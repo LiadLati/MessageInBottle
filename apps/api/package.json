@@ -1,0 +1,34 @@
+{
+  "name": "@mib/api",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/server.ts",
+    "start": "tsx src/server.ts",
+    "typecheck": "tsc --noEmit",
+    "build": "tsc --noEmit",
+    "test": "vitest run",
+    "db:migrate": "tsx src/db/migrate.ts",
+    "db:seed": "tsx src/db/seed.ts",
+    "db:reset": "tsx src/db/reset.ts",
+    "db:generate": "drizzle-kit generate"
+  },
+  "dependencies": {
+    "@hono/node-server": "^1.19.0",
+    "@hono/zod-validator": "^0.9.1",
+    "@mib/shared": "workspace:*",
+    "better-sqlite3": "^12.11.1",
+    "drizzle-orm": "^0.45.2",
+    "hono": "^4.13.7",
+    "zod": "^4.5.4"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/node": "^22.20.1",
+    "drizzle-kit": "^0.31.10",
+    "tsx": "^4.23.13",
+    "typescript": "^5.9.3",
+    "vitest": "^3.2.7"
+  }
+}

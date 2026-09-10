@@ -1,0 +1,69 @@
+import { useState } from 'react';
+import { api } from '../api/client.js';
+import { ErrorNote } from '../components/ui.js';
+import { formatDate } from '../lib/format.js';
+import { useAsync } from '../lib/useAsync.js';
+
+// Development-only controls: advance the server's simulated clock deterministically.
+// Hidden automatically when the API is not in dev mode.
+export function DevPanel({ onChanged, refreshKey }: { onChanged: () => void; refreshKey: number }) {
+  const status = useAsync(() => api.devStatus(), [], 30_000);
+  const sent = useAsync(() => api.sentBottles(), [refreshKey]);
+  const [error, setError] = useState<Error | null>(null);
+  const [open, setOpen] = useState(false);
+  if (status.error || !status.data?.devMode) return null;
+
+  const run = async (fn: () => Promise<unknown>) => {
+    setError(null);
+    try {
+      await fn();
+      await Promise.all([status.reload(), sent.reload()]);
+      onChanged();
+    } catch (err) {
+      setError(err instanceof Error ? err : new Error(String(err)));
+    }
+  };
+
+  const atSea = (sent.data?.bottles ?? []).filter((b) => b.state === 'at_sea');
+  return (
+    <aside className="dev-panel">
+      <button className="btn small" onClick={() => setOpen((o) => !o)} aria-expanded={open}>
+        Dev clock · {formatDate(status.data.serverTime)}
+      </button>
+      {open ? (
+        <div className="stack">
+          <div className="row wrap">
+            <button
+              className="btn small"
+              onClick={() => void run(() => api.devAdvance(60 * 60 * 1000))}
+            >
+              +1 hour
+            </button>
+            <button
+              className="btn small"
+              onClick={() => void run(() => api.devAdvance(6 * 60 * 60 * 1000))}
+            >
+              +6 hours
+            </button>
+            <button
+              className="btn small"
+              onClick={() => void run(() => api.devAdvance(24 * 60 * 60 * 1000))}
+            >
+              +1 day
+            </button>
+          </div>
+          {atSea.map((b) => (
+            <button
+              key={b.id}
+              className="btn small"
+              onClick={() => void run(() => api.devArrive(b.id))}
+            >
+              Land bottle to {b.recipient.displayName} now
+            </button>
+          ))}
+          <ErrorNote error={error} />
+        </div>
+      ) : null}
+    </aside>
+  );
+}

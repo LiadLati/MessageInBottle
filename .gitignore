@@ -1,0 +1,32 @@
+# dependencies / build
+node_modules/
+dist/
+*.tsbuildinfo
+
+# environment and secrets (keep .env.example)
+.env
+.env.*
+!.env.example
+
+# local database
+*.sqlite
+*.sqlite-journal
+*.sqlite-wal
+*.sqlite-shm
+apps/api/data/
+
+# logs and test artifacts
+*.log
+logs/
+coverage/
+.vitest/
+test-results/
+playwright-report/
+screenshots/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/*
+!.vscode/extensions.json
