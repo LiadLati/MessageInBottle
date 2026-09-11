@@ -122,7 +122,11 @@
   --shadow-marker: drop-shadow(0 6px 8px rgba(0, 0, 0, 0.55));
   --nav-height: 88px;
   --nav-safe-bottom: max(22px, env(safe-area-inset-bottom));
-  --header-pad-top: max(14px, env(safe-area-inset-top));
+  --safe-top: env(safe-area-inset-top, 0px);
+  /* System strips (development bar, arrival banner) stack above every header; each reports its
+     height into --slot-* so titles, controls and sheets move down instead of being covered. */
+  --top-stack: calc(var(--slot-dev, 0px) + var(--slot-banner, 0px));
+  --header-pad-top: calc(max(14px, var(--safe-top)) + var(--top-stack));
   --nav-icon: 21px;
   --write-pill-size: 46px;
   --button-primary-height: 52px;

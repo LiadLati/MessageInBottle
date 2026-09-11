@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { OpenedLetterDto, ShoreBottleDto } from '@mib/shared';
 import { api } from '../api/client.js';
 import { ShoreScene } from '../components/lazy.js';
@@ -14,15 +14,23 @@ const POLL_MS = 15_000;
 interface Props {
   onOpenProfile: () => void;
   onChooseShore: () => void;
+  onImmersive: (immersive: boolean) => void;
 }
 
 // S2 · My Shore — real-time 3D coast. Only bottles the server has landed are ever shown.
-export function MyShoreScreen({ onOpenProfile, onChooseShore }: Props) {
+export function MyShoreScreen({ onOpenProfile, onChooseShore, onImmersive }: Props) {
   const { user } = useSession();
   const shore = useAsync(() => api.myShore(), [], POLL_MS);
   const [opened, setOpened] = useState<{ letter: OpenedLetterDto; fresh: boolean } | null>(null);
   const [error, setError] = useState<Error | null>(null);
   const [busy, setBusy] = useState(false);
+  // Further arrivals stay folded so the sheet never grows over the featured bottle (C2 framing).
+  const [showMore, setShowMore] = useState(false);
+  // The opened letter is a full-screen reader: no navigation while it is up.
+  useEffect(() => {
+    onImmersive(opened !== null);
+    return () => onImmersive(false);
+  }, [opened, onImmersive]);
 
   const list = shore.data?.bottles ?? [];
   const sealed = list.filter((b) => b.state === 'delivered');
@@ -145,7 +153,19 @@ export function MyShoreScreen({ onOpenProfile, onChooseShore }: Props) {
                 : 'Its journey is complete'}
             </p>
             {list.length > 1 ? (
-              <ul className="list" style={{ marginTop: 14 }} aria-label="More on your shore">
+              <button
+                type="button"
+                className="btn-text"
+                style={{ marginTop: 12, width: '100%' }}
+                aria-expanded={showMore}
+                onClick={() => setShowMore((v) => !v)}
+              >
+                {list.length - 1} more on your shore
+                <Icon name="back" size={14} className={showMore ? 'rotate-up' : 'rotate-down'} />
+              </button>
+            ) : null}
+            {list.length > 1 && showMore ? (
+              <ul className="list" style={{ marginTop: 10 }} aria-label="More on your shore">
                 {list
                   .filter((b) => b.id !== featured.id)
                   .map((b) => (

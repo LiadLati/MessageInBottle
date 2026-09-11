@@ -4,6 +4,7 @@ import { api } from './api/client.js';
 import { Nav, type Tab } from './components/Nav.js';
 import { ProfileSheet } from './components/ProfileSheet.js';
 import { useAsync } from './lib/useAsync.js';
+import { useTopSlot } from './lib/useTopSlot.js';
 import { DevPanel } from './screens/DevPanel.js';
 import { FriendsScreen } from './screens/FriendsScreen.js';
 import { LettersScreen } from './screens/LettersScreen.js';
@@ -30,6 +31,9 @@ function Shell() {
   const [epoch, setEpoch] = useState(0);
   const [profileOpen, setProfileOpen] = useState(false);
   const [choosingShore, setChoosingShore] = useState(false);
+  // Immersive screens (preview & release, the release sequence, an opened letter) take the whole
+  // viewport: no navigation, no system strips.
+  const [immersive, setImmersive] = useState(false);
   const chart = useAsync(() => (user ? api.chart() : Promise.resolve(null)), [user?.id]);
   const notifications = useAsync(
     () => (user ? api.notifications() : Promise.resolve({ notifications: [] })),
@@ -79,12 +83,13 @@ function Shell() {
 
   const on3d = tab === 'shore';
   return (
-    <main className="app-viewport">
-      {unread.length > 0 && tab !== 'shore' ? (
-        <button type="button" className="banner" onClick={() => setTab('shore')}>
-          <span className="grow">{unread[0]!.message}</span>
-          {unread.length > 1 ? <span className="t-meta">+{unread.length - 1}</span> : null}
-        </button>
+    <main className={`app-viewport${immersive ? ' immersive' : ''}`}>
+      {unread.length > 0 && tab !== 'shore' && !immersive ? (
+        <ArrivalBanner
+          message={unread[0]!.message}
+          more={unread.length - 1}
+          onClick={() => setTab('shore')}
+        />
       ) : null}
       <div key={epoch}>
         {tab === 'ocean' ? (
@@ -99,10 +104,18 @@ function Shell() {
           />
         ) : null}
         {tab === 'write' ? (
-          <WriteScreen onReleased={onReleased} onChooseShore={chooseShore} />
+          <WriteScreen
+            onReleased={onReleased}
+            onChooseShore={chooseShore}
+            onImmersive={setImmersive}
+          />
         ) : null}
         {tab === 'shore' ? (
-          <MyShoreScreen onOpenProfile={openProfile} onChooseShore={chooseShore} />
+          <MyShoreScreen
+            onOpenProfile={openProfile}
+            onChooseShore={chooseShore}
+            onImmersive={setImmersive}
+          />
         ) : null}
         {tab === 'letters' ? (
           <LettersScreen
@@ -113,19 +126,40 @@ function Shell() {
         ) : null}
         {tab === 'friends' ? <FriendsScreen /> : null}
       </div>
-      <DevPanel refreshKey={epoch} onChanged={() => setEpoch((e) => e + 1)} />
+      {immersive ? null : <DevPanel refreshKey={epoch} onChanged={() => setEpoch((e) => e + 1)} />}
       {profileOpen ? (
         <ProfileSheet shoreName={shoreName} onChangeShore={chooseShore} onClose={closeProfile} />
       ) : null}
-      <Nav
-        active={tab}
-        on3d={on3d}
-        unread={unread.length}
-        onSelect={(t) => {
-          if (t === 'letters') setPassportId(null);
-          setTab(t);
-        }}
-      />
+      {immersive ? null : (
+        <Nav
+          active={tab}
+          on3d={on3d}
+          unread={unread.length}
+          onSelect={(t) => {
+            if (t === 'letters') setPassportId(null);
+            setTab(t);
+          }}
+        />
+      )}
     </main>
+  );
+}
+
+// Arrival notice: a strip in the top stack, never a cover over the header beneath it.
+function ArrivalBanner({
+  message,
+  more,
+  onClick,
+}: {
+  message: string;
+  more: number;
+  onClick: () => void;
+}) {
+  const slot = useTopSlot('banner', 8);
+  return (
+    <button ref={slot} type="button" className="banner" onClick={onClick}>
+      <span className="grow">{message}</span>
+      {more > 0 ? <span className="t-meta">+{more}</span> : null}
+    </button>
   );
 }

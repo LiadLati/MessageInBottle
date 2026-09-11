@@ -51,9 +51,10 @@ function loadDraft(): Draft {
 interface Props {
   onReleased: (bottle: SentBottleDto) => void;
   onChooseShore: () => void;
+  onImmersive: (immersive: boolean) => void;
 }
 
-export function WriteScreen({ onReleased, onChooseShore }: Props) {
+export function WriteScreen({ onReleased, onChooseShore, onImmersive }: Props) {
   const { user } = useSession();
   const [step, setStep] = useState<Step>('friend');
   const [draft, setDraft] = useState<Draft>(loadDraft);
@@ -74,6 +75,11 @@ export function WriteScreen({ onReleased, onChooseShore }: Props) {
     }
   }, [draft]);
   useEffect(ensureLetterFaces, []);
+  // Preview & release and the release sequence own the whole viewport (no navigation).
+  useEffect(() => {
+    onImmersive(step === 'preview' || step === 'releasing');
+    return () => onImmersive(false);
+  }, [step, onImmersive]);
 
   const validation = useMemo(() => validateLetterText(draft.text), [draft.text]);
   const characters = countLetterCharacters(draft.text);
@@ -207,7 +213,7 @@ export function WriteScreen({ onReleased, onChooseShore }: Props) {
           <>
             Addressed to{' '}
             <strong style={{ color: 'var(--foam-white)' }}>{draft.recipient?.displayName}</strong> ·
-            shore hidden until arrival
+            they will not see this journey before it arrives
           </>
         }
         actions={<BackButton onClick={() => setStep('friend')} label="Change" />}
@@ -330,67 +336,71 @@ export function WriteScreen({ onReleased, onChooseShore }: Props) {
         </div>
         <BackButton onClick={() => setStep('compose')} label="Edit letter" />
       </header>
-      <section className="sheet" aria-label="Preview and release">
-        {!p && !previewError ? <Skeleton /> : null}
-        {p ? (
-          <dl className="passport-grid">
-            <dt>From</dt>
-            <dd>
-              {user.displayName} · {p.originShore?.name ?? '—'}
-            </dd>
-            <dt>To</dt>
-            <dd>
-              {draft.recipient?.displayName} · {p.destinationShore?.name ?? '—'}
-            </dd>
-            <dt>Route</dt>
-            <dd>
-              {p.route
-                ? `${Math.max(1, p.route.nodeIds.length - 1)} passages`
-                : 'no connected route'}
-            </dd>
-          </dl>
-        ) : null}
-        {p && !p.eligible ? (
-          <p className="note error" style={{ marginTop: 12 }}>
-            {rejectionCopy(p.rejection)}
-          </p>
-        ) : null}
-        <ErrorNote error={previewError} />
-        <div style={{ marginTop: 14 }}>
-          <LetterPaper text={draft.text} font={draft.font} />
+      <section className="sheet preview" aria-label="Preview and release">
+        <div className="sheet-scroll">
+          {!p && !previewError ? <Skeleton /> : null}
+          {p ? (
+            <dl className="passport-grid">
+              <dt>From</dt>
+              <dd>
+                {user.displayName} · {p.originShore?.name ?? '—'}
+              </dd>
+              <dt>To</dt>
+              <dd>
+                {draft.recipient?.displayName} · {p.destinationShore?.name ?? '—'}
+              </dd>
+              <dt>Route</dt>
+              <dd>
+                {p.route
+                  ? `${Math.max(1, p.route.nodeIds.length - 1)} passages`
+                  : 'no connected route'}
+              </dd>
+            </dl>
+          ) : null}
+          {p && !p.eligible ? (
+            <p className="note error" style={{ marginTop: 12 }}>
+              {rejectionCopy(p.rejection)}
+            </p>
+          ) : null}
+          <ErrorNote error={previewError} />
+          <div style={{ marginTop: 14 }}>
+            <LetterPaper text={draft.text} font={draft.font} />
+          </div>
         </div>
-        <label className="checkbox-row" style={{ marginTop: 14 }}>
-          <input
-            type="checkbox"
-            checked={acknowledged}
-            onChange={(e) => setAcknowledged(e.target.checked)}
-          />
-          <span>
-            I understand this bottle may strand and become readable by strangers, be discarded, or
-            be lost forever. It holds nothing sensitive or urgent.
-          </span>
-        </label>
-        <button
-          type="button"
-          className="btn-primary"
-          style={{ marginTop: 14 }}
-          disabled={!canRelease}
-          onClick={release}
-        >
-          <Icon name="bottle" size={18} />
-          Seal and throw
-        </button>
-        <p className="t-meta" style={{ textAlign: 'center', marginTop: 8 }}>
-          Nothing is released until the sea confirms it
-        </p>
-        {releaseError ? (
-          <p className="note error" role="alert" style={{ marginTop: 12 }}>
-            {releaseError instanceof ApiError && releaseError.code === 'release_rejected'
-              ? releaseError.message
-              : `The sea did not take it: ${releaseError.message}.`}{' '}
-            Your letter is intact.
+        <div className="sheet-footer">
+          <label className="checkbox-row">
+            <input
+              type="checkbox"
+              checked={acknowledged}
+              onChange={(e) => setAcknowledged(e.target.checked)}
+            />
+            <span>
+              I understand this bottle may strand and become readable by strangers, be discarded, or
+              be lost forever. It holds nothing sensitive or urgent.
+            </span>
+          </label>
+          <button
+            type="button"
+            className="btn-primary"
+            style={{ marginTop: 12 }}
+            disabled={!canRelease}
+            onClick={release}
+          >
+            <Icon name="bottle" size={18} />
+            Seal and throw
+          </button>
+          <p className="t-meta" style={{ textAlign: 'center', marginTop: 8 }}>
+            Nothing is released until the sea confirms it
           </p>
-        ) : null}
+          {releaseError ? (
+            <p className="note error" role="alert" style={{ marginTop: 12 }}>
+              {releaseError instanceof ApiError && releaseError.code === 'release_rejected'
+                ? releaseError.message
+                : `The sea did not take it: ${releaseError.message}.`}{' '}
+              Your letter is intact.
+            </p>
+          ) : null}
+        </div>
       </section>
     </div>
   );

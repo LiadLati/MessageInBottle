@@ -2,9 +2,11 @@ import { useEffect, useImperativeHandle, useMemo, useRef, useState, type Ref } f
 import {
   Map as MapLibreMap,
   Marker,
+  setWorkerUrl,
   type GeoJSONSource,
   type StyleSpecification,
 } from 'maplibre-gl';
+import maplibreWorkerUrl from 'maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url';
 import type { Feature } from 'geojson';
 import type { GeoPoint } from '@mib/shared';
 import { prefersReducedMotion } from '../lib/format.js';
@@ -18,6 +20,10 @@ import {
 } from '../lib/mapGeometry.js';
 
 export type { MapRoute };
+
+// MapLibre resolves its module worker relative to its own chunk URL, which a bundled build never
+// emits; let Vite bundle the worker (and the shared chunk it imports) and hand MapLibre that URL.
+setWorkerUrl(maplibreWorkerUrl);
 
 export interface MapAnchor {
   id: string;
@@ -125,8 +131,18 @@ export function OceanMap({
     const b = boundsOf(points);
     if (!b) return;
     const wide = map.getContainer().clientWidth >= 900;
+    // Keep routes clear of the header, the mode switch / zoom cluster and the sheet; scale the
+    // paddings down on short viewports so they never exceed the container.
+    let top = wide ? 170 : 250;
+    let bottom = wide ? 80 : bottomPadding;
+    const spare = map.getContainer().clientHeight - 80;
+    if (top + bottom > spare) {
+      const k = spare / (top + bottom);
+      top = Math.floor(top * k);
+      bottom = Math.floor(bottom * k);
+    }
     map.fitBounds(b, {
-      padding: { top: 170, bottom: wide ? 80 : bottomPadding, left: 48, right: 48 },
+      padding: { top, bottom, left: 48, right: 76 },
       maxZoom: 5.2,
       duration: animate && !reduced ? 900 : 0,
       easing: (t: number) => 1 - Math.pow(1 - t, 3),

@@ -244,6 +244,23 @@ button:disabled {
   -webkit-backdrop-filter: blur(var(--glass-panel-3d-blur));
   border: var(--glass-panel-3d-border);
 }
+.sheet.preview {
+  display: flex;
+  flex-direction: column;
+  padding: 0;
+  overflow: hidden;
+}
+.sheet.preview .sheet-scroll {
+  min-height: 0;
+  overflow: auto;
+  padding: 16px 18px 14px;
+}
+.sheet.preview .sheet-footer {
+  flex: none;
+  padding: 12px 18px 14px;
+  border-top: 1px solid rgba(215, 231, 228, 0.12);
+  background: rgba(6, 20, 30, 0.35);
+}
 @keyframes sheet-rise {
   from {
     transform: translateY(24px);
@@ -258,7 +275,7 @@ button:disabled {
 /* ---------- deck screens (Write, Letters, Friends) ---------- */
 .deck-screen {
   min-height: 100dvh;
-  padding: var(--header-pad-top) 0 calc(var(--nav-height) + var(--nav-safe-bottom));
+  padding: var(--header-pad-top) 0 calc(var(--nav-height) + var(--nav-safe-bottom) + 24px);
   background:
     radial-gradient(120% 60% at 50% 0%, rgba(20, 90, 120, 0.22), rgba(9, 35, 49, 0) 60%),
     var(--ink-navy);
@@ -399,6 +416,12 @@ button:disabled {
   font-weight: 500;
   min-height: 44px;
   padding: 0 4px;
+}
+.rotate-down {
+  transform: rotate(-90deg);
+}
+.rotate-up {
+  transform: rotate(90deg);
 }
 .btn-destructive {
   color: var(--status-lost);
@@ -777,7 +800,7 @@ button.avatar {
   position: fixed;
   left: var(--gutter-overlay);
   right: var(--gutter-overlay);
-  top: calc(var(--header-pad-top) + 8px);
+  top: calc(var(--safe-top) + var(--slot-dev, 0px) + 8px);
   z-index: 30;
   display: flex;
   align-items: center;
@@ -797,29 +820,26 @@ button.avatar {
 
 .dev-strip {
   position: fixed;
-  top: max(6px, env(safe-area-inset-top));
-  left: 50%;
-  transform: translateX(-50%);
+  top: var(--safe-top);
+  left: 0;
+  right: 0;
   z-index: 25;
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  padding: 2px 10px;
-  border-radius: 999px;
-  background: rgba(6, 20, 30, 0.82);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
-  border: 1px dashed rgba(231, 207, 161, 0.45);
+  align-items: center;
+  gap: 6px;
+  padding: 0 var(--gutter-screen);
+  background: rgba(6, 20, 30, 0.92);
+  border-bottom: 1px dashed rgba(231, 207, 161, 0.45);
   color: var(--status-storm);
   font-size: 11px;
-  max-width: calc(100% - 2 * var(--gutter-screen));
 }
 .dev-strip[data-open='true'] {
-  border-radius: var(--radius-card);
-  padding: 6px 10px 10px;
+  padding-bottom: 8px;
 }
 .dev-strip .row {
   flex-wrap: wrap;
+  justify-content: center;
   gap: 6px;
 }
 .dev-strip .chip {
@@ -832,7 +852,8 @@ button.avatar {
   font-size: 10.5px;
   font-weight: 600;
   letter-spacing: 0.4px;
-  min-height: 22px;
+  min-height: 26px;
+  padding: 0 8px;
   text-align: center;
   white-space: nowrap;
 }
@@ -928,7 +949,7 @@ button.avatar {
 .mode-switch {
   position: absolute;
   left: var(--gutter-screen);
-  top: 118px;
+  top: calc(var(--header-pad-top) + 104px);
   display: flex;
   align-items: center;
   gap: 8px;
@@ -961,7 +982,7 @@ button.avatar {
 .zoom-cluster {
   position: absolute;
   right: var(--gutter-screen);
-  top: 118px;
+  top: calc(var(--header-pad-top) + 104px);
   display: flex;
   flex-direction: column;
   gap: 6px;
@@ -1009,7 +1030,7 @@ button.avatar {
   position: absolute;
   left: 20px;
   right: 20px;
-  top: 96px;
+  top: calc(var(--header-pad-top) + 82px);
   text-align: center;
   pointer-events: none;
 }
@@ -1029,7 +1050,7 @@ button.avatar {
   position: absolute;
   left: var(--gutter-overlay);
   right: var(--gutter-overlay);
-  bottom: 26px;
+  bottom: max(26px, calc(env(safe-area-inset-bottom, 0px) + 16px));
   padding: 14px 16px;
   border-radius: var(--radius-panel);
   background: var(--glass-panel-3d-bg);
@@ -1094,8 +1115,24 @@ button.avatar {
 .parchment.full {
   border-radius: 0;
   min-height: 100dvh;
-  padding: calc(var(--header-pad-top) + 72px) 24px calc(var(--nav-height) + 60px);
+  padding: calc(var(--header-pad-top) + 72px) 24px calc(env(safe-area-inset-bottom, 0px) + 96px);
   box-shadow: none;
+}
+.opened-letter {
+  min-height: 100dvh;
+}
+.opened-letter-foot {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 5;
+  padding: 18px 24px max(12px, env(safe-area-inset-bottom, 0px));
+  text-align: center;
+  font-size: 11.5px;
+  color: var(--paper-ink-muted);
+  background: linear-gradient(rgba(245, 235, 216, 0), rgba(245, 235, 216, 0.92) 40%);
+  pointer-events: none;
 }
 .parchment .grain {
   position: absolute;
@@ -1300,9 +1337,17 @@ button.avatar {
   color: var(--paper-ink-muted);
   font-size: 12px;
 }
+.opened-letter-top .provenance {
+  min-width: 0;
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 .opened-letter-top .btn-ghost {
   border-color: rgba(90, 76, 51, 0.35);
   color: var(--paper-ink);
+  white-space: nowrap;
 }
 .opened-letter-top .btn-ghost[aria-pressed='true'] {
   background: rgba(43, 33, 22, 0.08);
@@ -1339,6 +1384,15 @@ button.avatar {
   border-radius: 12px;
 }
 
+/* ---------- immersive screens: no navigation, no system strips ---------- */
+.app-viewport.immersive .world-screen {
+  z-index: 35;
+}
+.app-viewport.immersive .sheet {
+  bottom: max(16px, env(safe-area-inset-bottom, 0px));
+  max-height: calc(100dvh - 150px);
+}
+
 /* ---------- responsive ---------- */
 @media (max-width: 389px) {
   :root {
@@ -1355,7 +1409,7 @@ button.avatar {
   .nav {
     left: 0;
     right: auto;
-    top: 0;
+    top: calc(var(--safe-top) + var(--slot-dev, 0px));
     bottom: 0;
     width: var(--rail-width);
     height: auto;
@@ -1405,6 +1459,22 @@ button.avatar {
     animation: none;
     box-shadow: none;
   }
+  .world-screen.two-pane .sheet.preview {
+    padding: 0;
+  }
+  .world-screen.two-pane .sheet.preview .sheet-scroll {
+    padding: calc(var(--header-pad-top) + 20px) 24px 16px;
+  }
+  .world-screen.two-pane .sheet.preview .sheet-footer {
+    padding: 14px 24px 24px;
+  }
+  .app-viewport.immersive {
+    padding-left: 0;
+  }
+  .app-viewport.immersive .world-screen,
+  .app-viewport.immersive .opened-letter-top {
+    left: 0;
+  }
   .transport {
     left: 50%;
     right: auto;
@@ -1422,12 +1492,6 @@ button.avatar {
     left: calc(var(--rail-width) + 24px);
     right: auto;
     width: 420px;
-  }
-  .dev-strip {
-    left: auto;
-    right: 16px;
-    top: 12px;
-    transform: none;
   }
   .parchment.full {
     max-width: 720px;

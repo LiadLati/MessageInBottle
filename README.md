@@ -84,6 +84,9 @@ All variables are optional and documented in `.env.example`. The important ones:
 
 - `MIB_DEV_MODE` (default `true`): enables username-only sign-in, seeded users, the persisted
   development clock and the `/api/dev/*` routes. Must be `false` for any shared deployment.
+  The in-app dev clock bar is additionally compiled out of production bundles: it renders only
+  in `vite` development builds (`import.meta.env.DEV`) and only while the API reports dev mode.
+  `pnpm --filter @mib/web preview` serves the production bundle against the local API.
 - `MIB_MS_PER_CHART_UNIT` / `MIB_MIN_JOURNEY_MS`: the provisional travel model (spec decision D01 is
   still open). Defaults give roughly 1–4 days per crossing.
 - `MIB_DEFAULT_SHORE_CAPACITY`: destination slots per shore (spec D06 is open).

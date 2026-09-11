@@ -338,7 +338,7 @@ export function ShoreScene({ mode, showBottle = true, onReady, onController }: P
 
     // Bottle + splash
     const bottle = makeBottle(null);
-    bottle.group.scale.setScalar(isThrow ? 5 : 4.6);
+    bottle.group.scale.setScalar(isThrow ? 5 : 4.2);
     scene.add(bottle.group);
     const ripples: THREE.Mesh[] = [];
     const drops: Array<{ mesh: THREE.Mesh; a: number; sp: number; up: number }> = [];
@@ -485,11 +485,13 @@ export function ShoreScene({ mode, showBottle = true, onReady, onController }: P
       if (isThrow) {
         poseThrow(throwT);
       } else {
+        // Framing per reference C2: the bottle rests a little left of centre in the lower half of
+        // the frame, whole and unclipped, with the horizon in the upper third.
         bottle.group.visible = showBottleRef.current;
-        bottle.group.position.set(1.6, 0.14, 31.5);
+        bottle.group.position.set(0.55, 0.14, 28.0);
         bottle.group.rotation.set(-1.3, 0.55 + Math.sin(t * 0.25) * 0.03, 0.24);
-        cam.position.set(0.5 + Math.sin(t * 0.08) * 1, 2.5 + Math.sin(t * 0.21) * 0.09, 36.5);
-        cam.lookAt(1.7, 0.45, 27);
+        cam.position.set(0.5 + Math.sin(t * 0.08) * 0.6, 2.7 + Math.sin(t * 0.21) * 0.09, 36.5);
+        cam.lookAt(0.9, 0.7, 26);
       }
       renderer.render(scene, cam);
       if (running && !force && !(reduced && !isThrow)) requestAnimationFrame(() => frame());
