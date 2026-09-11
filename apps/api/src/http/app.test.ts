@@ -75,11 +75,29 @@ describe('HTTP surface', () => {
     expect(sent.bottles).toEqual([]);
   });
 
-  it('chart responses contain only abstract chart units, no coordinates or countries', async () => {
+  it('chart responses carry no political data and coordinates only on fictional app anchors', async () => {
     const w = createTestWorld();
     const app = createApp(w.ctx);
     const ada = await login(app, 'ada');
-    const text = await (await app.request('/api/chart', { headers: auth(ada.token) })).text();
-    expect(text).not.toMatch(/lat|lng|longitude|latitude|country|border/i);
+    const res = await app.request('/api/chart', { headers: auth(ada.token) });
+    const text = await res.text();
+    expect(text).not.toMatch(/country|border|boundary|flag|gps|user/i);
+    const chart = JSON.parse(text) as {
+      shores: Array<{ geo: { lng: number; lat: number } | null }>;
+      nodes: Array<{ kind: string; geo: { lng: number; lat: number } | null }>;
+    };
+    // Every anchor is a named app shore or a sea waypoint, never a person.
+    for (const s of chart.shores) expect(s.geo).not.toBeNull();
+    for (const n of chart.nodes) expect(['shore', 'waypoint', 'island']).toContain(n.kind);
+  });
+
+  it('user-facing responses never contain coordinates', async () => {
+    const w = createTestWorld();
+    const app = createApp(w.ctx);
+    const ada = await login(app, 'ada');
+    for (const path of ['/api/auth/me', '/api/friends', '/api/notifications']) {
+      const text = await (await app.request(path, { headers: auth(ada.token) })).text();
+      expect(text, path).not.toMatch(/lat|lng|longitude|latitude|gps|coordinate/i);
+    }
   });
 });

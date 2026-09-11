@@ -1,5 +1,5 @@
 import { and, eq } from 'drizzle-orm';
-import type { ChartResponse, ShoreDto } from '@mib/shared';
+import type { ChartResponse, GeoPoint, ShoreDto } from '@mib/shared';
 import type { DbOrTx } from '../db/client.js';
 import * as t from '../db/schema.js';
 import { CHART_BOUNDS } from '../db/seed-data.js';
@@ -31,9 +31,14 @@ export function loadActiveGraph(db: DbOrTx): RouteGraph {
       kind: n.kind,
       shoreId: n.shoreId,
       position: { x: n.chartX, y: n.chartY },
+      geo: geoOf(n),
     })),
     edges.map((e) => ({ from: e.fromNodeId, to: e.toNodeId, length: e.length })),
   );
+}
+
+export function geoOf(row: { lng: number | null; lat: number | null }): GeoPoint | null {
+  return row.lng === null || row.lat === null ? null : { lng: row.lng, lat: row.lat };
 }
 
 export function toShoreDto(row: typeof t.shores.$inferSelect): ShoreDto {
@@ -41,6 +46,7 @@ export function toShoreDto(row: typeof t.shores.$inferSelect): ShoreDto {
     id: row.id,
     name: row.name,
     position: { x: row.chartX, y: row.chartY },
+    geo: geoOf(row),
     capacity: row.capacity,
   };
 }
@@ -65,6 +71,7 @@ export function getChart(ctx: AppContext): ChartResponse {
       id: n.id,
       kind: n.kind,
       position: n.position,
+      geo: n.geo,
       shoreId: n.shoreId,
     })),
     edges,

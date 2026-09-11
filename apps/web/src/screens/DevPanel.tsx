@@ -26,43 +26,56 @@ export function DevPanel({ onChanged, refreshKey }: { onChanged: () => void; ref
 
   const atSea = (sent.data?.bottles ?? []).filter((b) => b.state === 'at_sea');
   return (
-    <aside className="dev-panel">
-      <button className="btn small" onClick={() => setOpen((o) => !o)} aria-expanded={open}>
+    <aside className="dev-strip" data-open={open}>
+      <button
+        type="button"
+        className="toggle"
+        onClick={() => setOpen((o) => !o)}
+        aria-expanded={open}
+      >
         Dev clock · {formatDate(status.data.serverTime)}
       </button>
       {open ? (
-        <div className="stack">
-          <div className="row wrap">
+        <>
+          <div className="row">
             <button
-              className="btn small"
+              type="button"
+              className="chip"
               onClick={() => void run(() => api.devAdvance(60 * 60 * 1000))}
             >
               +1 hour
             </button>
             <button
-              className="btn small"
+              type="button"
+              className="chip"
               onClick={() => void run(() => api.devAdvance(6 * 60 * 60 * 1000))}
             >
               +6 hours
             </button>
             <button
-              className="btn small"
+              type="button"
+              className="chip"
               onClick={() => void run(() => api.devAdvance(24 * 60 * 60 * 1000))}
             >
               +1 day
             </button>
           </div>
-          {atSea.map((b) => (
-            <button
-              key={b.id}
-              className="btn small"
-              onClick={() => void run(() => api.devArrive(b.id))}
-            >
-              Land bottle to {b.recipient.displayName} now
-            </button>
-          ))}
+          {atSea.length > 0 ? (
+            <div className="row">
+              {atSea.map((b) => (
+                <button
+                  key={b.id}
+                  type="button"
+                  className="chip"
+                  onClick={() => void run(() => api.devArrive(b.id))}
+                >
+                  Land bottle to {b.recipient.displayName} now
+                </button>
+              ))}
+            </div>
+          ) : null}
           <ErrorNote error={error} />
-        </div>
+        </>
       ) : null}
     </aside>
   );

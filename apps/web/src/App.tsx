@@ -1,6 +1,8 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import type { SentBottleDto } from '@mib/shared';
 import { api } from './api/client.js';
+import { Nav, type Tab } from './components/Nav.js';
+import { ProfileSheet } from './components/ProfileSheet.js';
 import { useAsync } from './lib/useAsync.js';
 import { DevPanel } from './screens/DevPanel.js';
 import { FriendsScreen } from './screens/FriendsScreen.js';
@@ -12,16 +14,6 @@ import { ShoreSetupScreen } from './screens/ShoreSetupScreen.js';
 import { WriteScreen } from './screens/WriteScreen.js';
 import { SessionProvider, useSession } from './state/session.js';
 
-type Tab = 'ocean' | 'write' | 'shore' | 'letters' | 'friends';
-
-const TABS: Array<{ id: Tab; label: string }> = [
-  { id: 'ocean', label: 'Ocean' },
-  { id: 'write', label: 'Write' },
-  { id: 'shore', label: 'My Shore' },
-  { id: 'letters', label: 'Letters' },
-  { id: 'friends', label: 'Friends' },
-];
-
 export function App() {
   return (
     <SessionProvider>
@@ -31,31 +23,50 @@ export function App() {
 }
 
 function Shell() {
-  const { user, loading, logout } = useSession();
+  const { user, loading } = useSession();
   const [tab, setTab] = useState<Tab>('ocean');
   const [passportId, setPassportId] = useState<string | null>(null);
   const [focusId, setFocusId] = useState<string | null>(null);
   const [epoch, setEpoch] = useState(0);
+  const [profileOpen, setProfileOpen] = useState(false);
+  const [choosingShore, setChoosingShore] = useState(false);
+  const chart = useAsync(() => (user ? api.chart() : Promise.resolve(null)), [user?.id]);
   const notifications = useAsync(
     () => (user ? api.notifications() : Promise.resolve({ notifications: [] })),
     [user?.id, epoch],
     20_000,
   );
   const unread = (notifications.data?.notifications ?? []).filter((n) => n.readAt === null);
+  const reloadNotifications = notifications.reload;
 
   useEffect(() => {
-    if (tab === 'shore' && unread.length > 0)
-      void api.markNotificationsRead().then(() => notifications.reload());
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tab, unread.length]);
+    if (tab === 'shore' && unread.length > 0) {
+      void api.markNotificationsRead().then(() => reloadNotifications());
+    }
+  }, [tab, unread.length, reloadNotifications]);
 
-  if (loading) return <main className="app-shell">Loading…</main>;
+  const openProfile = useCallback(() => setProfileOpen(true), []);
+  const closeProfile = useCallback(() => setProfileOpen(false), []);
+  const chooseShore = useCallback(() => {
+    setProfileOpen(false);
+    setChoosingShore(true);
+  }, []);
+
+  if (loading) return <main className="deck-screen" aria-busy />;
   if (!user) return <LoginScreen />;
-  if (!user.shoreId) {
+
+  const shoreName = chart.data?.shores.find((s) => s.id === user.shoreId)?.name ?? null;
+
+  if (!user.shoreId || choosingShore) {
     return (
-      <main className="app-shell">
-        <ShoreSetupScreen />
-        <SessionBar onLogout={logout} />
+      <main className="app-viewport">
+        <ShoreSetupScreen
+          onDone={() => {
+            setChoosingShore(false);
+            setEpoch((e) => e + 1);
+          }}
+          onCancel={user.shoreId ? () => setChoosingShore(false) : undefined}
+        />
       </main>
     );
   }
@@ -66,25 +77,33 @@ function Shell() {
     setTab('ocean');
   };
 
+  const on3d = tab === 'shore';
   return (
-    <main className="app-shell">
+    <main className="app-viewport">
       {unread.length > 0 && tab !== 'shore' ? (
-        <button className="banner" onClick={() => setTab('shore')}>
-          {unread[0]!.message} {unread.length > 1 ? `(+${unread.length - 1} more)` : ''}
+        <button type="button" className="banner" onClick={() => setTab('shore')}>
+          <span className="grow">{unread[0]!.message}</span>
+          {unread.length > 1 ? <span className="t-meta">+{unread.length - 1}</span> : null}
         </button>
       ) : null}
-      <div className="screen-host" key={epoch}>
+      <div key={epoch}>
         {tab === 'ocean' ? (
           <OceanScreen
             focusId={focusId}
+            onWrite={() => setTab('write')}
+            onOpenProfile={openProfile}
             onOpenPassport={(id) => {
               setPassportId(id);
               setTab('letters');
             }}
           />
         ) : null}
-        {tab === 'write' ? <WriteScreen onReleased={onReleased} /> : null}
-        {tab === 'shore' ? <MyShoreScreen /> : null}
+        {tab === 'write' ? (
+          <WriteScreen onReleased={onReleased} onChooseShore={chooseShore} />
+        ) : null}
+        {tab === 'shore' ? (
+          <MyShoreScreen onOpenProfile={openProfile} onChooseShore={chooseShore} />
+        ) : null}
         {tab === 'letters' ? (
           <LettersScreen
             passportId={passportId}
@@ -95,39 +114,18 @@ function Shell() {
         {tab === 'friends' ? <FriendsScreen /> : null}
       </div>
       <DevPanel refreshKey={epoch} onChanged={() => setEpoch((e) => e + 1)} />
-      <SessionBar onLogout={logout} />
-      <nav className="bottom-nav" aria-label="Main">
-        {TABS.map((t) => (
-          <button
-            key={t.id}
-            className={tab === t.id ? 'active' : ''}
-            aria-current={tab === t.id ? 'page' : undefined}
-            onClick={() => {
-              if (t.id === 'letters') setPassportId(null);
-              setTab(t.id);
-            }}
-          >
-            {t.label}
-            {t.id === 'shore' && unread.length > 0 ? (
-              <span className="badge" aria-label={`${unread.length} unread`}>
-                {unread.length}
-              </span>
-            ) : null}
-          </button>
-        ))}
-      </nav>
+      {profileOpen ? (
+        <ProfileSheet shoreName={shoreName} onChangeShore={chooseShore} onClose={closeProfile} />
+      ) : null}
+      <Nav
+        active={tab}
+        on3d={on3d}
+        unread={unread.length}
+        onSelect={(t) => {
+          if (t === 'letters') setPassportId(null);
+          setTab(t);
+        }}
+      />
     </main>
-  );
-}
-
-function SessionBar({ onLogout }: { onLogout: () => Promise<void> }) {
-  const { user } = useSession();
-  return (
-    <div className="session-bar muted small">
-      Signed in as <strong>{user?.displayName}</strong> (@{user?.username})
-      <button className="link" onClick={() => void onLogout()}>
-        Sign out
-      </button>
-    </div>
   );
 }
