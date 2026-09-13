@@ -4,8 +4,13 @@ import { Avatar, DeckScreen, ErrorNote, Skeleton } from '../components/ui.js';
 import { Icon } from '../design/Icon.js';
 import { useAsync } from '../lib/useAsync.js';
 
+interface Props {
+  // Called after any change to requests so the navigation badge is refreshed from the server.
+  onChanged?: (() => Promise<void>) | undefined;
+}
+
 // S9a · Friends and requests. Capacity is surfaced before writing; blocked people never form a list.
-export function FriendsScreen() {
+export function FriendsScreen({ onChanged }: Props) {
   const friends = useAsync(() => api.friends(), []);
   const [username, setUsername] = useState('');
   const [error, setError] = useState<Error | null>(null);
@@ -16,7 +21,7 @@ export function FriendsScreen() {
     setNotice(null);
     try {
       await fn();
-      await friends.reload();
+      await Promise.all([friends.reload(), onChanged?.()]);
       if (done) setNotice(done);
     } catch (err) {
       setError(err instanceof Error ? err : new Error(String(err)));
@@ -72,14 +77,31 @@ export function FriendsScreen() {
                       </span>
                       <span className="t-meta">@{r.from.username} · asked to be friends</span>
                     </span>
-                    <button
-                      type="button"
-                      className="btn-ghost"
-                      onClick={() => void run(() => api.acceptFriendRequest(r.id))}
-                    >
-                      <Icon name="check" size={14} />
-                      Accept
-                    </button>
+                    <span className="row" style={{ gap: 6 }}>
+                      <button
+                        type="button"
+                        className="btn-ghost"
+                        aria-label={`Deny request from ${r.from.displayName}`}
+                        onClick={() =>
+                          void run(
+                            () => api.denyFriendRequest(r.id),
+                            `Request from ${r.from.displayName} declined`,
+                          )
+                        }
+                      >
+                        <Icon name="close" size={14} />
+                        Deny
+                      </button>
+                      <button
+                        type="button"
+                        className="btn-ghost"
+                        aria-label={`Accept request from ${r.from.displayName}`}
+                        onClick={() => void run(() => api.acceptFriendRequest(r.id))}
+                      >
+                        <Icon name="check" size={14} />
+                        Accept
+                      </button>
+                    </span>
                   </li>
                 ))}
               </ul>

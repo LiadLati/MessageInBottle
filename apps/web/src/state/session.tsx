@@ -18,7 +18,7 @@ interface SessionState {
   user: MeResponse | null;
   loading: boolean;
   login: (username: string, password: string) => Promise<void>;
-  register: (username: string, password: string) => Promise<void>;
+  register: (username: string, email: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
   refresh: () => Promise<void>;
 }
@@ -76,7 +76,8 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     [start],
   );
   const register = useCallback(
-    async (username: string, password: string) => start(await api.register(username, password)),
+    async (username: string, email: string, password: string) =>
+      start(await api.register(username, email, password)),
     [start],
   );
 

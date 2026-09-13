@@ -2,7 +2,10 @@ import { describe, expect, it } from 'vitest';
 import {
   LoginRequestSchema,
   RegisterRequestSchema,
+  ResetPasswordRequestSchema,
   confirmationProblem,
+  emailProblem,
+  normalizeEmail,
   normalizeUsername,
   passwordProblem,
   usernameProblem,
@@ -32,8 +35,26 @@ describe('credential rules', () => {
       false,
     );
     expect(
-      RegisterRequestSchema.safeParse({ username: 'new_user', password: 'long enough' }).success,
+      RegisterRequestSchema.safeParse({
+        username: 'new_user',
+        email: 'new@example.com',
+        password: 'long enough',
+      }).success,
     ).toBe(true);
+  });
+
+  it('validates e-mail addresses and normalizes them', () => {
+    expect(emailProblem('')).toMatch(/enter/i);
+    expect(emailProblem('not-an-email')).toMatch(/does not look/);
+    expect(emailProblem('mira@example.com')).toBeNull();
+    expect(normalizeEmail('  Mira@Example.COM ')).toBe('mira@example.com');
+    expect(
+      RegisterRequestSchema.safeParse({ username: 'mira', password: 'long enough', email: 'x' })
+        .success,
+    ).toBe(false);
+    expect(
+      ResetPasswordRequestSchema.safeParse({ token: 'short', password: 'long enough' }).success,
+    ).toBe(false);
   });
 
   it('requires both fields to sign in', () => {

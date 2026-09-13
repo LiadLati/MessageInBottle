@@ -13,10 +13,36 @@ export function normalizeUsername(username: string): string {
 
 export const PasswordSchema = z.string().min(PASSWORD_MIN_LENGTH).max(PASSWORD_MAX_LENGTH);
 
+// E-mail addresses are stored in one canonical form (trimmed, lower-case) so lookups and the
+// uniqueness rule are case-insensitive.
+export const EMAIL_MAX_LENGTH = 254;
+export function normalizeEmail(email: string): string {
+  return email.trim().toLowerCase();
+}
+export const EmailSchema = z.string().trim().max(EMAIL_MAX_LENGTH).email();
+
 export const RegisterRequestSchema = z.object({
   username: UsernameSchema,
+  email: EmailSchema,
   password: PasswordSchema,
 });
+
+export const ForgotPasswordRequestSchema = z.object({
+  email: z.string().trim().max(EMAIL_MAX_LENGTH),
+});
+export const RESET_TOKEN_TTL_MS = 30 * 60 * 1000;
+export const ResetPasswordRequestSchema = z.object({
+  token: z.string().min(32).max(128),
+  password: PasswordSchema,
+});
+
+export function emailProblem(email: string): string | null {
+  const v = email.trim();
+  if (v.length === 0) return 'Enter your email address.';
+  if (v.length > EMAIL_MAX_LENGTH || !EmailSchema.safeParse(v).success)
+    return 'That does not look like an email address.';
+  return null;
+}
 export type RegisterRequest = z.infer<typeof RegisterRequestSchema>;
 
 export const LoginRequestSchema = z.object({

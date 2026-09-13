@@ -1,17 +1,26 @@
 import { useId, useState, type FormEvent } from 'react';
-import { confirmationProblem, passwordProblem, usernameProblem } from '@mib/shared';
-import { ApiError } from '../api/client.js';
+import { confirmationProblem, emailProblem, passwordProblem, usernameProblem } from '@mib/shared';
+import { ApiError, api } from '../api/client.js';
 import { Icon } from '../design/Icon.js';
 import { useSession } from '../state/session.js';
 
-type Mode = 'signin' | 'register';
+type Mode = 'signin' | 'register' | 'forgot' | 'reset';
+
+interface Props {
+  // Present when the app was opened from a password-reset link.
+  resetToken?: string | undefined;
+  onResetDone?: (() => void) | undefined;
+}
 
 // Turns an API failure into one sentence for the person; sign-in failures stay generic on
-// purpose (the server never says whether the username exists).
+// purpose (the server never says whether the username or address exists).
 function describeFailure(err: unknown, mode: Mode): string {
   if (err instanceof ApiError) {
     if (err.status === 401) return 'Incorrect username or password.';
     if (err.code === 'username_taken') return 'That username is already taken. Choose another.';
+    if (err.code === 'email_taken') return 'That email is already registered. Sign in instead.';
+    if (err.code === 'reset_invalid')
+      return 'This reset link is invalid or has expired. Request a new one.';
     if (err.status === 429) {
       const s = (err.details as { retryAfterSeconds?: number } | undefined)?.retryAfterSeconds;
       const mins = s ? Math.max(1, Math.ceil(s / 60)) : null;
@@ -23,43 +32,120 @@ function describeFailure(err: unknown, mode: Mode): string {
     if (err.status >= 500) return 'The sea is unreachable right now. Try again in a moment.';
     return err.message;
   }
-  return mode === 'register'
-    ? 'Could not create the account. Check your connection and try again.'
-    : 'Could not sign in. Check your connection and try again.';
+  const what =
+    mode === 'register'
+      ? 'create the account'
+      : mode === 'forgot'
+        ? 'send the reset link'
+        : mode === 'reset'
+          ? 'change the password'
+          : 'sign in';
+  return `Could not ${what}. Check your connection and try again.`;
 }
 
-export function LoginScreen() {
+function PasswordInput({
+  id,
+  value,
+  onChange,
+  onBlur,
+  problem,
+  autoComplete,
+  placeholder,
+  disabled,
+}: {
+  id: string;
+  value: string;
+  onChange: (v: string) => void;
+  onBlur: () => void;
+  problem: string | null;
+  autoComplete: 'new-password' | 'current-password';
+  placeholder: string;
+  disabled: boolean;
+}) {
+  const [show, setShow] = useState(false);
+  return (
+    <>
+      <div className="password-field">
+        <input
+          id={id}
+          className={`input${problem ? ' invalid' : ''}`}
+          type={show ? 'text' : 'password'}
+          autoComplete={autoComplete}
+          value={value}
+          disabled={disabled}
+          aria-invalid={Boolean(problem)}
+          aria-describedby={problem ? `${id}-err` : undefined}
+          onChange={(e) => onChange(e.target.value)}
+          onBlur={onBlur}
+          placeholder={placeholder}
+        />
+        <button
+          type="button"
+          className="btn-ghost reveal"
+          aria-pressed={show}
+          aria-controls={id}
+          aria-label={show ? 'Hide password' : 'Show password'}
+          onClick={() => setShow((v) => !v)}
+        >
+          {show ? 'Hide' : 'Show'}
+        </button>
+      </div>
+      {problem ? (
+        <p id={`${id}-err`} className="field-error" role="alert">
+          {problem}
+        </p>
+      ) : null}
+    </>
+  );
+}
+
+export function LoginScreen({ resetToken, onResetDone }: Props) {
   const { login, register } = useSession();
-  const [mode, setMode] = useState<Mode>('signin');
+  const [mode, setMode] = useState<Mode>(resetToken ? 'reset' : 'signin');
   const [username, setUsername] = useState('');
+  const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirm, setConfirm] = useState('');
-  const [showPassword, setShowPassword] = useState(false);
-  const [touched, setTouched] = useState<{ username?: true; password?: true; confirm?: true }>({});
+  const [touched, setTouched] = useState<
+    Partial<Record<'username' | 'email' | 'password' | 'confirm', true>>
+  >({});
   const [submitted, setSubmitted] = useState(false);
   const [failure, setFailure] = useState<string | null>(null);
+  const [success, setSuccess] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const ids = { u: useId(), p: useId(), c: useId(), err: useId() };
+  const ids = { u: useId(), e: useId(), p: useId(), c: useId() };
 
   const registering = mode === 'register';
+  const resetting = mode === 'reset';
+  const forgot = mode === 'forgot';
+  const needsPassword = mode === 'signin' || registering || resetting;
+  const needsConfirm = registering || resetting;
   const problems = {
-    username: usernameProblem(username),
-    password: registering
-      ? passwordProblem(password, username)
-      : password
-        ? null
-        : 'Enter your password.',
-    confirm: registering ? confirmationProblem(password, confirm) : null,
+    username: mode === 'signin' || registering ? usernameProblem(username) : null,
+    email: registering || forgot ? emailProblem(email) : null,
+    password: needsPassword
+      ? registering || resetting
+        ? passwordProblem(password, registering ? username : '')
+        : password
+          ? null
+          : 'Enter your password.'
+      : null,
+    confirm: needsConfirm ? confirmationProblem(password, confirm) : null,
   };
   const show = (field: keyof typeof problems) =>
     (touched[field] || submitted) && problems[field] ? problems[field] : null;
-  const formValid = !problems.username && !problems.password && !problems.confirm;
+  const formValid =
+    !problems.username && !problems.email && !problems.password && !problems.confirm;
+  const touch = (field: keyof typeof problems) => () =>
+    setTouched((t) => ({ ...t, [field]: true }));
 
   const switchMode = (next: Mode) => {
     setMode(next);
     setFailure(null);
+    setSuccess(null);
     setSubmitted(false);
     setTouched({});
+    setPassword('');
     setConfirm('');
   };
 
@@ -70,13 +156,42 @@ export function LoginScreen() {
     if (!formValid) return;
     setBusy(true);
     try {
-      if (registering) await register(username.trim(), password);
-      else await login(username.trim(), password);
+      if (registering) await register(username.trim(), email.trim(), password);
+      else if (forgot) {
+        await api.forgotPassword(email.trim());
+        setSuccess(
+          'If an account exists for that address, a reset link is on its way. It works for 30 minutes.',
+        );
+        setBusy(false);
+      } else if (resetting) {
+        await api.resetPassword(resetToken ?? '', password);
+        onResetDone?.();
+        switchMode('signin');
+        setSuccess('Your password was changed. Sign in with the new one.');
+        setBusy(false);
+      } else await login(username.trim(), password);
     } catch (err) {
       setFailure(describeFailure(err, mode));
       setBusy(false);
     }
   };
+
+  const title =
+    mode === 'register'
+      ? 'Create your account'
+      : mode === 'forgot'
+        ? 'Forgot your password?'
+        : mode === 'reset'
+          ? 'Choose a new password'
+          : 'Message in a Bottle';
+  const intro =
+    mode === 'register'
+      ? 'A username your friends will recognise, an email for recovery, and a password only you know.'
+      : mode === 'forgot'
+        ? 'Enter the email address on your account and we will send a link to choose a new password.'
+        : mode === 'reset'
+          ? 'The new password replaces the old one everywhere: every signed-in device will need it.'
+          : 'Write to someone you know. Seal the letter, throw it into the sea, and follow its uncertain journey toward their shore.';
 
   return (
     <main className="login-screen">
@@ -99,127 +214,146 @@ export function LoginScreen() {
           <img src="/brand/app-symbol.svg" alt="" />
           <span className="t-eyebrow">Slow correspondence</span>
         </div>
-        <h1 className="t-display">{registering ? 'Create your account' : 'Message in a Bottle'}</h1>
-        <p className="secondary">
-          {registering
-            ? 'A username your friends will recognise, and a password only you know.'
-            : 'Write to someone you know. Seal the letter, throw it into the sea, and follow its uncertain journey toward their shore.'}
-        </p>
+        <h1 className="t-display">{title}</h1>
+        <p className="secondary">{intro}</p>
         <form onSubmit={submit} className="stack" noValidate aria-busy={busy}>
-          <div className="field">
-            <label className="t-label" htmlFor={ids.u}>
-              Username
-            </label>
-            <input
-              id={ids.u}
-              className={`input${show('username') ? ' invalid' : ''}`}
-              autoFocus
-              autoCapitalize="none"
-              autoCorrect="off"
-              spellCheck={false}
-              autoComplete="username"
-              inputMode="text"
-              value={username}
-              disabled={busy}
-              aria-invalid={Boolean(show('username'))}
-              aria-describedby={show('username') ? `${ids.u}-err` : undefined}
-              onChange={(e) => setUsername(e.target.value)}
-              onBlur={() => setTouched((t) => ({ ...t, username: true }))}
-              placeholder={registering ? 'letters, digits, underscore' : 'your username'}
-            />
-            {show('username') ? (
-              <p id={`${ids.u}-err`} className="field-error" role="alert">
-                {show('username')}
-              </p>
-            ) : null}
-          </div>
-          <div className="field">
-            <label className="t-label" htmlFor={ids.p}>
-              Password
-            </label>
-            <div className="password-field">
-              <input
-                id={ids.p}
-                className={`input${show('password') ? ' invalid' : ''}`}
-                type={showPassword ? 'text' : 'password'}
-                autoComplete={registering ? 'new-password' : 'current-password'}
-                value={password}
-                disabled={busy}
-                aria-invalid={Boolean(show('password'))}
-                aria-describedby={show('password') ? `${ids.p}-err` : undefined}
-                onChange={(e) => setPassword(e.target.value)}
-                onBlur={() => setTouched((t) => ({ ...t, password: true }))}
-                placeholder={registering ? 'at least 8 characters' : '••••••••'}
-              />
-              <button
-                type="button"
-                className="btn-ghost reveal"
-                aria-pressed={showPassword}
-                aria-label={showPassword ? 'Hide password' : 'Show password'}
-                onClick={() => setShowPassword((v) => !v)}
-              >
-                {showPassword ? 'Hide' : 'Show'}
-              </button>
-            </div>
-            {show('password') ? (
-              <p id={`${ids.p}-err`} className="field-error" role="alert">
-                {show('password')}
-              </p>
-            ) : null}
-          </div>
-          {registering ? (
+          {mode === 'signin' || registering ? (
             <div className="field">
-              <label className="t-label" htmlFor={ids.c}>
-                Confirm password
+              <label className="t-label" htmlFor={ids.u}>
+                Username
               </label>
               <input
-                id={ids.c}
-                className={`input${show('confirm') ? ' invalid' : ''}`}
-                type={showPassword ? 'text' : 'password'}
-                autoComplete="new-password"
-                value={confirm}
+                id={ids.u}
+                className={`input${show('username') ? ' invalid' : ''}`}
+                autoFocus
+                autoCapitalize="none"
+                autoCorrect="off"
+                spellCheck={false}
+                autoComplete="username"
+                value={username}
                 disabled={busy}
-                aria-invalid={Boolean(show('confirm'))}
-                aria-describedby={show('confirm') ? `${ids.c}-err` : undefined}
-                onChange={(e) => setConfirm(e.target.value)}
-                onBlur={() => setTouched((t) => ({ ...t, confirm: true }))}
-                placeholder="the same password again"
+                aria-invalid={Boolean(show('username'))}
+                aria-describedby={show('username') ? `${ids.u}-err` : undefined}
+                onChange={(e) => setUsername(e.target.value)}
+                onBlur={touch('username')}
+                placeholder={registering ? 'letters, digits, underscore' : 'your username'}
               />
-              {show('confirm') ? (
-                <p id={`${ids.c}-err`} className="field-error" role="alert">
-                  {show('confirm')}
+              {show('username') ? (
+                <p id={`${ids.u}-err`} className="field-error" role="alert">
+                  {show('username')}
                 </p>
               ) : null}
             </div>
           ) : null}
+          {registering || forgot ? (
+            <div className="field">
+              <label className="t-label" htmlFor={ids.e}>
+                Email
+              </label>
+              <input
+                id={ids.e}
+                className={`input${show('email') ? ' invalid' : ''}`}
+                type="email"
+                autoFocus={forgot}
+                autoCapitalize="none"
+                autoCorrect="off"
+                spellCheck={false}
+                autoComplete="email"
+                inputMode="email"
+                value={email}
+                disabled={busy}
+                aria-invalid={Boolean(show('email'))}
+                aria-describedby={show('email') ? `${ids.e}-err` : undefined}
+                onChange={(e) => setEmail(e.target.value)}
+                onBlur={touch('email')}
+                placeholder="you@example.com"
+              />
+              {show('email') ? (
+                <p id={`${ids.e}-err`} className="field-error" role="alert">
+                  {show('email')}
+                </p>
+              ) : null}
+            </div>
+          ) : null}
+          {needsPassword ? (
+            <div className="field">
+              <label className="t-label" htmlFor={ids.p}>
+                {resetting ? 'New password' : 'Password'}
+              </label>
+              <PasswordInput
+                id={ids.p}
+                value={password}
+                onChange={setPassword}
+                onBlur={touch('password')}
+                problem={show('password')}
+                autoComplete={registering || resetting ? 'new-password' : 'current-password'}
+                placeholder={registering || resetting ? 'at least 8 characters' : '••••••••'}
+                disabled={busy}
+              />
+            </div>
+          ) : null}
+          {mode === 'signin' ? (
+            <button
+              type="button"
+              className="btn-text forgot-link"
+              disabled={busy}
+              onClick={() => switchMode('forgot')}
+            >
+              Forgot password?
+            </button>
+          ) : null}
+          {needsConfirm ? (
+            <div className="field">
+              <label className="t-label" htmlFor={ids.c}>
+                Confirm {resetting ? 'new ' : ''}password
+              </label>
+              <PasswordInput
+                id={ids.c}
+                value={confirm}
+                onChange={setConfirm}
+                onBlur={touch('confirm')}
+                problem={show('confirm')}
+                autoComplete="new-password"
+                placeholder="the same password again"
+                disabled={busy}
+              />
+            </div>
+          ) : null}
           {failure ? (
-            <p id={ids.err} className="note error" role="alert">
+            <p className="note error" role="alert">
               {failure}
             </p>
           ) : null}
-          <button type="submit" className="btn-primary" disabled={busy}>
-            {busy ? (
-              <>
-                <span className="pulse-dot" aria-hidden />
-                {registering ? 'Creating your account…' : 'Signing in…'}
-              </>
-            ) : registering ? (
-              'Create account'
-            ) : (
-              'Sign in'
-            )}
-          </button>
-          {registering ? (
-            <button
-              type="button"
-              className="btn-text auth-switch"
-              disabled={busy}
-              onClick={() => switchMode('signin')}
-            >
-              <Icon name="back" size={14} />
-              Back to sign in
+          {success ? (
+            <p className="note success" role="status">
+              {success}
+            </p>
+          ) : null}
+          {forgot && success ? null : (
+            <button type="submit" className="btn-primary" disabled={busy}>
+              {busy ? (
+                <>
+                  <span className="pulse-dot" aria-hidden />
+                  {registering
+                    ? 'Creating your account…'
+                    : forgot
+                      ? 'Sending…'
+                      : resetting
+                        ? 'Changing the password…'
+                        : 'Signing in…'}
+                </>
+              ) : registering ? (
+                'Create account'
+              ) : forgot ? (
+                'Send reset link'
+              ) : resetting ? (
+                'Set new password'
+              ) : (
+                'Sign in'
+              )}
             </button>
-          ) : (
+          )}
+          {mode === 'signin' ? (
             <button
               type="button"
               className="btn-secondary"
@@ -227,6 +361,19 @@ export function LoginScreen() {
               onClick={() => switchMode('register')}
             >
               Create account
+            </button>
+          ) : (
+            <button
+              type="button"
+              className="btn-text auth-switch"
+              disabled={busy}
+              onClick={() => {
+                if (resetting) onResetDone?.();
+                switchMode('signin');
+              }}
+            >
+              <Icon name="back" size={14} />
+              Back to sign in
             </button>
           )}
         </form>

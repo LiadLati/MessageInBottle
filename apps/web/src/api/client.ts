@@ -53,8 +53,12 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
 }
 
 export const api = {
-  register: (username: string, password: string) =>
-    request<SessionResponse>('POST', '/auth/register', { username, password }),
+  register: (username: string, email: string, password: string) =>
+    request<SessionResponse>('POST', '/auth/register', { username, email, password }),
+  forgotPassword: (email: string) =>
+    request<{ ok: boolean }>('POST', '/auth/password/forgot', { email }),
+  resetPassword: (token: string, password: string) =>
+    request<void>('POST', '/auth/password/reset', { token, password }),
   login: (username: string, password: string) =>
     request<SessionResponse>('POST', '/auth/login', { username, password }),
   me: () => request<MeResponse>('GET', '/auth/me'),
@@ -64,6 +68,7 @@ export const api = {
   friends: () => request<FriendsResponse>('GET', '/friends'),
   sendFriendRequest: (username: string) => request<void>('POST', '/friends/requests', { username }),
   acceptFriendRequest: (id: string) => request<void>('POST', `/friends/requests/${id}/accept`),
+  denyFriendRequest: (id: string) => request<void>('POST', `/friends/requests/${id}/deny`),
   blockUser: (username: string) => request<void>('POST', '/friends/blocks', { username }),
   sentBottles: () => request<{ bottles: SentBottleSummaryDto[] }>('GET', '/bottles/sent'),
   sentBottle: (id: string) => request<{ bottle: SentBottleDto }>('GET', `/bottles/sent/${id}`),
@@ -87,4 +92,9 @@ export const api = {
   devStatus: () => request<DevStatus>('GET', '/dev/status'),
   devAdvance: (ms: number) => request<DevStatus>('POST', '/dev/advance', { ms }),
   devArrive: (bottleId: string) => request<DevStatus>('POST', '/dev/arrive', { bottleId }),
+  devOutbox: () =>
+    request<{
+      provider: string;
+      messages: Array<{ id: number; to: string; subject: string; text: string; sentAt: string }>;
+    }>('GET', '/dev/outbox'),
 };

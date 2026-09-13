@@ -14,11 +14,13 @@ interface Props {
   active: Tab;
   on3d?: boolean;
   unread?: number;
+  // Pending incoming friend requests (server-authoritative count).
+  pendingFriends?: number;
   onSelect: (tab: Tab) => void;
 }
 
 // Bottom nav on phones (Write is the raised pill), left rail from 900px up.
-export function Nav({ active, on3d = false, unread = 0, onSelect }: Props) {
+export function Nav({ active, on3d = false, unread = 0, pendingFriends = 0, onSelect }: Props) {
   return (
     <nav className={`nav${on3d ? ' on-3d' : ''}`} aria-label="Main">
       {ITEMS.map((item) => {
@@ -52,6 +54,14 @@ export function Nav({ active, on3d = false, unread = 0, onSelect }: Props) {
             {item.id === 'shore' && unread > 0 ? (
               <span className="nav-badge" aria-label={`${unread} unread`}>
                 {unread}
+              </span>
+            ) : null}
+            {item.id === 'friends' && pendingFriends > 0 ? (
+              <span
+                className="nav-badge"
+                aria-label={`${pendingFriends} pending friend ${pendingFriends === 1 ? 'request' : 'requests'}`}
+              >
+                {pendingFriends > 9 ? '9+' : pendingFriends}
               </span>
             ) : null}
           </button>

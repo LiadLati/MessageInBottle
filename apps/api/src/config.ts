@@ -28,13 +28,26 @@ export interface AppConfig {
   // Only behind a reverse proxy that sets X-Forwarded-For: otherwise clients could pick their
   // own rate-limit bucket by sending the header themselves.
   trustProxy: boolean;
+  // Public URL of the web app, used to build links in e-mails.
+  appUrl: string;
+  mail: MailConfig;
+}
+
+export type MailProvider = 'outbox' | 'smtp' | 'disabled';
+export interface MailConfig {
+  // outbox: development-only captured messages (never allowed outside dev mode).
+  // smtp: any SMTP provider. disabled: nothing is sent (request-reset still answers normally).
+  provider: MailProvider;
+  from: string;
+  smtp: { host: string; port: number; secure: boolean; user: string; pass: string };
 }
 
 export function loadConfig(): AppConfig {
+  const devMode = (process.env.MIB_DEV_MODE ?? 'true') === 'true';
   return {
     port: envInt('MIB_PORT', 3001),
     databasePath: process.env.MIB_DATABASE_PATH ?? path.join(API_ROOT, 'data', 'mib.sqlite'),
-    devMode: (process.env.MIB_DEV_MODE ?? 'true') === 'true',
+    devMode,
     logRequests: (process.env.MIB_LOG_REQUESTS ?? 'true') === 'true',
     msPerChartUnit: envInt('MIB_MS_PER_CHART_UNIT', 60 * 60 * 1000),
     minJourneyMs: envInt('MIB_MIN_JOURNEY_MS', 6 * 60 * 60 * 1000),
@@ -43,6 +56,27 @@ export function loadConfig(): AppConfig {
     sessionTtlMs: envInt('MIB_SESSION_TTL_MS', 30 * 24 * 60 * 60 * 1000),
     corsOrigin: process.env.MIB_CORS_ORIGIN ?? 'http://localhost:5173',
     trustProxy: (process.env.MIB_TRUST_PROXY ?? 'false') === 'true',
+    appUrl: process.env.MIB_APP_URL ?? 'http://localhost:5173',
+    mail: loadMailConfig(devMode),
+  };
+}
+
+function loadMailConfig(devMode: boolean): MailConfig {
+  const raw = process.env.MIB_MAIL_PROVIDER ?? (devMode ? 'outbox' : 'disabled');
+  if (raw !== 'outbox' && raw !== 'smtp' && raw !== 'disabled')
+    throw new Error('MIB_MAIL_PROVIDER must be outbox, smtp or disabled');
+  if (raw === 'outbox' && !devMode)
+    throw new Error('MIB_MAIL_PROVIDER=outbox is development-only; use smtp or disabled');
+  return {
+    provider: raw,
+    from: process.env.MIB_MAIL_FROM ?? 'Message in a Bottle <no-reply@localhost>',
+    smtp: {
+      host: process.env.MIB_SMTP_HOST ?? '',
+      port: envInt('MIB_SMTP_PORT', 587),
+      secure: (process.env.MIB_SMTP_SECURE ?? 'false') === 'true',
+      user: process.env.MIB_SMTP_USER ?? '',
+      pass: process.env.MIB_SMTP_PASS ?? '',
+    },
   };
 }
 

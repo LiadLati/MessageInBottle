@@ -27,9 +27,13 @@ const register = (
   username: string,
   password: string,
   extra: Record<string, string> = {},
+  email = `${username
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9_]/g, '')}@example.test`,
 ) =>
   app.request('/api/auth/register', {
-    ...json({ username, password }),
+    ...json({ username, email, password }),
     headers: { 'content-type': 'application/json', ...extra },
   });
 const login = (app: App, username: string, password: string, extra: Record<string, string> = {}) =>
@@ -313,8 +317,10 @@ describe('migration compatibility', () => {
     ) as {
       entries: Array<{ tag: string }>;
     };
-    const legacyEntries = journal.entries.filter((e) => !e.tag.includes('auth_credentials'));
-    expect(legacyEntries.length).toBe(journal.entries.length - 1);
+    // Everything before the first authentication migration.
+    const authIdx = journal.entries.findIndex((e) => e.tag.includes('auth_credentials'));
+    const legacyEntries = journal.entries.slice(0, authIdx);
+    expect(legacyEntries.length).toBe(2);
     fs.mkdirSync(path.join(legacyDir, 'meta'));
     fs.writeFileSync(
       path.join(legacyDir, 'meta', '_journal.json'),
@@ -357,7 +363,7 @@ describe('migration compatibility', () => {
     // The upgraded database serves the new API: old accounts cannot sign in until they get a
     // password, new accounts register normally, and the dev seed backfills only seed accounts.
     const w = createTestWorld();
-    const app = createApp({ db, clock: w.clock, config });
+    const app = createApp({ db, clock: w.clock, config, mailer: w.outbox });
     expect((await login(app, 'oldtimer', 'anything long enough')).status).toBe(401);
     expect((await register(app, 'newcomer', 'newcomer password')).status).toBe(201);
     seedUsers(db, T0);

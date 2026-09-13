@@ -4,6 +4,7 @@ import { createDb, runMigrations } from './db/client.js';
 import { seedChart, seedUsers } from './db/seed.js';
 import { createApp } from './http/app.js';
 import { DevClock, SystemClock } from './lib/clock.js';
+import { createMailer } from './lib/mail.js';
 import type { AppContext } from './services/context.js';
 import { runJourneyTick } from './services/journey.js';
 
@@ -17,6 +18,7 @@ const ctx: AppContext = {
   db,
   clock: config.devMode ? new DevClock(db) : new SystemClock(),
   config,
+  mailer: createMailer(config.mail),
 };
 const app = createApp(ctx);
 
@@ -32,6 +34,6 @@ worker.unref();
 
 serve({ fetch: app.fetch, port: config.port }, (info) => {
   console.log(
-    `Message in a Bottle API listening on http://localhost:${info.port} (devMode=${config.devMode})`,
+    `Message in a Bottle API listening on http://localhost:${info.port} (devMode=${config.devMode}, mail=${config.mail.provider})`,
   );
 });

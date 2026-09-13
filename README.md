@@ -119,12 +119,15 @@ All routes are under `/api`, JSON, bearer-token authenticated except sign-in.
 | POST   | `/auth/register`              | Create an account (username + password) → opaque token        |
 | POST   | `/auth/login`                 | Sign in with username + password → opaque token               |
 | POST   | `/auth/logout`                | Revoke the current token                                      |
+| POST   | `/auth/password/forgot`       | Request a reset link by e-mail (same answer for any address)  |
+| POST   | `/auth/password/reset`        | Set a new password with a single-use token (revokes sessions) |
 | GET    | `/auth/me`                    | Current user                                                  |
 | GET    | `/chart`                      | Neutral sea chart: shores, waypoints, islands, passages       |
 | PUT    | `/chart/my-shore`             | Manual shore selection                                        |
 | GET    | `/friends`                    | Approved friends, incoming/outgoing requests                  |
 | POST   | `/friends/requests`           | Send request by exact username                                |
 | POST   | `/friends/requests/:id/accept`| Mutual approval                                               |
+| POST   | `/friends/requests/:id/deny`  | Decline a pending request (atomic, idempotent)                |
 | POST   | `/friends/blocks`             | Block a user (enforced at release and before arrival)         |
 | POST   | `/bottles/preview`            | Eligibility + planned route for a recipient                   |
 | POST   | `/bottles/release`            | Atomic release; idempotent via `idempotencyKey`               |
@@ -135,6 +138,7 @@ All routes are under `/api`, JSON, bearer-token authenticated except sign-in.
 | GET    | `/shore/bottles/:id/letter`   | Re-read an opened letter                                      |
 | GET    | `/notifications`              | In-app events (arrival notices are created only on commit)    |
 | GET    | `/dev/status`, POST `/dev/advance`, `/dev/arrive`, `/dev/tick` | Dev-mode clock and worker controls |
+| GET    | `/dev/outbox`                 | Dev-mode captured e-mails (password-reset links)              |
 
 Non-participants get `404` for any bottle, never `403`, so IDs disclose nothing.
 
@@ -148,5 +152,14 @@ always "incorrect username or password", whether or not the username exists, and
 against a dummy hash for unknown users so timing does not differ. Sign-in is limited per account
 and per client address, registration per client address (HTTP 429 with `retryAfterSeconds`).
 Tokens are opaque, stored hashed with a TTL, and sign-out revokes only the current token. The
-migration `0002_auth_credentials` is additive: pre-existing rows keep a null password and cannot
-sign in until one is set.
+migrations `0002_auth_credentials` and `0003_email_and_password_resets` are additive:
+pre-existing rows keep a null password (cannot sign in until one is set) and a null e-mail
+(cannot use password recovery until one is added).
+
+New accounts register with an e-mail address, stored normalized and unique. Password recovery:
+`/auth/password/forgot` always answers the same way; when the address is known, a random token is
+mailed and only its SHA-256 is stored, valid for 30 minutes, single-use, superseding earlier
+tokens. A successful reset revokes every session of the account. Mail goes through a
+provider-neutral adapter (`MIB_MAIL_PROVIDER`: `smtp`, `disabled`, or the development-only
+`outbox`, which the dev bar and `GET /api/dev/outbox` expose so the flow can be tested locally).
+Reset tokens are never logged.

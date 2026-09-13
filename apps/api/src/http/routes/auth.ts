@@ -1,10 +1,25 @@
 import { Hono } from 'hono';
 import type { Context } from 'hono';
 import { getConnInfo } from '@hono/node-server/conninfo';
-import { LoginRequestSchema, RegisterRequestSchema, normalizeUsername } from '@mib/shared';
+import {
+  ForgotPasswordRequestSchema,
+  LoginRequestSchema,
+  RegisterRequestSchema,
+  ResetPasswordRequestSchema,
+  normalizeEmail,
+  normalizeUsername,
+} from '@mib/shared';
 import { AppError, conflict } from '../../lib/errors.js';
 import { RateLimiter, type RateLimitRule } from '../../lib/rate-limit.js';
-import { login, logout, register, usernameTaken } from '../../services/auth.js';
+import {
+  emailTaken,
+  login,
+  logout,
+  register,
+  requestPasswordReset,
+  resetPassword,
+  usernameTaken,
+} from '../../services/auth.js';
 import type { AppEnv } from '../app.js';
 import { requireAuth } from '../middleware/auth.js';
 import { jsonBody } from '../validate.js';
@@ -14,6 +29,9 @@ import { jsonBody } from '../validate.js';
 export const LOGIN_PER_ADDRESS: RateLimitRule = { limit: 20, windowMs: 15 * 60 * 1000 };
 export const LOGIN_PER_ACCOUNT: RateLimitRule = { limit: 10, windowMs: 15 * 60 * 1000 };
 export const REGISTER_PER_ADDRESS: RateLimitRule = { limit: 10, windowMs: 60 * 60 * 1000 };
+export const FORGOT_PER_ADDRESS: RateLimitRule = { limit: 5, windowMs: 15 * 60 * 1000 };
+export const FORGOT_PER_EMAIL: RateLimitRule = { limit: 3, windowMs: 60 * 60 * 1000 };
+export const RESET_PER_ADDRESS: RateLimitRule = { limit: 10, windowMs: 15 * 60 * 1000 };
 
 const rateLimited = (retryAfterMs: number) =>
   new AppError(429, 'rate_limited', 'too many attempts, try again later', {
@@ -48,6 +66,8 @@ export function authRoutes(limiter = new RateLimiter()) {
     const ctx = c.get('ctx');
     if (usernameTaken(ctx, body.username))
       throw conflict('username_taken', 'that username is already taken');
+    if (emailTaken(ctx, body.email))
+      throw conflict('email_taken', 'that email is already registered');
     return c.json(register(ctx, body), 201);
   });
 
@@ -60,6 +80,21 @@ export function authRoutes(limiter = new RateLimiter()) {
     // A successful sign-in clears the account's failed-attempt budget.
     limiter.reset(accountKey);
     return c.json(session, 200);
+  });
+
+  // Same answer whether or not the address is known: the response cannot be used to enumerate.
+  r.post('/password/forgot', jsonBody(ForgotPasswordRequestSchema), async (c) => {
+    const { email } = c.req.valid('json');
+    enforce(`forgot:addr:${clientKey(c)}`, FORGOT_PER_ADDRESS);
+    enforce(`forgot:email:${normalizeEmail(email)}`, FORGOT_PER_EMAIL);
+    await requestPasswordReset(c.get('ctx'), email);
+    return c.json({ ok: true }, 202);
+  });
+
+  r.post('/password/reset', jsonBody(ResetPasswordRequestSchema), (c) => {
+    enforce(`reset:addr:${clientKey(c)}`, RESET_PER_ADDRESS);
+    resetPassword(c.get('ctx'), c.req.valid('json'));
+    return c.body(null, 204);
   });
 
   r.get('/me', requireAuth, (c) => c.json(c.get('user')));

@@ -18,6 +18,13 @@ interface Props {
   onOpenProfile: () => void;
 }
 
+// What the sheet shows. The default is the clean map; a route or a bottle is opened only by a
+// tap on the map (or by the release flow handing over the bottle it just created).
+type View =
+  | { kind: 'clean' }
+  | { kind: 'route'; routeKey: string }
+  | { kind: 'bottle'; id: string; fromRoute: string | null };
+
 function toRoute(b: SentBottleSummaryDto): MapRoute | null {
   if (!b.route.geoPoints || b.route.geoPoints.length < 2) return null;
   return {
@@ -31,42 +38,82 @@ function toRoute(b: SentBottleSummaryDto): MapRoute | null {
   };
 }
 
+// Bottles share a route when they follow the same sequence of passages.
+const routeKeyOf = (b: SentBottleSummaryDto) => b.route.nodeIds.join('>');
+
 // S1 · Ocean — private journeys over the real world map.
 export function OceanScreen({ focusId = null, onOpenPassport, onWrite, onOpenProfile }: Props) {
   const { user } = useSession();
   const bottles = useAsync(() => api.sentBottles(), [], POLL_MS);
   const chart = useAsync(() => api.chart(), []);
-  const [selected, setSelected] = useState<string | null>(focusId);
+  const [view, setView] = useState<View>(() =>
+    focusId ? { kind: 'bottle', id: focusId, fromRoute: null } : { kind: 'clean' },
+  );
   const [fitKey, setFitKey] = useState(focusId ?? 'initial');
   const mapHandle = useRef<OceanMapHandle>(null);
 
   const list = useMemo(() => bottles.data?.bottles ?? [], [bottles.data]);
-  const current = list.find((b) => b.id === selected) ?? list[0] ?? null;
+  const groups = useMemo(() => {
+    const map = new Map<string, SentBottleSummaryDto[]>();
+    for (const b of list) {
+      const key = routeKeyOf(b);
+      map.set(key, [...(map.get(key) ?? []), b]);
+    }
+    return map;
+  }, [list]);
+
+  const current = view.kind === 'bottle' ? (list.find((b) => b.id === view.id) ?? null) : null;
+  const routeBottles = useMemo(
+    () => (view.kind === 'route' ? (groups.get(view.routeKey) ?? []) : []),
+    [view, groups],
+  );
+  const selectedRouteIds = useMemo(
+    () =>
+      view.kind === 'bottle'
+        ? [view.id]
+        : view.kind === 'route'
+          ? routeBottles.map((b) => b.id)
+          : [],
+    [view, routeBottles],
+  );
 
   const routes = useMemo(() => list.map(toRoute).filter((r): r is MapRoute => r !== null), [list]);
+  const focusBottle = current ?? routeBottles[0] ?? null;
   const anchors = useMemo<MapAnchor[]>(() => {
-    if (!current || !chart.data) return [];
+    if (!focusBottle || !chart.data) return [];
     const byId = new Map(chart.data.shores.map((s) => [s.id, s]));
-    const o = byId.get(current.originShore.id);
-    const d = byId.get(current.destinationShore.id);
+    const o = byId.get(focusBottle.originShore.id);
+    const d = byId.get(focusBottle.destinationShore.id);
     const out: MapAnchor[] = [];
     if (o?.geo) out.push({ id: o.id, name: o.name, geo: o.geo, role: 'origin' });
     if (d?.geo) out.push({ id: d.id, name: d.name, geo: d.geo, role: 'destination' });
     return out;
-  }, [current, chart.data]);
+  }, [focusBottle, chart.data]);
 
-  const select = (id: string) => {
-    setSelected(id);
-    setFitKey(`${id}:${Date.now()}`);
+  const refit = (key: string) => setFitKey(`${key}:${Date.now()}`);
+  // A tap on a bottle marker or route line: one bottle opens directly, a shared route lists them.
+  const selectFromMap = (bottleId: string) => {
+    const b = list.find((x) => x.id === bottleId);
+    if (!b) return;
+    const key = routeKeyOf(b);
+    const group = groups.get(key) ?? [b];
+    if (group.length === 1) setView({ kind: 'bottle', id: b.id, fromRoute: null });
+    else setView({ kind: 'route', routeKey: key });
+    refit(key);
+  };
+  const close = () => {
+    setView({ kind: 'clean' });
+    refit('all');
   };
 
   const synced = list[0]?.serverTime ?? null;
   const atSeaCount = list.filter((b) => b.state === 'at_sea').length;
-  const subline = synced
-    ? `Position synced ${formatTime(synced)} · simulated`
-    : bottles.loading
+  const subline =
+    bottles.loading && !bottles.data
       ? 'Charting…'
-      : 'Nothing at sea';
+      : list.length === 0
+        ? 'Nothing at sea'
+        : `${synced ? `Synced ${formatTime(synced)} · ` : ''}${list.length === 1 ? 'tap the bottle' : 'tap a bottle or route'}`;
 
   return (
     <div className="world-screen two-pane">
@@ -75,8 +122,8 @@ export function OceanScreen({ focusId = null, onOpenPassport, onWrite, onOpenPro
           handle={mapHandle}
           routes={routes}
           anchors={anchors}
-          selectedRouteId={current?.id ?? null}
-          onSelectRoute={select}
+          selectedRouteIds={selectedRouteIds}
+          onSelectRoute={selectFromMap}
           fitKey={fitKey}
         />
       </div>
@@ -137,17 +184,19 @@ export function OceanScreen({ focusId = null, onOpenPassport, onWrite, onOpenPro
         <button
           type="button"
           className="glass-control map-control"
-          aria-label="Recenter on route"
+          aria-label="Recenter"
           onClick={() => mapHandle.current?.recenter()}
         >
           <Icon name="recenter" size={16} />
         </button>
       </div>
 
-      <section className="sheet" aria-label="Journey">
-        {bottles.loading && !bottles.data ? (
+      {bottles.loading && !bottles.data ? (
+        <section className="sheet" aria-label="Journey">
           <Skeleton />
-        ) : !current ? (
+        </section>
+      ) : list.length === 0 ? (
+        <section className="sheet" aria-label="Journey">
           <div className="stack">
             <h2 className="t-display-sm">No bottles at sea</h2>
             <p className="t-meta" style={{ fontSize: 13.5 }}>
@@ -156,30 +205,77 @@ export function OceanScreen({ focusId = null, onOpenPassport, onWrite, onOpenPro
             <button type="button" className="btn-primary" onClick={onWrite}>
               Write a letter
             </button>
+            <ErrorNote error={bottles.error ?? chart.error} />
           </div>
-        ) : (
+        </section>
+      ) : view.kind === 'route' ? (
+        <section className="sheet" aria-label="Bottles on this route">
+          <div className="row">
+            <div className="grow">
+              <h2 className="t-card-title">{routeBottles.length} bottles on this route</h2>
+              <p className="t-meta">
+                {routeBottles[0]?.originShore.name} → {routeBottles[0]?.destinationShore.name}
+              </p>
+            </div>
+            <button type="button" className="glass-control" aria-label="Close" onClick={close}>
+              <Icon name="close" size={16} />
+            </button>
+          </div>
+          <ul className="list" style={{ marginTop: 12 }}>
+            {routeBottles.map((b) => (
+              <li key={b.id}>
+                <button
+                  type="button"
+                  className="row-item selectable"
+                  onClick={() => setView({ kind: 'bottle', id: b.id, fromRoute: view.routeKey })}
+                >
+                  <Avatar name={b.recipient.displayName} tone="foam" />
+                  <span className="grow">
+                    <span className="t-card-title" style={{ display: 'block' }}>
+                      To {b.recipient.displayName}
+                    </span>
+                    <span className="t-meta">
+                      {b.state === 'at_sea' ? 'At sea for' : 'Journey took'}{' '}
+                      {formatDuration(b.elapsedMs)}
+                    </span>
+                  </span>
+                  <StatusChip state={b.state} />
+                </button>
+              </li>
+            ))}
+          </ul>
+          <ErrorNote error={bottles.error ?? chart.error} />
+        </section>
+      ) : view.kind === 'bottle' && current ? (
+        <section className="sheet" aria-label="Journey">
           <JourneyCard
             bottle={current}
-            others={list.filter((b) => b.id !== current.id)}
-            onPick={select}
+            onBack={
+              view.fromRoute ? () => setView({ kind: 'route', routeKey: view.fromRoute! }) : null
+            }
+            onClose={close}
             onPassport={() => onOpenPassport(current.id)}
           />
-        )}
-        <ErrorNote error={bottles.error ?? chart.error} />
-      </section>
+          <ErrorNote error={bottles.error ?? chart.error} />
+        </section>
+      ) : bottles.error || chart.error ? (
+        <section className="sheet" aria-label="Journey">
+          <ErrorNote error={bottles.error ?? chart.error} />
+        </section>
+      ) : null}
     </div>
   );
 }
 
 function JourneyCard({
   bottle,
-  others,
-  onPick,
+  onBack,
+  onClose,
   onPassport,
 }: {
   bottle: SentBottleSummaryDto;
-  others: SentBottleSummaryDto[];
-  onPick: (id: string) => void;
+  onBack: (() => void) | null;
+  onClose: () => void;
   onPassport: () => void;
 }) {
   const passages = Math.max(1, bottle.route.nodeIds.length - 1);
@@ -188,17 +284,31 @@ function JourneyCard({
   return (
     <div>
       <div className="row">
-        <Avatar name={bottle.recipient.displayName} tone="foam" />
-        <div className="grow">
+        {onBack ? (
+          <button
+            type="button"
+            className="glass-control"
+            aria-label="Back to route"
+            onClick={onBack}
+          >
+            <Icon name="back" size={16} />
+          </button>
+        ) : (
+          <Avatar name={bottle.recipient.displayName} tone="foam" />
+        )}
+        <div className="grow" style={{ minWidth: 0 }}>
           <div className="t-card-title">To {bottle.recipient.displayName}</div>
           <div className="t-meta">
             {bottle.originShore.name} → {bottle.destinationShore.name} · {passages}{' '}
             {passages === 1 ? 'passage' : 'passages'}
           </div>
         </div>
-        <StatusChip state={bottle.state} />
+        <button type="button" className="glass-control" aria-label="Close" onClick={onClose}>
+          <Icon name="close" size={16} />
+        </button>
       </div>
       <div className="row" style={{ marginTop: 16 }}>
+        <StatusChip state={bottle.state} />
         <div
           className="progress-rail"
           role="progressbar"
@@ -232,20 +342,6 @@ function JourneyCard({
           Passport
         </button>
       </div>
-      {others.length > 0 ? (
-        <div style={{ marginTop: 16 }}>
-          <div className="t-eyebrow" style={{ marginBottom: 8 }}>
-            Other bottles
-          </div>
-          <div className="row" style={{ flexWrap: 'wrap', gap: 6 }}>
-            {others.map((b) => (
-              <button key={b.id} type="button" className="chip" onClick={() => onPick(b.id)}>
-                To {b.recipient.displayName} · {formatDuration(b.elapsedMs)}
-              </button>
-            ))}
-          </div>
-        </div>
-      ) : null}
     </div>
   );
 }

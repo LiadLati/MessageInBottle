@@ -1,4 +1,4 @@
-import { and, eq, or } from 'drizzle-orm';
+import { and, eq, ne, or } from 'drizzle-orm';
 import type { FriendsResponse } from '@mib/shared';
 import type { DbOrTx } from '../db/client.js';
 import * as t from '../db/schema.js';
@@ -80,7 +80,12 @@ export function listFriends(ctx: AppContext, userId: string): FriendsResponse {
     }
   }
   friends.sort((a, b) => a.displayName.localeCompare(b.displayName));
-  return { friends, incomingRequests, outgoingRequests };
+  return {
+    friends,
+    incomingRequests,
+    outgoingRequests,
+    pendingIncomingCount: incomingRequests.length,
+  };
 }
 
 export function sendFriendRequest(ctx: AppContext, fromId: string, toUsername: string): void {
@@ -139,6 +144,23 @@ export function acceptFriendRequest(ctx: AppContext, userId: string, requestId: 
     .update(t.friendships)
     .set({ status: 'accepted', acceptedAt: ctx.clock.now() })
     .where(and(eq(t.friendships.id, requestId), eq(t.friendships.status, 'pending')))
+    .run();
+}
+
+// Declining a request removes the pending row in one guarded statement: only the addressee can
+// decline, an accepted friendship is never touched, and repeating the call is a no-op (the
+// request is simply gone). Nothing about bottles or journeys is involved.
+export function denyFriendRequest(ctx: AppContext, userId: string, requestId: string): void {
+  ctx.db
+    .delete(t.friendships)
+    .where(
+      and(
+        eq(t.friendships.id, requestId),
+        eq(t.friendships.status, 'pending'),
+        or(eq(t.friendships.userLowId, userId), eq(t.friendships.userHighId, userId)),
+        ne(t.friendships.requestedById, userId),
+      ),
+    )
     .run();
 }
 

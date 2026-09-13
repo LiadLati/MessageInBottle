@@ -4,6 +4,7 @@ import { DevAdvanceRequestSchema, DevArriveRequestSchema, type DevStatus } from 
 import * as t from '../../db/schema.js';
 import { plannedArrivalAt } from '../../domain/routing.js';
 import { DevClock } from '../../lib/clock.js';
+import { OutboxMailer } from '../../lib/mail.js';
 import { badRequest, notFound } from '../../lib/errors.js';
 import { activePlan, runJourneyTick } from '../../services/journey.js';
 import type { AppEnv } from '../app.js';
@@ -24,6 +25,23 @@ export function devRoutes() {
   });
 
   r.get('/status', (c) => c.json(status(c.get('ctx'))));
+
+  // Development outbox: the captured e-mails (password-reset links) so the recovery flow can be
+  // exercised locally. Only exists with the outbox mailer, which itself exists only in dev mode.
+  r.get('/outbox', (c) => {
+    const mailer = c.get('ctx').mailer;
+    const messages =
+      mailer instanceof OutboxMailer
+        ? mailer.messages.map((m) => ({
+            id: m.id,
+            to: m.to,
+            subject: m.subject,
+            text: m.text,
+            sentAt: new Date(m.sentAt).toISOString(),
+          }))
+        : [];
+    return c.json({ provider: mailer.kind, messages });
+  });
 
   r.post('/advance', jsonBody(DevAdvanceRequestSchema), (c) => {
     const ctx = c.get('ctx');

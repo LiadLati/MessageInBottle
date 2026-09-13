@@ -5,6 +5,7 @@ import * as t from '../db/schema.js';
 import { DEV_SEED_PASSWORD } from '../db/seed-data.js';
 import { seedChart, seedUsers } from '../db/seed.js';
 import type { Clock } from '../lib/clock.js';
+import { OutboxMailer } from '../lib/mail.js';
 import type { createApp } from '../http/app.js';
 import type { AppContext, AuthUser } from '../services/context.js';
 
@@ -36,6 +37,12 @@ export function testConfig(overrides: Partial<AppConfig> = {}): AppConfig {
     sessionTtlMs: 60 * 60 * 1000,
     corsOrigin: '*',
     trustProxy: true,
+    appUrl: 'http://app.test',
+    mail: {
+      provider: 'outbox',
+      from: 'test <no-reply@test>',
+      smtp: { host: '', port: 587, secure: false, user: '', pass: '' },
+    },
     ...overrides,
   };
 }
@@ -44,6 +51,7 @@ export interface TestWorld {
   ctx: AppContext;
   db: Db;
   clock: ManualClock;
+  outbox: OutboxMailer;
   user(username: string): AuthUser;
 }
 
@@ -54,11 +62,13 @@ export function createTestWorld(overrides: Partial<AppConfig> = {}): TestWorld {
   seedChart(db, config.defaultShoreCapacity, T0);
   seedUsers(db, T0);
   const clock = new ManualClock(T0);
-  const ctx: AppContext = { db, clock, config };
+  const outbox = new OutboxMailer(() => clock.now());
+  const ctx: AppContext = { db, clock, config, mailer: outbox };
   return {
     ctx,
     db,
     clock,
+    outbox,
     user(username) {
       const row = db.select().from(t.users).where(eq(t.users.username, username)).get();
       if (!row) throw new Error(`no seeded user ${username}`);
@@ -67,6 +77,7 @@ export function createTestWorld(overrides: Partial<AppConfig> = {}): TestWorld {
         username: row.username,
         displayName: row.displayName,
         shoreId: row.shoreId,
+        email: row.email,
       };
     },
   };

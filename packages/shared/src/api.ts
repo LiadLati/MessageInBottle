@@ -43,6 +43,8 @@ export const SessionResponseSchema = z.object({
     username: z.string(),
     displayName: z.string(),
     shoreId: IdSchema.nullable(),
+    // Only ever returned to the account owner; null for accounts created before e-mail existed.
+    email: z.string().nullable(),
   }),
 });
 export type SessionResponse = z.infer<typeof SessionResponseSchema>;
@@ -100,6 +102,8 @@ export const FriendsResponseSchema = z.object({
   friends: z.array(FriendSchema),
   incomingRequests: z.array(FriendRequestSchema),
   outgoingRequests: z.array(FriendRequestSchema),
+  // Server-authoritative count of pending requests addressed to the caller (badge source).
+  pendingIncomingCount: z.number().int().nonnegative(),
 });
 export type FriendsResponse = z.infer<typeof FriendsResponseSchema>;
 
