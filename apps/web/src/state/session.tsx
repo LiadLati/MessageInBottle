@@ -7,15 +7,18 @@ import {
   useState,
   type ReactNode,
 } from 'react';
-import type { MeResponse } from '@mib/shared';
+import type { MeResponse, SessionResponse } from '@mib/shared';
 import { api, setAuthToken } from '../api/client.js';
 
 const STORAGE_KEY = 'mib.session.token';
+// Client-side keys that belong to the signed-in person and must not survive a sign-out.
+const PER_USER_KEYS = ['mib.draft'];
 
 interface SessionState {
   user: MeResponse | null;
   loading: boolean;
-  login: (username: string) => Promise<void>;
+  login: (username: string, password: string) => Promise<void>;
+  register: (username: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
   refresh: () => Promise<void>;
 }
@@ -62,26 +65,45 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       .finally(() => setLoading(false));
   }, [refresh]);
 
-  const login = useCallback(async (username: string) => {
-    const session = await api.devLogin(username);
+  const start = useCallback((session: SessionResponse) => {
     setAuthToken(session.token);
     storeToken(session.token);
     setUser(session.user);
   }, []);
 
+  const login = useCallback(
+    async (username: string, password: string) => start(await api.login(username, password)),
+    [start],
+  );
+  const register = useCallback(
+    async (username: string, password: string) => start(await api.register(username, password)),
+    [start],
+  );
+
+  // Safe sign-out: the server session is revoked, and whatever the request outcome the token
+  // and any per-user client state are gone from this browser.
   const logout = useCallback(async () => {
     try {
       await api.logout();
+    } catch {
+      /* the token is dropped regardless */
     } finally {
       setAuthToken(null);
       storeToken(null);
+      for (const key of PER_USER_KEYS) {
+        try {
+          sessionStorage.removeItem(key);
+        } catch {
+          /* ignore */
+        }
+      }
       setUser(null);
     }
   }, []);
 
   const value = useMemo(
-    () => ({ user, loading, login, logout, refresh }),
-    [user, loading, login, logout, refresh],
+    () => ({ user, loading, login, register, logout, refresh }),
+    [user, loading, login, register, logout, refresh],
   );
   return <SessionContext.Provider value={value}>{children}</SessionContext.Provider>;
 }

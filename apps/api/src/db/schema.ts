@@ -21,6 +21,10 @@ export const users = sqliteTable('users', {
     .notNull()
     .default('active'),
   createdAt: integer('created_at').notNull(),
+  // Salted scrypt hash (see lib/password.ts). Null means the account cannot sign in: rows that
+  // predate authentication, or accounts whose password was cleared.
+  passwordHash: text('password_hash'),
+  passwordUpdatedAt: integer('password_updated_at'),
 });
 
 export const sessions = sqliteTable('sessions', {

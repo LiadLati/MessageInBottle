@@ -53,7 +53,10 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
 }
 
 export const api = {
-  devLogin: (username: string) => request<SessionResponse>('POST', '/auth/dev-login', { username }),
+  register: (username: string, password: string) =>
+    request<SessionResponse>('POST', '/auth/register', { username, password }),
+  login: (username: string, password: string) =>
+    request<SessionResponse>('POST', '/auth/login', { username, password }),
   me: () => request<MeResponse>('GET', '/auth/me'),
   logout: () => request<void>('POST', '/auth/logout'),
   chart: () => request<ChartResponse>('GET', '/chart'),

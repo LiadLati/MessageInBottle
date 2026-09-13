@@ -581,6 +581,39 @@ button.avatar {
   box-shadow: 0 0 0 3px rgba(143, 211, 204, 0.15);
 }
 
+.input.invalid {
+  border-color: rgba(231, 160, 140, 0.7);
+}
+.input:disabled {
+  opacity: 0.6;
+}
+.field-error {
+  font-size: 12.5px;
+  line-height: 1.35;
+  color: #f0b8a6;
+}
+.password-field {
+  position: relative;
+}
+.password-field .input {
+  padding-right: 76px;
+}
+.password-field .reveal {
+  position: absolute;
+  right: 6px;
+  top: 50%;
+  transform: translateY(-50%);
+  min-height: 36px;
+  padding: 0 12px;
+  font-size: 12.5px;
+}
+.auth-switch {
+  align-self: center;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
 .list {
   list-style: none;
   padding: 0;

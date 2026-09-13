@@ -39,14 +39,17 @@ pnpm dev                    # API on http://localhost:3001, web on http://localh
 ```
 
 Open http://localhost:5173 on a phone-sized viewport (the layout also supports desktop, where the
-navigation becomes a left rail and world screens split into map/scene + side pane). Development
-sign-in accepts any username; seeded accounts are `ada`, `bo`, `cy` (all mutual friends, each
-with a shore) and `dee` (no shore, pending request to ada). Use two browser profiles or a private
-window to play both sides. The map and the 3D shore need WebGL.
+navigation becomes a left rail and world screens split into map/scene + side pane). Create an
+account with a username and a password (8+ characters), or sign in as one of the seeded
+development accounts `ada`, `bo`, `cy` (all mutual friends, each with a shore) and `dee` (no
+shore, pending request to ada). **Development only:** the seed gives those four accounts the
+password `dev-password-2026`; they are created solely by the dev-mode seed (`MIB_DEV_MODE=true`),
+never by the API, so a production database never contains them. Use two browser profiles or a
+private window to play both sides. The map and the 3D shore need WebGL.
 
 Walkthrough of the vertical slice:
 
-1. Sign in as `ada` → Write → choose Bo → write up to 1,000 characters on the parchment, pick a
+1. Sign in as `ada` (password `dev-password-2026`) → Write → choose Bo → write up to 1,000 characters on the parchment, pick a
    visual font → Seal the letter → the preview shows the planned sea route on the world map; toggle
    Readable Print (text never changes), acknowledge the public-exposure notice → Seal and throw.
 2. The nine-beat release sequence plays in the 3D scene (tap anywhere to skip). The release
@@ -56,7 +59,7 @@ Walkthrough of the vertical slice:
 4. Sign in as `bo` → My Shore is an empty 3D coast; there is no incoming notification.
 5. As `ada`, open the **Dev clock** pill (top centre) and press "Land bottle to Bo now" (or
    advance the clock in steps). The server moves its simulated clock forward and runs the worker.
-6. As `bo`, the bottle rests on the sand and an arrival card appears. "Pick it up" opens the aged
+6. As `bo` (same development password), the bottle rests on the sand and an arrival card appears. "Pick it up" opens the aged
    letter on full-screen parchment with Readable Print. Opening completes the journey.
 7. As `ada`, the passport shows Arrived, Opened, the frozen total duration and the event history.
 
@@ -82,8 +85,9 @@ Schema changes: edit `apps/api/src/db/schema.ts`, then `pnpm --filter @mib/api d
 
 All variables are optional and documented in `.env.example`. The important ones:
 
-- `MIB_DEV_MODE` (default `true`): enables username-only sign-in, seeded users, the persisted
+- `MIB_DEV_MODE` (default `true`): enables the seeded development accounts, the persisted
   development clock and the `/api/dev/*` routes. Must be `false` for any shared deployment.
+- `MIB_SESSION_TTL_MS` (default 30 days): lifetime of a sign-in token.
   The in-app dev clock bar is additionally compiled out of production bundles: it renders only
   in `vite` development builds (`import.meta.env.DEV`) and only while the API reports dev mode.
   `pnpm --filter @mib/web preview` serves the production bundle against the local API.
@@ -112,7 +116,9 @@ All routes are under `/api`, JSON, bearer-token authenticated except sign-in.
 
 | Method | Path                          | Purpose                                                       |
 | ------ | ----------------------------- | ------------------------------------------------------------- |
-| POST   | `/auth/dev-login`             | Development sign-in by username → opaque token                |
+| POST   | `/auth/register`              | Create an account (username + password) → opaque token        |
+| POST   | `/auth/login`                 | Sign in with username + password → opaque token               |
+| POST   | `/auth/logout`                | Revoke the current token                                      |
 | GET    | `/auth/me`                    | Current user                                                  |
 | GET    | `/chart`                      | Neutral sea chart: shores, waypoints, islands, passages       |
 | PUT    | `/chart/my-shore`             | Manual shore selection                                        |
@@ -131,3 +137,16 @@ All routes are under `/api`, JSON, bearer-token authenticated except sign-in.
 | GET    | `/dev/status`, POST `/dev/advance`, `/dev/arrive`, `/dev/tick` | Dev-mode clock and worker controls |
 
 Non-participants get `404` for any bottle, never `403`, so IDs disclose nothing.
+
+### Accounts
+
+Usernames are stored in one normalized form (trimmed, lower-case) under a unique index, so
+`Ada` and `ada` are the same account; the display name keeps the typed casing. Passwords are
+stored only as salted scrypt hashes (`scrypt$N,r,p$salt$key`, per-password random salt) and are
+never returned or logged; validation errors echo field paths, not values. A failed sign-in is
+always "incorrect username or password", whether or not the username exists, and is verified
+against a dummy hash for unknown users so timing does not differ. Sign-in is limited per account
+and per client address, registration per client address (HTTP 429 with `retryAfterSeconds`).
+Tokens are opaque, stored hashed with a TTL, and sign-out revokes only the current token. The
+migration `0002_auth_credentials` is additive: pre-existing rows keep a null password and cannot
+sign in until one is set.

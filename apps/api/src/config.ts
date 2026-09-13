@@ -25,6 +25,9 @@ export interface AppConfig {
   journeyTickMs: number;
   sessionTtlMs: number;
   corsOrigin: string;
+  // Only behind a reverse proxy that sets X-Forwarded-For: otherwise clients could pick their
+  // own rate-limit bucket by sending the header themselves.
+  trustProxy: boolean;
 }
 
 export function loadConfig(): AppConfig {
@@ -39,6 +42,7 @@ export function loadConfig(): AppConfig {
     journeyTickMs: envInt('MIB_JOURNEY_TICK_MS', 15_000),
     sessionTtlMs: envInt('MIB_SESSION_TTL_MS', 30 * 24 * 60 * 60 * 1000),
     corsOrigin: process.env.MIB_CORS_ORIGIN ?? 'http://localhost:5173',
+    trustProxy: (process.env.MIB_TRUST_PROXY ?? 'false') === 'true',
   };
 }
 

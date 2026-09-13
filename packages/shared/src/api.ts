@@ -35,8 +35,7 @@ export const LetterTextSchema = z
     `letter exceeds ${LETTER_MAX_CHARACTERS} characters`,
   );
 
-// ---------- auth ----------
-export const DevLoginRequestSchema = z.object({ username: UsernameSchema });
+// ---------- auth (request schemas live in auth.ts) ----------
 export const SessionResponseSchema = z.object({
   token: z.string(),
   user: z.object({

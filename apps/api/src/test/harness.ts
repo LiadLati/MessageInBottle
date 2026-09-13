@@ -2,8 +2,10 @@ import { eq } from 'drizzle-orm';
 import type { AppConfig } from '../config.js';
 import { createDb, runMigrations, type Db } from '../db/client.js';
 import * as t from '../db/schema.js';
+import { DEV_SEED_PASSWORD } from '../db/seed-data.js';
 import { seedChart, seedUsers } from '../db/seed.js';
 import type { Clock } from '../lib/clock.js';
+import type { createApp } from '../http/app.js';
 import type { AppContext, AuthUser } from '../services/context.js';
 
 export class ManualClock implements Clock {
@@ -33,6 +35,7 @@ export function testConfig(overrides: Partial<AppConfig> = {}): AppConfig {
     journeyTickMs: 1000,
     sessionTtlMs: 60 * 60 * 1000,
     corsOrigin: '*',
+    trustProxy: true,
     ...overrides,
   };
 }
@@ -67,6 +70,22 @@ export function createTestWorld(overrides: Partial<AppConfig> = {}): TestWorld {
       };
     },
   };
+}
+
+// Signs a seeded development account in through the real HTTP surface.
+export async function loginAs(
+  app: ReturnType<typeof createApp>,
+  username: string,
+  password = DEV_SEED_PASSWORD,
+): Promise<{ token: string; id: string }> {
+  const res = await app.request('/api/auth/login', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ username, password }),
+  });
+  if (res.status !== 200) throw new Error(`login ${username} failed: ${res.status}`);
+  const body = (await res.json()) as { token: string; user: { id: string } };
+  return { token: body.token, id: body.user.id };
 }
 
 export const SAMPLE_TEXT = 'Dear friend,\nthe tide was gentle this morning. — A';
