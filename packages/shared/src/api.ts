@@ -17,6 +17,11 @@ export const IdempotencyKeySchema = z.string().min(8).max(128);
 export const ChartPointSchema = z.object({ x: z.number(), y: z.number() });
 export type ChartPoint = z.infer<typeof ChartPointSchema>;
 
+// Geographic anchor of a fictional shore or sea waypoint on the world map (spec §6.1).
+// Only app anchors carry these; user locations are never collected or stored.
+export const GeoPointSchema = z.object({ lng: z.number(), lat: z.number() });
+export type GeoPoint = z.infer<typeof GeoPointSchema>;
+
 export const LetterFontSchema = z.enum(LETTER_FONTS);
 export const BottleStateSchema = z.enum(BOTTLE_STATES);
 export const JourneyEventTypeSchema = z.enum(JOURNEY_EVENT_TYPES);
@@ -51,6 +56,7 @@ export const ShoreSchema = z.object({
   id: IdSchema,
   name: z.string(),
   position: ChartPointSchema,
+  geo: GeoPointSchema.nullable(),
   capacity: z.number().int().nonnegative(),
 });
 export type ShoreDto = z.infer<typeof ShoreSchema>;
@@ -59,6 +65,7 @@ export const ChartNodeSchema = z.object({
   id: IdSchema,
   kind: z.enum(['shore', 'waypoint', 'island']),
   position: ChartPointSchema,
+  geo: GeoPointSchema.nullable(),
   shoreId: IdSchema.nullable(),
 });
 export const ChartEdgeSchema = z.object({ from: IdSchema, to: IdSchema });
@@ -130,6 +137,7 @@ export const RouteViewSchema = z.object({
   version: z.number().int(),
   nodeIds: z.array(IdSchema),
   points: z.array(ChartPointSchema),
+  geoPoints: z.array(GeoPointSchema).nullable(),
   totalLength: z.number(),
   plannedDurationMs: z.number().int(),
 });
@@ -139,7 +147,12 @@ export const ReleasePreviewResponseSchema = z.object({
   eligible: z.boolean(),
   rejection: z.enum(RELEASE_REJECTIONS).nullable(),
   originShore: ShoreSchema.nullable(),
-  destinationShore: ShoreSchema.pick({ id: true, name: true, position: true }).nullable(),
+  destinationShore: ShoreSchema.pick({
+    id: true,
+    name: true,
+    position: true,
+    geo: true,
+  }).nullable(),
   route: RouteViewSchema.nullable(),
 });
 export type ReleasePreviewResponse = z.infer<typeof ReleasePreviewResponseSchema>;
@@ -163,6 +176,7 @@ export type AgingProfile = z.infer<typeof AgingProfileSchema>;
 
 export const BottlePositionSchema = z.object({
   point: ChartPointSchema,
+  geo: GeoPointSchema.nullable(),
   progress: z.number().min(0).max(1),
   asOf: z.string(),
 });

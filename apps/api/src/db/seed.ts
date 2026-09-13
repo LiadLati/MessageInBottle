@@ -1,4 +1,4 @@
-import { eq } from 'drizzle-orm';
+import { and, eq, isNull } from 'drizzle-orm';
 import { loadConfig } from '../config.js';
 import { createDb, runMigrations, type Db } from './client.js';
 import * as t from './schema.js';
@@ -13,17 +13,48 @@ import {
 import { newId } from '../lib/ids.js';
 import { canonicalPair } from '../services/friends.js';
 
+// Databases created before geographic anchors existed get them filled in without a new graph
+// version: the anchors only add a second coordinate space to the same nodes.
+function backfillGeoAnchors(db: Db): void {
+  db.transaction((tx) => {
+    for (const s of SEED_SHORES) {
+      tx.update(t.shores)
+        .set({ lng: s.lng, lat: s.lat })
+        .where(and(eq(t.shores.id, s.id), isNull(t.shores.lng)))
+        .run();
+    }
+    for (const n of SEED_NODES) {
+      tx.update(t.routeNodes)
+        .set({ lng: n.lng, lat: n.lat })
+        .where(and(eq(t.routeNodes.id, n.id), isNull(t.routeNodes.lng)))
+        .run();
+    }
+  });
+}
+
 export function seedChart(db: Db, capacity: number, now: number): void {
   const existing = db
     .select()
     .from(t.routeGraphVersions)
     .where(eq(t.routeGraphVersions.active, true))
     .get();
-  if (existing) return;
+  if (existing) {
+    backfillGeoAnchors(db);
+    return;
+  }
   db.transaction((tx) => {
     for (const s of SEED_SHORES) {
       tx.insert(t.shores)
-        .values({ id: s.id, name: s.name, chartX: s.x, chartY: s.y, capacity, active: true })
+        .values({
+          id: s.id,
+          name: s.name,
+          chartX: s.x,
+          chartY: s.y,
+          lng: s.lng,
+          lat: s.lat,
+          capacity,
+          active: true,
+        })
         .onConflictDoNothing()
         .run();
     }
@@ -38,6 +69,8 @@ export function seedChart(db: Db, capacity: number, now: number): void {
           shoreId: n.shoreId ?? null,
           chartX: n.x,
           chartY: n.y,
+          lng: n.lng,
+          lat: n.lat,
         })
         .run();
     }

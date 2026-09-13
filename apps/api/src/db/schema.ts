@@ -2,13 +2,15 @@ import {
   index,
   integer,
   primaryKey,
+  real,
   sqliteTable,
   text,
   uniqueIndex,
 } from 'drizzle-orm/sqlite-core';
 
 // All timestamps are epoch milliseconds of *server* time (spec §11 invariant 7).
-// No GPS coordinates are stored anywhere; chart positions are abstract sea-chart units.
+// No user GPS coordinates are stored anywhere. Chart positions are abstract sea-chart units;
+// shores and waypoints additionally carry fictional geographic anchors for the world map.
 
 export const users = sqliteTable('users', {
   id: text('id').primaryKey(),
@@ -70,6 +72,8 @@ export const shores = sqliteTable('shores', {
   name: text('name').notNull(),
   chartX: integer('chart_x').notNull(),
   chartY: integer('chart_y').notNull(),
+  lng: real('lng'),
+  lat: real('lat'),
   capacity: integer('capacity').notNull(),
   active: integer('active', { mode: 'boolean' }).notNull().default(true),
 });
@@ -91,6 +95,8 @@ export const routeNodes = sqliteTable(
     shoreId: text('shore_id').references(() => shores.id),
     chartX: integer('chart_x').notNull(),
     chartY: integer('chart_y').notNull(),
+    lng: real('lng'),
+    lat: real('lat'),
   },
   (t) => [primaryKey({ columns: [t.graphVersion, t.id] })],
 );

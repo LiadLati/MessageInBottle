@@ -17,12 +17,36 @@ decision has been made.
 | Time                | Server `Clock` abstraction (`SystemClock` / `DevClock`) | Spec §11 invariant 7: only server time drives travel. Dev mode persists a forward-only offset so journeys can be advanced deterministically and survive restarts.               |
 | Worker              | In-process interval calling `runJourneyTick`          | Arrival is a pure function of persisted plan + server time, so a missed or repeated tick is harmless. Can be moved to a separate process without code changes.                   |
 | Auth                | Username-only dev sign-in, opaque hashed session tokens | Real identity is out of scope for this stage; the session mechanism (bearer token, hashed at rest, TTL) is the shape the real one will keep.                                    |
-| Geography           | Abstract 1000×600 chart with fictional shore names     | Spec §6: no countries, borders, or GPS anywhere. Shores/waypoints/islands are graph nodes with chart coordinates only. No coordinate ever reaches storage or logs.               |
+| Geography           | Abstract 1000×600 chart with fictional shore names, plus a fictional geographic anchor (lng/lat) per shore/waypoint | Spec §6: no countries, borders, or user GPS anywhere. Routing lengths and durations come from the abstract chart; the anchors exist only so the world map can draw water-only passages off real coastlines. Anchors are app data with invented names — users are never located. |
+| World map           | MapLibre GL JS with a land-only style; bundled Natural Earth 50m land polygons by default | Open source, no credentials, offline. The style has a sea background, land fill and coastline only; `assertNeutralStyle` rejects symbol/label/boundary layers. A licensed vector source can be supplied via `VITE_MIB_MAP_*`. |
+| 3D shore & release  | three.js scene ported from the design handoff's `shore3d.js`, driven from React | Real geometry, refractive glass bottle, displaced water, textured sand/foam/clouds from the handoff. The parent owns the nine-beat release timeline (`seek(t)`), so UI beats and the request lifecycle stay in sync. |
+
+## Design integration (cinematic direction, handoff 2026-09-07)
+
+Every screen is built from three layers that never mix: a **world layer** (MapLibre map or
+three.js scene, `position: absolute; inset: 0`), a **scrim** (non-interactive gradients that
+guarantee contrast) and a **UI layer** (plain DOM glass panels, buttons and nav — never inside the
+GL context, so text scaling, RTL and screen readers work). Tokens from `DESIGN_TOKENS.json` live
+in `apps/web/src/design/tokens.css`; icons and markers from the handoff are in
+`apps/web/src/design/icons.generated.ts` and `apps/web/public/markers`; the sky, sand, foam and
+cloud textures feed the 3D scene from `apps/web/public/textures`.
+
+Rules the integration keeps: the map shows land geometry only; the bottle marker is a DOM element
+with a 44px hit area; the release request and the release animation are independent (the map only
+appears on server commit, a failure rewinds to the sealed letter with the draft intact); parchment
+appears only on letter surfaces; Readable Print changes typeface only; every sequence is skippable
+and has a reduced-motion equivalent; the map SDK and the 3D engine are lazy chunks that never load
+with sign-in.
 
 ## Layering
 
 ```
 apps/web  (UI)            screens/, components/   → talks only to api/client.ts
+  design/                 tokens.css, Icon + generated icon paths from the handoff
+  components/OceanMap     MapLibre world map (routes, trail, anchors, DOM bottle marker)
+  components/ShoreScene   three.js coast / throw scene (ported from handoff shore3d.js)
+  components/ReleaseSequence  nine-beat release timeline over the throw scene
+  lib/mapGeometry         style policy guard + client-side route interpolation (unit-tested)
 @mib/shared (contracts)   DTO schemas, BottleState + transitions, letter + font rules
 apps/api
   http/                   Hono routes: auth, validation, DTO shaping. No business rules.

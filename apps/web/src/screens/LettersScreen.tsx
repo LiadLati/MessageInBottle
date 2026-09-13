@@ -1,18 +1,23 @@
 import { api } from '../api/client.js';
 import { LetterPaper } from '../components/LetterPaper.js';
-import { Empty, ErrorNote, Loading, Screen, StatusPill } from '../components/ui.js';
+import {
+  Avatar,
+  BackButton,
+  DeckScreen,
+  ErrorNote,
+  Skeleton,
+  StatusChip,
+} from '../components/ui.js';
 import { formatDate, formatDuration } from '../lib/format.js';
 import { useAsync } from '../lib/useAsync.js';
 
-export function LettersScreen({
-  passportId,
-  onSelect,
-  onBack,
-}: {
+interface Props {
   passportId: string | null;
   onSelect: (id: string) => void;
   onBack: () => void;
-}) {
+}
+
+export function LettersScreen({ passportId, onSelect, onBack }: Props) {
   if (passportId) return <PassportView key={passportId} id={passportId} onBack={onBack} />;
   return <SentHistory onSelect={onSelect} />;
 }
@@ -21,29 +26,37 @@ function SentHistory({ onSelect }: { onSelect: (id: string) => void }) {
   const sent = useAsync(() => api.sentBottles(), []);
   const list = sent.data?.bottles ?? [];
   return (
-    <Screen title="My Letters · Sent">
-      {sent.loading ? (
-        <Loading />
+    <DeckScreen title="Letters" subtitle="Everything you have sent, with its fate">
+      {sent.loading && !sent.data ? (
+        <Skeleton />
       ) : list.length === 0 ? (
-        <Empty>Nothing sent yet.</Empty>
+        <div className="glass-panel stack">
+          <h2 className="t-display-sm">Nothing sent yet</h2>
+          <p className="secondary">Your sent bottles and their passports will gather here.</p>
+        </div>
       ) : (
         <ul className="list">
           {list.map((b) => (
             <li key={b.id}>
-              <button className="list-item as-button" onClick={() => onSelect(b.id)}>
-                <span>
-                  <strong>To {b.recipient.displayName}</strong>
-                  <span className="muted small block">{formatDate(b.releasedAt)}</span>
+              <button type="button" className="row-item selectable" onClick={() => onSelect(b.id)}>
+                <Avatar name={b.recipient.displayName} tone="foam" />
+                <span className="grow">
+                  <span className="t-card-title" style={{ display: 'block' }}>
+                    To {b.recipient.displayName}
+                  </span>
+                  <span className="t-meta">
+                    Released {formatDate(b.releasedAt)} · {formatDuration(b.elapsedMs)}
+                  </span>
                 </span>
-                <StatusPill state={b.state} />
+                <StatusChip state={b.state} />
               </button>
             </li>
           ))}
         </ul>
       )}
-      <p className="muted small">Received archive is proposed (D04) and not part of this stage.</p>
+      <p className="t-meta">A private received archive is a proposed later stage.</p>
       <ErrorNote error={sent.error} />
-    </Screen>
+    </DeckScreen>
   );
 }
 
@@ -51,60 +64,73 @@ function PassportView({ id, onBack }: { id: string; onBack: () => void }) {
   const res = useAsync(() => api.sentBottle(id), [id], 15_000);
   const b = res.data?.bottle;
   return (
-    <Screen
-      title="Bottle passport"
-      actions={
-        <button className="btn small" onClick={onBack}>
-          Back
-        </button>
-      }
-    >
+    <DeckScreen title="Bottle passport" actions={<BackButton onClick={onBack} />}>
       {res.loading || !b ? (
-        <Loading />
+        <Skeleton />
       ) : (
         <>
-          <div className="row space-between">
-            <strong>To {b.recipient.displayName}</strong>
-            <StatusPill state={b.state} />
+          <div className="glass-panel stack">
+            <div className="row between">
+              <div className="row">
+                <Avatar name={b.recipient.displayName} tone="foam" />
+                <div>
+                  <div className="t-card-title">To {b.recipient.displayName}</div>
+                  <div className="t-meta">
+                    {b.originShore.name} → {b.destinationShore.name}
+                  </div>
+                </div>
+              </div>
+              <StatusChip state={b.state} />
+            </div>
+            <dl className="passport-grid">
+              <dt>Released</dt>
+              <dd>{formatDate(b.releasedAt)}</dd>
+              <dt>{b.elapsedIsLive ? 'At sea for' : 'Total voyage'}</dt>
+              <dd>{formatDuration(b.elapsedMs)}</dd>
+              <dt>Passages</dt>
+              <dd>{Math.max(1, b.route.nodeIds.length - 1)}</dd>
+              <dt>Storms</dt>
+              <dd>None</dd>
+              {b.deliveredAt ? (
+                <>
+                  <dt>Arrived</dt>
+                  <dd>{formatDate(b.deliveredAt)}</dd>
+                </>
+              ) : null}
+              {b.openedAt ? (
+                <>
+                  <dt>Opened</dt>
+                  <dd>{formatDate(b.openedAt)}</dd>
+                </>
+              ) : null}
+            </dl>
+            {b.state === 'delivered' ? (
+              <p className="t-meta">
+                Waiting for {b.recipient.displayName} to open it. Your words stay sealed until then.
+              </p>
+            ) : null}
           </div>
-          <dl className="passport">
-            <dt>Released</dt>
-            <dd>{formatDate(b.releasedAt)}</dd>
-            <dt>Origin shore</dt>
-            <dd>{b.originShore.name}</dd>
-            <dt>Destination shore</dt>
-            <dd>{b.destinationShore.name}</dd>
-            <dt>Elapsed</dt>
-            <dd>
-              {formatDuration(b.elapsedMs)} {b.elapsedIsLive ? '(live)' : '(completed)'}
-            </dd>
-            {b.deliveredAt ? (
-              <>
-                <dt>Arrived</dt>
-                <dd>{formatDate(b.deliveredAt)}</dd>
-              </>
-            ) : null}
-            {b.openedAt ? (
-              <>
-                <dt>Opened</dt>
-                <dd>{formatDate(b.openedAt)}</dd>
-              </>
-            ) : null}
-          </dl>
-          <h2>Journey history</h2>
-          <ol className="timeline">
-            {b.events.map((e) => (
-              <li key={e.seq}>
-                <span className="muted small">{formatDate(e.occurredAt)}</span> {eventLabel(e.type)}
-              </li>
-            ))}
-          </ol>
-          <h2>Your letter</h2>
+          <div className="glass-panel stack">
+            <h2 className="t-label">Journey history</h2>
+            <ol className="timeline">
+              {b.events.map((e) => (
+                <li key={e.seq}>
+                  <span>
+                    <span className="t-meta" style={{ display: 'block' }}>
+                      {formatDate(e.occurredAt)}
+                    </span>
+                    {eventLabel(e.type)}
+                  </span>
+                </li>
+              ))}
+            </ol>
+          </div>
+          <h2 className="section-title">Your letter</h2>
           <LetterPaper text={b.letter.text} font={b.letter.font} />
         </>
       )}
       <ErrorNote error={res.error} />
-    </Screen>
+    </DeckScreen>
   );
 }
 

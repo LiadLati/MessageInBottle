@@ -9,6 +9,7 @@ function seedGraph() {
     kind: n.kind,
     shoreId: n.shoreId ?? null,
     position: { x: n.x, y: n.y },
+    geo: { lng: n.lng, lat: n.lat },
   }));
   const edges = SEED_EDGES.map(([from, to]) => ({
     from,
@@ -51,6 +52,7 @@ describe('connected maritime routing (spec §6.3, §18 #5)', () => {
       kind: 'shore',
       shoreId: 'shore_lonely',
       position: { x: 1, y: 1 },
+      geo: null,
     });
     graph.adjacency.set('n_lonely', []);
     expect(planRoute(graph, 'shore_lantern_cove', 'shore_lonely')).toBeNull();

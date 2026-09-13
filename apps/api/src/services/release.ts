@@ -12,6 +12,7 @@ import * as t from '../db/schema.js';
 import { DISCLOSURE_VERSION } from '../config.js';
 import {
   journeyDurationMs,
+  pathGeoPoints,
   pathPoints,
   planRoute,
   type PlannedPath,
@@ -19,7 +20,7 @@ import {
 } from '../domain/routing.js';
 import { newId, sha256 } from '../lib/ids.js';
 import { AppError, conflict } from '../lib/errors.js';
-import { getShore, loadActiveGraph, toShoreDto } from './chart.js';
+import { geoOf, getShore, loadActiveGraph, toShoreDto } from './chart.js';
 import type { AppContext, AuthUser } from './context.js';
 import { areAcceptedFriends, isBlockedEitherWay } from './friends.js';
 
@@ -123,6 +124,7 @@ export function routeView(
     version,
     nodeIds: path.nodeIds,
     points: pathPoints(graph, path.nodeIds),
+    geoPoints: pathGeoPoints(graph, path.nodeIds),
     totalLength: path.totalLength,
     plannedDurationMs,
   };
@@ -153,7 +155,12 @@ export function previewRelease(
     rejection: result.ok ? null : result.rejection,
     originShore: partial.originShore ? toShoreDto(partial.originShore) : null,
     destinationShore: dest
-      ? { id: dest.id, name: dest.name, position: { x: dest.chartX, y: dest.chartY } }
+      ? {
+          id: dest.id,
+          name: dest.name,
+          position: { x: dest.chartX, y: dest.chartY },
+          geo: geoOf(dest),
+        }
       : null,
     route,
   };

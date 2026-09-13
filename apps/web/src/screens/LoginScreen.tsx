@@ -22,33 +22,54 @@ export function LoginScreen() {
   };
 
   return (
-    <main className="app-shell login">
-      <h1>Message in a Bottle</h1>
-      <p className="lede">
-        Write to someone you know. Seal it, throw it into the sea, and follow its uncertain journey
-        to their shore.
-      </p>
-      <form onSubmit={submit} className="stack">
-        <label className="field">
-          <span>Username (development sign-in)</span>
-          <input
-            autoFocus
-            autoCapitalize="none"
-            autoComplete="username"
-            value={username}
-            onChange={(e) => setUsername(e.target.value)}
-            placeholder="ada, bo, cy, dee or a new name"
-          />
-        </label>
-        <button className="btn primary" disabled={busy || username.trim().length < 2}>
-          {busy ? 'Signing in…' : 'Sign in'}
-        </button>
-        <ErrorNote error={error} />
-      </form>
-      <p className="muted small">
-        A shore is an app anchor, not a real location. No GPS is collected. Letters may be lost at
-        sea.
-      </p>
+    <main className="login-screen">
+      <div
+        className="world-layer"
+        aria-hidden
+        style={{
+          backgroundImage: 'url(/textures/sky-dusk-equirect-1024x512.png)',
+          backgroundSize: 'cover',
+          backgroundPosition: 'center 40%',
+          opacity: 0.9,
+        }}
+      />
+      <div
+        className="scrim"
+        style={{ background: 'linear-gradient(rgba(6,18,27,.15), rgba(6,18,27,.92) 62%)' }}
+      />
+      <div className="login-card">
+        <div className="brand">
+          <img src="/brand/app-symbol.svg" alt="" />
+          <span className="t-eyebrow">Slow correspondence</span>
+        </div>
+        <h1 className="t-display">Message in a Bottle</h1>
+        <p className="secondary">
+          Write to someone you know. Seal the letter, throw it into the sea, and follow its
+          uncertain journey toward their shore.
+        </p>
+        <form onSubmit={submit} className="stack">
+          <label className="field">
+            <span className="t-label">Username</span>
+            <input
+              className="input"
+              autoFocus
+              autoCapitalize="none"
+              autoComplete="username"
+              value={username}
+              onChange={(e) => setUsername(e.target.value)}
+              placeholder="ada, bo, cy — or a new name"
+            />
+          </label>
+          <button className="btn-primary" disabled={busy || username.trim().length < 2}>
+            {busy ? 'Signing in…' : 'Sign in'}
+          </button>
+          <ErrorNote error={error} />
+        </form>
+        <p className="t-meta">
+          Development sign-in: any username works. A shore is an app anchor, not a real location —
+          no GPS is ever collected. Letters can strand or be lost.
+        </p>
+      </div>
     </main>
   );
 }

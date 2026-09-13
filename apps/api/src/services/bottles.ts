@@ -10,9 +10,16 @@ import {
   type ShoreResponse,
 } from '@mib/shared';
 import * as t from '../db/schema.js';
-import { pathPoints, pointAlongPath, plannedArrivalAt, progressAt } from '../domain/routing.js';
+import {
+  geoPointAlongPath,
+  pathGeoPoints,
+  pathPoints,
+  pointAlongPath,
+  plannedArrivalAt,
+  progressAt,
+} from '../domain/routing.js';
 import { conflict, notFound } from '../lib/errors.js';
-import { loadActiveGraph, toShoreDto } from './chart.js';
+import { geoOf, loadActiveGraph, toShoreDto } from './chart.js';
 import type { AppContext, AuthUser } from './context.js';
 import { activePlan, appendEvent, releaseCapacityOnce, transitionBottle } from './journey.js';
 
@@ -37,6 +44,7 @@ function graphForPlan(ctx: AppContext, plan: PlanRow) {
         kind: n.kind,
         shoreId: n.shoreId,
         position: { x: n.chartX, y: n.chartY },
+        geo: geoOf(n),
       });
     }
   }
@@ -51,6 +59,7 @@ function sentSummary(
 ): SentBottleSummaryDto {
   const graph = graphForPlan(ctx, plan);
   const points = pathPoints(graph, plan.nodeIds);
+  const geoPoints = pathGeoPoints(graph, plan.nodeIds);
   const progress = bottle.state === 'at_sea' ? progressAt(plan, now) : 1;
   // Elapsed time freezes when the journey completes at opening (spec §7, §10.3).
   const completedAt = bottle.completedAt ?? bottle.openedAt;
@@ -72,10 +81,16 @@ function sentSummary(
       version: plan.planVersion,
       nodeIds: plan.nodeIds,
       points,
+      geoPoints,
       totalLength: plan.totalLength,
       plannedDurationMs: plan.plannedDurationMs,
     },
-    position: { point: pointAlongPath(points, progress), progress, asOf: iso(now) },
+    position: {
+      point: pointAlongPath(points, progress),
+      geo: geoPoints ? geoPointAlongPath(geoPoints, progress) : null,
+      progress,
+      asOf: iso(now),
+    },
     serverTime: iso(now),
   };
 }

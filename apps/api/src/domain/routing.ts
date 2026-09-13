@@ -1,4 +1,4 @@
-import type { ChartPoint } from '@mib/shared';
+import type { ChartPoint, GeoPoint } from '@mib/shared';
 
 export type NodeKind = 'shore' | 'waypoint' | 'island';
 
@@ -7,6 +7,7 @@ export interface GraphNode {
   kind: NodeKind;
   shoreId: string | null;
   position: ChartPoint;
+  geo: GeoPoint | null;
 }
 
 export interface GraphEdge {
@@ -114,6 +115,26 @@ export function pathPoints(graph: RouteGraph, nodeIds: string[]): ChartPoint[] {
     if (!node) throw new Error(`route references unknown node ${id}`);
     return node.position;
   });
+}
+
+// Geographic polyline of a planned path; null when any node lacks an anchor (legacy graphs).
+export function pathGeoPoints(graph: RouteGraph, nodeIds: string[]): GeoPoint[] | null {
+  const out: GeoPoint[] = [];
+  for (const id of nodeIds) {
+    const node = graph.nodes.get(id);
+    if (!node?.geo) return null;
+    out.push(node.geo);
+  }
+  return out;
+}
+
+// Same interpolation as pointAlongPath, in lng/lat degree space (adequate at ocean scale).
+export function geoPointAlongPath(points: GeoPoint[], progress: number): GeoPoint {
+  const p = pointAlongPath(
+    points.map((g) => ({ x: g.lng, y: g.lat })),
+    progress,
+  );
+  return { lng: p.x, lat: p.y };
 }
 
 function segmentLength(a: ChartPoint, b: ChartPoint): number {
