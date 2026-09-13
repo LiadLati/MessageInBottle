@@ -1,9 +1,13 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 
+// 127.0.0.1 rather than localhost on purpose: since Node 17 the resolver order is no longer
+// reordered, so on some systems (Windows in particular) `localhost` resolves to ::1 first and a
+// proxy hop can fail even though the API is running. The API binds dual-stack, so the explicit
+// IPv4 address always reaches it. Override with MIB_API_URL when the API lives elsewhere.
 const apiProxy = {
   '/api': {
-    target: process.env.MIB_API_URL ?? 'http://localhost:3001',
+    target: process.env.MIB_API_URL ?? 'http://127.0.0.1:3001',
     changeOrigin: true,
   },
 };

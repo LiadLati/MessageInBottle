@@ -1,6 +1,6 @@
 import { useId, useState, type FormEvent } from 'react';
 import { confirmationProblem, emailProblem, passwordProblem, usernameProblem } from '@mib/shared';
-import { ApiError, api } from '../api/client.js';
+import { ApiError, UNREACHABLE, api } from '../api/client.js';
 import { Icon } from '../design/Icon.js';
 import { useSession } from '../state/session.js';
 
@@ -16,6 +16,7 @@ interface Props {
 // purpose (the server never says whether the username or address exists).
 function describeFailure(err: unknown, mode: Mode): string {
   if (err instanceof ApiError) {
+    if (err.code === UNREACHABLE) return err.message;
     if (err.status === 401) return 'Incorrect username or password.';
     if (err.code === 'username_taken') return 'That username is already taken. Choose another.';
     if (err.code === 'email_taken') return 'That email is already registered. Sign in instead.';
@@ -29,7 +30,7 @@ function describeFailure(err: unknown, mode: Mode): string {
         : 'Too many attempts. Try again in a few minutes.';
     }
     if (err.status === 400) return 'Please check the fields and try again.';
-    if (err.status >= 500) return 'The sea is unreachable right now. Try again in a moment.';
+    if (err.status >= 500) return 'Something went wrong on the server. Try again in a moment.';
     return err.message;
   }
   const what =

@@ -1,4 +1,4 @@
-import nodemailer, { type Transporter } from 'nodemailer';
+import type { Transporter } from 'nodemailer';
 import type { MailConfig } from '../config.js';
 
 export interface MailMessage {
@@ -29,20 +29,43 @@ export class OutboxMailer implements Mailer {
   }
 }
 
+// SMTP is the only provider that needs a mail library, so nodemailer is loaded the first time a
+// message is actually sent. Nothing about starting the API depends on it: a deployment using the
+// development outbox or no mail at all boots with the package absent, and a missing or broken
+// install can never take the whole server down (it would strand the web app on a dead proxy).
 export class SmtpMailer implements Mailer {
   readonly kind = 'smtp' as const;
-  private readonly transport: Transporter;
+  private transport: Transporter | null = null;
   constructor(private readonly config: MailConfig) {
+    // Configuration errors are still reported at startup, where they can be acted on.
     if (!config.smtp.host) throw new Error('MIB_SMTP_HOST is required for the smtp mail provider');
-    this.transport = nodemailer.createTransport({
-      host: config.smtp.host,
-      port: config.smtp.port,
-      secure: config.smtp.secure,
-      auth: config.smtp.user ? { user: config.smtp.user, pass: config.smtp.pass } : undefined,
-    });
   }
+
+  private async connect(): Promise<Transporter> {
+    if (this.transport) return this.transport;
+    let createTransport;
+    try {
+      ({ createTransport } = await import('nodemailer'));
+    } catch (cause) {
+      throw new Error(
+        'the smtp mail provider needs the "nodemailer" package; run `pnpm install` or set MIB_MAIL_PROVIDER=disabled',
+        { cause },
+      );
+    }
+    this.transport = createTransport({
+      host: this.config.smtp.host,
+      port: this.config.smtp.port,
+      secure: this.config.smtp.secure,
+      auth: this.config.smtp.user
+        ? { user: this.config.smtp.user, pass: this.config.smtp.pass }
+        : undefined,
+    });
+    return this.transport;
+  }
+
   async send(message: MailMessage): Promise<void> {
-    await this.transport.sendMail({ from: this.config.from, ...message });
+    const transport = await this.connect();
+    await transport.sendMail({ from: this.config.from, ...message });
   }
 }
 

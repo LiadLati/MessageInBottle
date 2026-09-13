@@ -38,6 +38,11 @@ pnpm db:reset               # create ./apps/api/data/mib.sqlite, apply migration
 pnpm dev                    # API on http://localhost:3001, web on http://localhost:5173
 ```
 
+**After pulling changes, run `pnpm install` again** before `pnpm dev`: new dependencies and
+migrations arrive with the code, and the API applies pending migrations to the existing database
+on start (it is never reset). `pnpm dev` runs two processes; the web half keeps working even if
+the API half fails, so read the API's output when something is wrong.
+
 Open http://localhost:5173 on a phone-sized viewport (the layout also supports desktop, where the
 navigation becomes a left rail and world screens split into map/scene + side pane). Create an
 account with a username and a password (8+ characters), or sign in as one of the seeded
@@ -109,6 +114,19 @@ set in `apps/web/.env` (see `.env.example`):
 
 Only that one layer is ever drawn; `assertNeutralStyle` refuses any style containing symbol
 (label) layers or administrative/boundary/place source layers before the map is created.
+
+### If the app says it cannot reach the server
+
+Sign-in (and every other action) reports `Cannot reach the Message in a Bottle server` when the
+API is not answering. The web dev server proxies `/api` to `http://localhost:3001`, and when
+nothing is listening there it replies `500` with an empty body — the app now names that case
+instead of blaming the request. Check, in order:
+
+1. The API half of `pnpm dev`. On a startup failure it prints a framed message naming the cause
+   and the fix; the most common one after pulling is a missing dependency, cured by `pnpm install`.
+2. `curl http://localhost:3001/api/health` — a healthy API answers `{"ok":true,...}`.
+3. Nothing else already occupying port 3001 (the API reports `EADDRINUSE` if so; start it with a
+   different `MIB_PORT`, and point the web app at it with `MIB_API_URL`).
 
 ## API overview
 

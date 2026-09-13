@@ -4,7 +4,7 @@ import { RESET_TOKEN_TTL_MS } from '@mib/shared';
 import { createApp } from './app.js';
 import { FORGOT_PER_EMAIL } from './routes/auth.js';
 import * as t from '../db/schema.js';
-import { DisabledMailer, createMailer } from '../lib/mail.js';
+import { DisabledMailer, OutboxMailer, SmtpMailer, createMailer } from '../lib/mail.js';
 import { sha256 } from '../lib/ids.js';
 import { createTestWorld, testConfig } from '../test/harness.js';
 
@@ -145,6 +145,22 @@ describe('password recovery', () => {
 });
 
 describe('mail configuration', () => {
+  it('builds every provider without loading a mail library', () => {
+    // Starting the API must never depend on nodemailer: only an actual SMTP send does. A hard
+    // import here would take the whole server down when the package is missing or unbuilt, and
+    // the web app would then show every request as a server it cannot reach.
+    const base = testConfig().mail;
+    expect(createMailer({ ...base, provider: 'outbox' })).toBeInstanceOf(OutboxMailer);
+    expect(createMailer({ ...base, provider: 'disabled' })).toBeInstanceOf(DisabledMailer);
+    const smtp = createMailer({
+      ...base,
+      provider: 'smtp',
+      smtp: { ...base.smtp, host: 'smtp.example.com' },
+    });
+    expect(smtp).toBeInstanceOf(SmtpMailer);
+    expect(smtp.kind).toBe('smtp');
+  });
+
   it('never allows the development outbox outside dev mode and drops mail when disabled', async () => {
     const prod = testConfig({ devMode: false });
     expect(createMailer({ ...prod.mail, provider: 'disabled' })).toBeInstanceOf(DisabledMailer);
