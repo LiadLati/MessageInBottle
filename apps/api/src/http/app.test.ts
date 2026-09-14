@@ -65,27 +65,27 @@ describe('HTTP surface', () => {
     expect(sent.bottles).toEqual([]);
   });
 
-  it('chart responses list shores with app anchors and dataset attribution, never people', async () => {
+  it('chart responses list shores with app anchors and seas, never people or country names', async () => {
     const w = createTestWorld();
     const app = createApp(w.ctx);
     const ada = await login(app, 'ada');
     const res = await app.request('/api/chart', { headers: auth(ada.token) });
     const text = await res.text();
-    // No user data, no device location, no route graph internals.
-    expect(text).not.toMatch(/gps|user|flag|"nodes"|"edges"/i);
+    // No user data, no device location, no route graph internals, no country attribution.
+    expect(text).not.toMatch(/gps|user|flag|"nodes"|"edges"|country/i);
+    for (const name of ['Portugal', 'Germany', 'France', 'United States of America', 'Russia'])
+      expect(text, name).not.toContain(name);
     const chart = JSON.parse(text) as {
       graphVersion: number;
-      shores: Array<{
-        id: string;
-        geo: { lng: number; lat: number } | null;
-        country: string | null;
-      }>;
+      shores: Array<{ id: string; geo: { lng: number; lat: number } | null; sea: string | null }>;
     };
     expect(chart.graphVersion).toBe(2);
-    // Every anchor is a named app shore; catalogue shores carry the dataset's country name.
-    for (const s of chart.shores) expect(s.geo).not.toBeNull();
-    expect(chart.shores.find((s) => s.id === 'shore_lantern_cove')!.country).toBeNull();
-    expect(chart.shores.find((s) => s.id === 'shore_jp_tokyo')!.country).toBe('Japan');
+    for (const s of chart.shores) {
+      expect(s.geo).not.toBeNull();
+      expect(Object.keys(s).sort()).toEqual(['capacity', 'geo', 'id', 'name', 'position', 'sea']);
+    }
+    expect(chart.shores.find((s) => s.id === 'shore_lantern_cove')!.sea).toBeNull();
+    expect(chart.shores.find((s) => s.id === 'shore_jp_tokyo')!.sea).toBe('Tokyo Bay');
     expect(chart.shores.length).toBeGreaterThan(300);
   });
 

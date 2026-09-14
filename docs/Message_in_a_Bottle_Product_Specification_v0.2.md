@@ -144,7 +144,7 @@ Shore catalog (decided 2026-09-14): the catalog is global. Every coastal country
 - Show recognizable land masses, coastlines, seas, oceans, islands, and virtual shores.
 - Amended 2026-09-14 (supersedes the earlier “no political borders” decision): show country borders as thin, understated lines from a bundled, offline, credential-free dataset (Natural Earth Admin 0, 1:50m, public domain, packaged by `world-atlas` under ISC) on both the Ocean map and Choose-Your-Shore. Borders are line work only, drawn beneath routes, bottle markers and shore markers.
 - Do not show country or city name labels, flags, or political territory fills on the map. Apply this policy to base-map tiles, zoom levels, legends, and accessibility labels—not just custom overlays.
-- Shore names are real harbour names; each shore also carries the dataset's country name and its sea for search and for the shore card. Country names never appear as map labels.
+- Country names are intentionally hidden everywhere in the user-facing application (decided 2026-09-14): borders are visible, names are not. Shore cards, lists, search results, counts, popups and accessibility labels show only the harbour name and its sea or ocean; search matches harbour name and sea only; the client API never receives a country field. Country attribution is kept server-side for geographic validation, the coverage report and routing.
 - No user-location dots or GPS tracks appear on either map.
 
 ### 6.3 Connected maritime routing
@@ -448,7 +448,7 @@ Confirmed behavior and proposed safeguards to verify once the relevant decisions
 1. Sender selects a friend; self-send is rejected and repeat sends to that friend are supported.
 2. Release fails safely for invalid recipients, blocks, full capacity, unsupported routes, or rejected content; the draft remains intact.
 3. Retried release creates exactly one bottle and one reservation.
-4. Manual shore selection works without GPS. No user coordinates appear in any response; shore anchors and the dataset's country name are app data. Country borders render as thin lines only, with no name labels (amended 2026-09-14).
+4. Manual shore selection works without GPS. No user coordinates appear in any response; shore anchors and the dataset's country name are app data. Country borders render as thin lines only; country names appear nowhere in the UI or client API (amended 2026-09-14).
 5. Every route and island deviation stays in the connected sea graph, including date-line and same-shore cases.
 6. Sender sees dashed destination route, current simulated position, elapsed time, and all their outgoing history.
 7. Recipient cannot retrieve the incoming bottle or receive prearrival alerts through any ordinary endpoint.

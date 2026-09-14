@@ -23,6 +23,7 @@ import { prefersReducedMotion } from '../lib/format.js';
 import {
   assertMapStylePolicy,
   boundsOf,
+  clusterPins,
   geoAlong,
   interpolatedProgress,
   lineFeature,
@@ -223,68 +224,79 @@ export function OceanMap({
     const keep = new Set<string>();
     if (pins) {
       const zoom = map.getZoom();
-      const projected = as.map((a) => ({ a, p: map.project([a.geo.lng, a.geo.lat]) }));
-      const clusters: Array<{ members: MapAnchor[]; x: number; y: number }> = [];
-      for (const { a, p } of projected) {
-        const near = clusters.find((c) => Math.hypot(c.x - p.x, c.y - p.y) < CLUSTER_PX);
-        if (near) {
-          near.members.push(a);
-          near.x = (near.x * (near.members.length - 1) + p.x) / near.members.length;
-          near.y = (near.y * (near.members.length - 1) + p.y) / near.members.length;
-        } else clusters.push({ members: [a], x: p.x, y: p.y });
-      }
+      const projected = as.map((a) => {
+        const p = map.project([a.geo.lng, a.geo.lat]);
+        return { item: a, x: p.x, y: p.y };
+      });
+      const clusters = clusterPins(projected, zoom, MAX_ZOOM, CLUSTER_PX);
       for (const c of clusters) {
-        const single = c.members.length === 1 ? c.members[0]! : null;
-        const key = single
-          ? single.id
-          : `cluster:${c.members
-              .map((m) => m.id)
-              .sort()
-              .join('|')}`;
-        keep.add(key);
-        let m = anchorMarkersRef.current.get(key);
-        if (!m) {
-          const el = document.createElement('button');
-          el.type = 'button';
-          if (single) {
-            el.className = 'map-shore-pin';
-            el.innerHTML = `<span class="dot"></span><span class="label"></span>`;
-            el.addEventListener('click', (ev) => {
-              ev.stopPropagation();
-              latest.current.onSelectAnchor?.(single.id);
-            });
-          } else {
+        if (c.members.length > 1 && c.offsets.length === 0) {
+          // A real cluster: zooming in will separate it.
+          const key = `cluster:${c.members
+            .map((m) => m.id)
+            .sort()
+            .join('|')}`;
+          keep.add(key);
+          let m = anchorMarkersRef.current.get(key);
+          if (!m) {
+            const el = document.createElement('button');
+            el.type = 'button';
             el.className = 'map-shore-cluster';
             el.textContent = String(c.members.length);
-            el.setAttribute('aria-label', `${c.members.length} shores, tap to zoom in`);
-            const center = map.unproject([c.x, c.y]);
+            el.setAttribute('aria-label', `${c.members.length} shores, activate to zoom in`);
             el.addEventListener('click', (ev) => {
               ev.stopPropagation();
               map.easeTo({
-                center,
+                center: m!.getLngLat(),
                 zoom: Math.min(MAX_ZOOM, map.getZoom() + 1.6),
                 duration: reduced ? 0 : 500,
               });
             });
+            m = new Marker({ element: el, anchor: 'center' })
+              .setLngLat(map.unproject([c.x, c.y]))
+              .addTo(map);
+            anchorMarkersRef.current.set(key, m);
+          } else m.setLngLat(map.unproject([c.x, c.y]));
+          continue;
+        }
+        // Single pins, or a spread ring of pins that zooming could not separate. Each pin keeps
+        // its real coordinate; only the marker's screen offset moves.
+        c.members.forEach((member, i) => {
+          const offset = c.offsets[i] ?? [0, 0];
+          keep.add(member.id);
+          let m = anchorMarkersRef.current.get(member.id);
+          if (!m) {
+            const el = document.createElement('button');
+            el.type = 'button';
+            el.className = 'map-shore-pin';
+            el.innerHTML = `<span class="leg"></span><span class="dot"></span><span class="label"></span>`;
+            el.addEventListener('click', (ev) => {
+              ev.stopPropagation();
+              latest.current.onSelectAnchor?.(member.id);
+            });
+            m = new Marker({ element: el, anchor: 'top' })
+              .setLngLat([member.geo.lng, member.geo.lat])
+              .addTo(map);
+            anchorMarkersRef.current.set(member.id, m);
           }
-          const lngLat = single
-            ? [single.geo.lng, single.geo.lat]
-            : map.unproject([c.x, c.y]).toArray();
-          m = new Marker({ element: el, anchor: single ? 'top' : 'center' })
-            .setLngLat(lngLat as [number, number])
-            .addTo(map);
-          anchorMarkersRef.current.set(key, m);
-        } else if (!single) {
-          m.setLngLat(map.unproject([c.x, c.y]));
-        }
-        if (single) {
+          m.setOffset(offset);
           const el = m.getElement();
-          el.querySelector('.label')!.textContent = single.name;
-          el.setAttribute('aria-label', `Shore: ${single.name}`);
-          el.setAttribute('aria-pressed', String(single.id === sel));
-          el.classList.toggle('selected', single.id === sel);
-          el.classList.toggle('compact', zoom < LABEL_ZOOM && single.id !== sel);
-        }
+          const spread = c.offsets.length > 0;
+          el.classList.toggle('spread', spread);
+          // Leg from the dot back to the real position, so the offset reads as a pointer.
+          const leg = el.querySelector<HTMLElement>('.leg')!;
+          if (spread) {
+            const dx = -offset[0];
+            const dy = -offset[1] - 6;
+            leg.style.height = `${Math.round(Math.hypot(dx, dy))}px`;
+            leg.style.transform = `rotate(${Math.atan2(-dx, dy) * (180 / Math.PI)}deg)`;
+          }
+          el.querySelector('.label')!.textContent = member.name;
+          el.setAttribute('aria-label', `Shore: ${member.name}`);
+          el.setAttribute('aria-pressed', String(member.id === sel));
+          el.classList.toggle('selected', member.id === sel);
+          el.classList.toggle('compact', zoom < LABEL_ZOOM && member.id !== sel && !spread);
+        });
       }
     }
     for (const [id, m] of anchorMarkersRef.current) {

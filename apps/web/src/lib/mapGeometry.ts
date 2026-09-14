@@ -127,3 +127,64 @@ export function boundsOf(points: GeoPoint[]): Bounds | null {
     [maxLng, maxLat],
   ];
 }
+
+// ---------- shore pin clustering ----------
+export interface PinPoint<T> {
+  item: T;
+  x: number;
+  y: number;
+}
+export interface PinCluster<T> {
+  members: T[];
+  x: number;
+  y: number;
+  // Screen offset per member when the cluster is spread ("spiderfied") because zooming can no
+  // longer separate its harbours; empty for a real cluster or a single pin.
+  offsets: Array<[number, number]>;
+}
+
+// Greedy screen-space clustering. A cluster only survives while zooming in could still pull
+// its members `clusterPx` apart before `maxZoom`; otherwise (harbours a few km apart, e.g. the
+// two sides of one gulf) it dissolves into a ring of offset pins around the real position, so
+// every harbour stays individually visible and selectable. Offsets are purely visual.
+export function clusterPins<T>(
+  points: Array<PinPoint<T>>,
+  zoom: number,
+  maxZoom: number,
+  clusterPx: number,
+): Array<PinCluster<T>> {
+  const groups: Array<{ points: Array<PinPoint<T>>; x: number; y: number }> = [];
+  for (const pt of points) {
+    const near = groups.find((g) => Math.hypot(g.x - pt.x, g.y - pt.y) < clusterPx);
+    if (near) {
+      near.points.push(pt);
+      near.x = (near.x * (near.points.length - 1) + pt.x) / near.points.length;
+      near.y = (near.y * (near.points.length - 1) + pt.y) / near.points.length;
+    } else groups.push({ points: [pt], x: pt.x, y: pt.y });
+  }
+  const scale = Math.pow(2, Math.max(0, maxZoom - zoom));
+  return groups.map((g) => {
+    const members = g.points.map((p) => p.item);
+    if (members.length === 1) return { members, x: g.x, y: g.y, offsets: [] };
+    // Would the two farthest members be apart at max zoom? Then zooming still helps.
+    let spread = 0;
+    for (let i = 0; i < g.points.length; i++)
+      for (let j = i + 1; j < g.points.length; j++) {
+        const a = g.points[i]!;
+        const b = g.points[j]!;
+        spread = Math.max(spread, Math.hypot(a.x - b.x, a.y - b.y));
+      }
+    const atMax = zoom >= maxZoom - 0.05;
+    if (!atMax && spread * scale >= clusterPx) return { members, x: g.x, y: g.y, offsets: [] };
+    return { members, x: g.x, y: g.y, offsets: spreadOffsets(members.length) };
+  });
+}
+
+// Ring offsets (px) for n pins around their shared position, starting at the top.
+export function spreadOffsets(n: number): Array<[number, number]> {
+  const radius = 26 + 6 * Math.max(0, n - 2);
+  return Array.from({ length: n }, (_, i) => {
+    const angle = -Math.PI / 2 + (2 * Math.PI * i) / n;
+    return [Math.round(Math.cos(angle) * radius), Math.round(Math.sin(angle) * radius)];
+  });
+}

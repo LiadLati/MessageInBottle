@@ -59,9 +59,8 @@ export const ShoreSchema = z.object({
   position: ChartPointSchema,
   geo: GeoPointSchema.nullable(),
   capacity: z.number().int().nonnegative(),
-  // Real-world attribution of catalogue shores (dataset country name, body of water); null on
-  // the original fictional shores. Never a user's location.
-  country: z.string().nullable(),
+  // Body of water of a catalogue shore; null on the original fictional shores. Country names
+  // are deliberately never sent to clients (spec §6.2): borders are drawn, names are not.
   sea: z.string().nullable(),
 });
 export type ShoreDto = z.infer<typeof ShoreSchema>;

@@ -64,7 +64,6 @@ export function toShoreDto(row: typeof t.shores.$inferSelect): ShoreDto {
     position: { x: row.chartX, y: row.chartY },
     geo: geoOf(row),
     capacity: row.capacity,
-    country: row.countryName,
     sea: row.sea,
   };
 }

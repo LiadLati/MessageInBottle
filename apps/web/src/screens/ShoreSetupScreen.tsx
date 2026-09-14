@@ -6,6 +6,7 @@ import type { MapAnchor } from '../components/OceanMap.js';
 import { ErrorNote, Skeleton } from '../components/ui.js';
 import { Icon } from '../design/Icon.js';
 import { useAsync } from '../lib/useAsync.js';
+import { describeShore, matchesShore } from '../lib/shores.js';
 import { useSession } from '../state/session.js';
 
 interface Props {
@@ -13,25 +14,9 @@ interface Props {
   onCancel?: (() => void) | undefined;
 }
 
-const fold = (s: string) => s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
-
-// Name, country and sea all count, accent-insensitively ("Malaga" finds Málaga).
-function matches(shore: ShoreDto, query: string): boolean {
-  const q = fold(query.trim());
-  if (!q) return true;
-  return [shore.name, shore.country ?? '', shore.sea ?? ''].some((v) => fold(v).includes(q));
-}
-
-// "Portugal · North Atlantic · 5 places"; the original fictional shores have no country.
-function describe(shore: ShoreDto): string {
-  const parts = [shore.country, shore.sea].filter((p): p is string => Boolean(p));
-  if (parts.length === 0) parts.push('App anchor');
-  return `${parts.join(' · ')} · ${shore.capacity} places`;
-}
-
 // Shore selection over the real map (IA S9c). Manual only: no GPS, no coordinates collected.
 // On phones the map is the whole screen: pins (clustered when dense) are the list, a search
-// field finds a harbour by name, country or sea; picking one raises a compact card with the
+// field finds a harbour by name or sea; picking one raises a compact card with the
 // shore's details and "Anchor here". Desktop keeps a searchable side pane.
 export function ShoreSetupScreen({ onDone, onCancel }: Props) {
   const { user, refresh } = useSession();
@@ -53,7 +38,7 @@ export function ShoreSetupScreen({ onDone, onCancel }: Props) {
         .map((s) => ({ id: s.id, name: s.name, geo: s.geo!, role: 'shore' as const })),
     [shores],
   );
-  const filtered = useMemo(() => shores.filter((s) => matches(s, query)), [shores, query]);
+  const filtered = useMemo(() => shores.filter((s) => matchesShore(s, query)), [shores, query]);
   const chosen = shores.find((s) => s.id === choice) ?? null;
   const searching = query.trim().length > 0;
 
@@ -97,7 +82,7 @@ export function ShoreSetupScreen({ onDone, onCancel }: Props) {
         className="input"
         type="search"
         autoComplete="off"
-        placeholder="Search a harbour, country or sea"
+        placeholder="Search a harbour or sea"
         aria-label="Search shores"
         value={query}
         onChange={(e) => setQuery(e.target.value)}
@@ -129,7 +114,7 @@ export function ShoreSetupScreen({ onDone, onCancel }: Props) {
             <span className="t-card-title" style={{ display: 'block' }}>
               {s.name}
             </span>
-            <span className="t-meta">{describe(s)}</span>
+            <span className="t-meta">{describeShore(s)}</span>
           </span>
           {selected ? (
             <span className="check-circle" aria-hidden>
@@ -189,7 +174,7 @@ export function ShoreSetupScreen({ onDone, onCancel }: Props) {
           <div className="row">
             <div className="grow">
               <h2 className="t-card-title">{chosen.name}</h2>
-              <p className="t-meta">{describe(chosen)}</p>
+              <p className="t-meta">{describeShore(chosen)}</p>
             </div>
             <button
               type="button"

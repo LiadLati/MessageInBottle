@@ -1102,6 +1102,22 @@ button.avatar {
   letter-spacing: 0.4px;
   white-space: nowrap;
 }
+.map-shore-pin {
+  position: relative;
+}
+.map-shore-pin .leg {
+  display: none;
+  position: absolute;
+  top: 6px;
+  left: 50%;
+  width: 1px;
+  transform-origin: top center;
+  background: rgba(143, 211, 204, 0.55);
+  pointer-events: none;
+}
+.map-shore-pin.spread .leg {
+  display: block;
+}
 .map-shore-pin.compact .label {
   display: none;
 }
