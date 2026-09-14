@@ -26,6 +26,8 @@ function passagesPerShore(chart: ChartResponse): Record<string, number> {
 }
 
 // Shore selection over the real map (IA S9c). Manual only: no GPS, no coordinates collected.
+// On phones the map is the whole screen: pins (clustered when dense) are the list; picking one
+// raises a compact card with the shore's details and "Anchor here". Desktop keeps the side pane.
 export function ShoreSetupScreen({ onDone, onCancel }: Props) {
   const { user, refresh } = useSession();
   const chart = useAsync(() => api.chart(), []);
@@ -41,6 +43,7 @@ export function ShoreSetupScreen({ onDone, onCancel }: Props) {
     [chart.data],
   );
   const passages = useMemo(() => (chart.data ? passagesPerShore(chart.data) : {}), [chart.data]);
+  const chosen = chart.data?.shores.find((s) => s.id === choice) ?? null;
 
   const save = async () => {
     if (!choice) return;
@@ -58,16 +61,29 @@ export function ShoreSetupScreen({ onDone, onCancel }: Props) {
   };
 
   const changing = Boolean(user?.shoreId);
+  const details = (id: string, capacity: number) =>
+    `Connected to ${passages[id] ?? 0} ${passages[id] === 1 ? 'passage' : 'passages'} · ${capacity} places`;
+  const anchorButton = (
+    <button
+      type="button"
+      className="btn-primary"
+      disabled={!choice || busy || choice === user?.shoreId}
+      onClick={save}
+    >
+      {busy ? 'Anchoring…' : choice === user?.shoreId ? 'Anchored here' : 'Anchor here'}
+    </button>
+  );
+
   return (
-    <div className="world-screen two-pane">
+    <div className="world-screen two-pane shore-setup">
       <div className="world-layer">
         <OceanMap
           routes={[]}
           anchors={anchors}
           showAnchorLabels
           selectedAnchorId={choice}
-          onSelectAnchor={setChoice}
-          bottomPadding={360}
+          onSelectAnchor={(id) => setChoice((c) => (c === id ? null : id))}
+          bottomPadding={200}
           fitKey="shores"
         />
       </div>
@@ -84,7 +100,39 @@ export function ShoreSetupScreen({ onDone, onCancel }: Props) {
           </button>
         ) : null}
       </header>
-      <section className="sheet" aria-label="Shores">
+
+      {/* Phone: a compact card only once a pin is chosen; closing it restores the clean map. */}
+      {chosen ? (
+        <section className="sheet shore-card phone-only" aria-label="Selected shore">
+          <div className="row">
+            <div className="grow">
+              <h2 className="t-card-title">{chosen.name}</h2>
+              <p className="t-meta">{details(chosen.id, chosen.capacity)}</p>
+            </div>
+            <button
+              type="button"
+              className="glass-control"
+              aria-label="Deselect shore"
+              onClick={() => setChoice(null)}
+            >
+              <Icon name="close" size={16} />
+            </button>
+          </div>
+          <div style={{ marginTop: 12 }}>{anchorButton}</div>
+          <p className="t-meta" style={{ marginTop: 8 }}>
+            A shore is only an anchor in the app. Changing it affects future bottles only.
+          </p>
+          <ErrorNote error={error} />
+        </section>
+      ) : null}
+      {chart.error ? (
+        <section className="sheet phone-only">
+          <ErrorNote error={chart.error} />
+        </section>
+      ) : null}
+
+      {/* Desktop: the side pane lists every shore next to the map. */}
+      <section className="sheet desktop-only" aria-label="Shores">
         {chart.loading || !chart.data ? (
           <Skeleton />
         ) : (
@@ -105,10 +153,7 @@ export function ShoreSetupScreen({ onDone, onCancel }: Props) {
                         <span className="t-card-title" style={{ display: 'block' }}>
                           {s.name}
                         </span>
-                        <span className="t-meta">
-                          Connected to {passages[s.id] ?? 0}{' '}
-                          {passages[s.id] === 1 ? 'passage' : 'passages'} · {s.capacity} places
-                        </span>
+                        <span className="t-meta">{details(s.id, s.capacity)}</span>
                       </span>
                       {selected ? (
                         <span className="check-circle" aria-hidden>
@@ -120,14 +165,7 @@ export function ShoreSetupScreen({ onDone, onCancel }: Props) {
                 );
               })}
             </ul>
-            <button
-              type="button"
-              className="btn-primary"
-              disabled={!choice || busy || choice === user?.shoreId}
-              onClick={save}
-            >
-              {busy ? 'Anchoring…' : 'Anchor here'}
-            </button>
+            {anchorButton}
             <p className="t-meta">
               A shore is only an anchor in the app. It says nothing about where you live, and
               changing it affects future bottles only.

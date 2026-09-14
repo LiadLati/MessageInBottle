@@ -15,6 +15,20 @@
       "when": 1789085228352,
       "tag": "0001_geo_anchors",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1789329130847,
+      "tag": "0002_auth_credentials",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1789333829923,
+      "tag": "0003_email_and_password_resets",
+      "breakpoints": true
     }
   ]
 }

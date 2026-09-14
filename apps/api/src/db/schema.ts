@@ -21,7 +21,32 @@ export const users = sqliteTable('users', {
     .notNull()
     .default('active'),
   createdAt: integer('created_at').notNull(),
+  // Salted scrypt hash (see lib/password.ts). Null means the account cannot sign in: rows that
+  // predate authentication, or accounts whose password was cleared.
+  passwordHash: text('password_hash'),
+  passwordUpdatedAt: integer('password_updated_at'),
+  // Normalized (trimmed, lower-case) and unique; null for accounts that predate e-mail.
+  email: text('email').unique(),
 });
+
+// Password-reset tokens: only the SHA-256 of the token is stored, each token is single-use and
+// expires 30 minutes after it was requested. Rows are kept after use for auditing.
+export const passwordResets = sqliteTable(
+  'password_resets',
+  {
+    id: text('id').primaryKey(),
+    userId: text('user_id')
+      .notNull()
+      .references(() => users.id),
+    tokenHash: text('token_hash').notNull().unique(),
+    createdAt: integer('created_at').notNull(),
+    expiresAt: integer('expires_at').notNull(),
+    usedAt: integer('used_at'),
+    // Set when a newer request or a completed reset supersedes this token.
+    invalidatedAt: integer('invalidated_at'),
+  },
+  (t) => [index('password_resets_user_idx').on(t.userId)],
+);
 
 export const sessions = sqliteTable('sessions', {
   tokenHash: text('token_hash').primaryKey(),

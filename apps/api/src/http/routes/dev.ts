@@ -4,6 +4,7 @@ import { DevAdvanceRequestSchema, DevArriveRequestSchema, type DevStatus } from 
 import * as t from '../../db/schema.js';
 import { plannedArrivalAt } from '../../domain/routing.js';
 import { DevClock } from '../../lib/clock.js';
+import { OutboxMailer } from '../../lib/mail.js';
 import { badRequest, notFound } from '../../lib/errors.js';
 import { activePlan, runJourneyTick } from '../../services/journey.js';
 import type { AppEnv } from '../app.js';
@@ -14,6 +15,26 @@ import { jsonBody } from '../validate.js';
 // Mounted only when MIB_DEV_MODE=true; time only ever moves forward.
 export function devRoutes() {
   const r = new Hono<AppEnv>();
+
+  // Registered before the authentication middleware on purpose: password recovery is used while
+  // signed out, so the captured message has to be readable then. This router is mounted only
+  // when MIB_DEV_MODE is on, and the outbox only ever exists for the development mailer, so no
+  // production deployment can reach it.
+  r.get('/outbox', (c) => {
+    const mailer = c.get('ctx').mailer;
+    const messages =
+      mailer instanceof OutboxMailer
+        ? mailer.messages.map((m) => ({
+            id: m.id,
+            to: m.to,
+            subject: m.subject,
+            text: m.text,
+            sentAt: new Date(m.sentAt).toISOString(),
+          }))
+        : [];
+    return c.json({ provider: mailer.kind, messages });
+  });
+
   r.use('*', requireAuth);
 
   const status = (ctx: AppEnv['Variables']['ctx']): DevStatus => ({

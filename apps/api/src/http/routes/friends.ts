@@ -3,6 +3,7 @@ import { BlockUserRequestSchema, SendFriendRequestSchema } from '@mib/shared';
 import {
   acceptFriendRequest,
   blockUser,
+  denyFriendRequest,
   listFriends,
   sendFriendRequest,
 } from '../../services/friends.js';
@@ -20,6 +21,10 @@ export function friendRoutes() {
   });
   r.post('/requests/:id/accept', (c) => {
     acceptFriendRequest(c.get('ctx'), c.get('user').id, c.req.param('id'));
+    return c.body(null, 204);
+  });
+  r.post('/requests/:id/deny', (c) => {
+    denyFriendRequest(c.get('ctx'), c.get('user').id, c.req.param('id'));
     return c.body(null, 204);
   });
   r.post('/blocks', jsonBody(BlockUserRequestSchema), (c) => {

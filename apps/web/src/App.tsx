@@ -23,8 +23,22 @@ export function App() {
   );
 }
 
+// A password-reset link opens the app with ?reset=<token>; the token lives only in the URL and
+// is removed from it as soon as the screen has taken it.
+function readResetToken(): string | null {
+  try {
+    const token = new URLSearchParams(window.location.search).get('reset');
+    if (!token) return null;
+    window.history.replaceState({}, '', window.location.pathname);
+    return token;
+  } catch {
+    return null;
+  }
+}
+
 function Shell() {
   const { user, loading } = useSession();
+  const [resetToken, setResetToken] = useState<string | null>(readResetToken);
   const [tab, setTab] = useState<Tab>('ocean');
   const [passportId, setPassportId] = useState<string | null>(null);
   const [focusId, setFocusId] = useState<string | null>(null);
@@ -42,6 +56,14 @@ function Shell() {
   );
   const unread = (notifications.data?.notifications ?? []).filter((n) => n.readAt === null);
   const reloadNotifications = notifications.reload;
+  // Friend-request badge: the server's count of pending requests addressed to this user.
+  const friends = useAsync(
+    () => (user ? api.friends() : Promise.resolve(null)),
+    [user?.id, epoch],
+    20_000,
+  );
+  const pendingFriends = friends.data?.pendingIncomingCount ?? 0;
+  const reloadFriends = friends.reload;
 
   useEffect(() => {
     if (tab === 'shore' && unread.length > 0) {
@@ -56,6 +78,9 @@ function Shell() {
     setChoosingShore(true);
   }, []);
 
+  if (resetToken) {
+    return <LoginScreen resetToken={resetToken} onResetDone={() => setResetToken(null)} />;
+  }
   if (loading) return <main className="deck-screen" aria-busy />;
   if (!user) return <LoginScreen />;
 
@@ -124,7 +149,7 @@ function Shell() {
             onBack={() => setPassportId(null)}
           />
         ) : null}
-        {tab === 'friends' ? <FriendsScreen /> : null}
+        {tab === 'friends' ? <FriendsScreen onChanged={reloadFriends} /> : null}
       </div>
       {immersive ? null : <DevPanel refreshKey={epoch} onChanged={() => setEpoch((e) => e + 1)} />}
       {profileOpen ? (
@@ -135,6 +160,7 @@ function Shell() {
           active={tab}
           on3d={on3d}
           unread={unread.length}
+          pendingFriends={pendingFriends}
           onSelect={(t) => {
             if (t === 'letters') setPassportId(null);
             setTab(t);

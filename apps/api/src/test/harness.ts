@@ -2,8 +2,11 @@ import { eq } from 'drizzle-orm';
 import type { AppConfig } from '../config.js';
 import { createDb, runMigrations, type Db } from '../db/client.js';
 import * as t from '../db/schema.js';
+import { DEV_SEED_PASSWORD } from '../db/seed-data.js';
 import { seedChart, seedUsers } from '../db/seed.js';
 import type { Clock } from '../lib/clock.js';
+import { OutboxMailer } from '../lib/mail.js';
+import type { createApp } from '../http/app.js';
 import type { AppContext, AuthUser } from '../services/context.js';
 
 export class ManualClock implements Clock {
@@ -33,6 +36,13 @@ export function testConfig(overrides: Partial<AppConfig> = {}): AppConfig {
     journeyTickMs: 1000,
     sessionTtlMs: 60 * 60 * 1000,
     corsOrigin: '*',
+    trustProxy: true,
+    appUrl: 'http://app.test',
+    mail: {
+      provider: 'outbox',
+      from: 'test <no-reply@test>',
+      smtp: { host: '', port: 587, secure: false, user: '', pass: '' },
+    },
     ...overrides,
   };
 }
@@ -41,6 +51,7 @@ export interface TestWorld {
   ctx: AppContext;
   db: Db;
   clock: ManualClock;
+  outbox: OutboxMailer;
   user(username: string): AuthUser;
 }
 
@@ -51,11 +62,13 @@ export function createTestWorld(overrides: Partial<AppConfig> = {}): TestWorld {
   seedChart(db, config.defaultShoreCapacity, T0);
   seedUsers(db, T0);
   const clock = new ManualClock(T0);
-  const ctx: AppContext = { db, clock, config };
+  const outbox = new OutboxMailer(() => clock.now());
+  const ctx: AppContext = { db, clock, config, mailer: outbox };
   return {
     ctx,
     db,
     clock,
+    outbox,
     user(username) {
       const row = db.select().from(t.users).where(eq(t.users.username, username)).get();
       if (!row) throw new Error(`no seeded user ${username}`);
@@ -64,9 +77,26 @@ export function createTestWorld(overrides: Partial<AppConfig> = {}): TestWorld {
         username: row.username,
         displayName: row.displayName,
         shoreId: row.shoreId,
+        email: row.email,
       };
     },
   };
+}
+
+// Signs a seeded development account in through the real HTTP surface.
+export async function loginAs(
+  app: ReturnType<typeof createApp>,
+  username: string,
+  password = DEV_SEED_PASSWORD,
+): Promise<{ token: string; id: string }> {
+  const res = await app.request('/api/auth/login', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ username, password }),
+  });
+  if (res.status !== 200) throw new Error(`login ${username} failed: ${res.status}`);
+  const body = (await res.json()) as { token: string; user: { id: string } };
+  return { token: body.token, id: body.user.id };
 }
 
 export const SAMPLE_TEXT = 'Dear friend,\nthe tide was gentle this morning. — A';

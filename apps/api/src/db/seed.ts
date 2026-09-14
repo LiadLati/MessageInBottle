@@ -4,6 +4,7 @@ import { createDb, runMigrations, type Db } from './client.js';
 import * as t from './schema.js';
 import {
   SEED_EDGES,
+  DEV_SEED_PASSWORD,
   SEED_FRIENDSHIPS,
   SEED_NODES,
   SEED_SHORES,
@@ -11,6 +12,7 @@ import {
   edgeLength,
 } from './seed-data.js';
 import { newId } from '../lib/ids.js';
+import { hashPassword } from '../lib/password.js';
 import { canonicalPair } from '../services/friends.js';
 
 // Databases created before geographic anchors existed get them filled in without a new graph
@@ -85,13 +87,23 @@ export function seedChart(db: Db, capacity: number, now: number): void {
   });
 }
 
+// Development-only accounts. Callers must guard with devMode (server.ts, reset.ts, the seed
+// script and the test harness do); the function itself never runs in production paths.
 export function seedUsers(db: Db, now: number): void {
+  const devHash = hashPassword(DEV_SEED_PASSWORD);
   db.transaction((tx) => {
     const ids = new Map<string, string>();
     for (const u of SEED_USERS) {
       const found = tx.select().from(t.users).where(eq(t.users.username, u.username)).get();
       if (found) {
         ids.set(u.username, found.id);
+        // Accounts seeded before passwords existed get the development password once.
+        if (found.passwordHash === null) {
+          tx.update(t.users)
+            .set({ passwordHash: devHash, passwordUpdatedAt: now })
+            .where(eq(t.users.id, found.id))
+            .run();
+        }
         continue;
       }
       const id = newId('usr');
@@ -102,6 +114,8 @@ export function seedUsers(db: Db, now: number): void {
           displayName: u.displayName,
           shoreId: u.shoreId,
           createdAt: now,
+          passwordHash: devHash,
+          passwordUpdatedAt: now,
         })
         .run();
       ids.set(u.username, id);
@@ -132,6 +146,10 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   runMigrations(db);
   const now = Date.now();
   seedChart(db, config.defaultShoreCapacity, now);
-  seedUsers(db, now);
-  console.log(`Seeded chart and users into ${config.databasePath}`);
+  if (config.devMode) {
+    seedUsers(db, now);
+    console.log(`Seeded chart and development users into ${config.databasePath}`);
+  } else {
+    console.log(`Seeded chart into ${config.databasePath} (no users outside dev mode)`);
+  }
 }

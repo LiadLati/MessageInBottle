@@ -1,16 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { createApp } from './app.js';
-import { createTestWorld, releaseInput } from '../test/harness.js';
-
-async function login(app: ReturnType<typeof createApp>, username: string) {
-  const res = await app.request('/api/auth/dev-login', {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ username }),
-  });
-  const body = (await res.json()) as { token: string; user: { id: string } };
-  return { token: body.token, id: body.user.id };
-}
+import { createTestWorld, loginAs as login, releaseInput } from '../test/harness.js';
 
 const auth = (token: string) => ({
   authorization: `Bearer ${token}`,

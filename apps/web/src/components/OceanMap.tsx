@@ -1,4 +1,12 @@
-import { useEffect, useImperativeHandle, useMemo, useRef, useState, type Ref } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useImperativeHandle,
+  useMemo,
+  useRef,
+  useState,
+  type Ref,
+} from 'react';
 import {
   Map as MapLibreMap,
   Marker,
@@ -41,8 +49,10 @@ export interface OceanMapHandle {
 interface Props {
   routes: MapRoute[];
   anchors: MapAnchor[];
-  selectedRouteId?: string | null;
+  // Bottles whose route is highlighted; several when a shared route is selected.
+  selectedRouteIds?: string[];
   selectedAnchorId?: string | null;
+  // Shore pins as tappable DOM markers, clustered when they crowd and labelled from LABEL_ZOOM.
   showAnchorLabels?: boolean;
   fitKey?: string;
   bottomPadding?: number;
@@ -53,6 +63,11 @@ interface Props {
 
 const MIN_ZOOM = 1.6;
 const MAX_ZOOM = 7;
+// Shore pins: neighbours closer than this (screen px) fold into one cluster; names appear from
+// this zoom. Both keep a much larger shore catalogue readable on a phone.
+const CLUSTER_PX = 44;
+const LABEL_ZOOM = 3.2;
+const EMPTY_SELECTION: string[] = [];
 const LAND_URL = '/map/land-50m.geojson';
 
 // Map style policy (MAP_DESIGN.md): land geometry and nothing else. The default source is the
@@ -101,7 +116,7 @@ export function isWebGLAvailable(): boolean {
 export function OceanMap({
   routes,
   anchors,
-  selectedRouteId = null,
+  selectedRouteIds = EMPTY_SELECTION,
   selectedAnchorId = null,
   showAnchorLabels = false,
   fitKey = '',
@@ -116,18 +131,35 @@ export function OceanMap({
   const anchorMarkersRef = useRef(new globalThis.Map<string, Marker>());
   const [loaded, setLoaded] = useState(false);
   const [unsupported] = useState(() => !isWebGLAvailable());
-  const latest = useRef({ routes, anchors, selectedRouteId, onSelectRoute, onSelectAnchor });
+  const latest = useRef({
+    routes,
+    anchors,
+    selectedRouteIds,
+    selectedAnchorId,
+    showAnchorLabels,
+    onSelectRoute,
+    onSelectAnchor,
+  });
   useEffect(() => {
-    latest.current = { routes, anchors, selectedRouteId, onSelectRoute, onSelectAnchor };
+    latest.current = {
+      routes,
+      anchors,
+      selectedRouteIds,
+      selectedAnchorId,
+      showAnchorLabels,
+      onSelectRoute,
+      onSelectAnchor,
+    };
   });
   const reduced = useMemo(() => prefersReducedMotion(), []);
 
   const fitToSelection = (animate: boolean) => {
     const map = mapRef.current;
     if (!map) return;
-    const { routes: rs, anchors: as, selectedRouteId: sel } = latest.current;
-    const route = rs.find((r) => r.id === sel) ?? rs[0];
-    const points = route ? route.points : as.map((a) => a.geo);
+    const { routes: rs, anchors: as, selectedRouteIds: sel } = latest.current;
+    const chosen = rs.filter((r) => sel.includes(r.id));
+    const shown = chosen.length > 0 ? chosen : rs;
+    const points = shown.length > 0 ? shown.flatMap((r) => r.points) : as.map((a) => a.geo);
     const b = boundsOf(points);
     if (!b) return;
     const wide = map.getContainer().clientWidth >= 900;
@@ -154,6 +186,88 @@ export function OceanMap({
     zoomOut: () => mapRef.current?.zoomOut({ duration: reduced ? 0 : 300 }),
     recenter: () => fitToSelection(true),
   }));
+
+  // Shore pins as DOM markers. Pins whose screen positions overlap fold into a numbered cluster
+  // that zooms in when tapped; names are shown only from LABEL_ZOOM so a dense coast stays
+  // readable. Re-run after every camera move because membership depends on the projection.
+  const layoutPins = useCallback(() => {
+    const map = mapRef.current;
+    if (!map) return;
+    const { anchors: as, selectedAnchorId: sel, showAnchorLabels: pins } = latest.current;
+    const keep = new Set<string>();
+    if (pins) {
+      const zoom = map.getZoom();
+      const projected = as.map((a) => ({ a, p: map.project([a.geo.lng, a.geo.lat]) }));
+      const clusters: Array<{ members: MapAnchor[]; x: number; y: number }> = [];
+      for (const { a, p } of projected) {
+        const near = clusters.find((c) => Math.hypot(c.x - p.x, c.y - p.y) < CLUSTER_PX);
+        if (near) {
+          near.members.push(a);
+          near.x = (near.x * (near.members.length - 1) + p.x) / near.members.length;
+          near.y = (near.y * (near.members.length - 1) + p.y) / near.members.length;
+        } else clusters.push({ members: [a], x: p.x, y: p.y });
+      }
+      for (const c of clusters) {
+        const single = c.members.length === 1 ? c.members[0]! : null;
+        const key = single
+          ? single.id
+          : `cluster:${c.members
+              .map((m) => m.id)
+              .sort()
+              .join('|')}`;
+        keep.add(key);
+        let m = anchorMarkersRef.current.get(key);
+        if (!m) {
+          const el = document.createElement('button');
+          el.type = 'button';
+          if (single) {
+            el.className = 'map-shore-pin';
+            el.innerHTML = `<span class="dot"></span><span class="label"></span>`;
+            el.addEventListener('click', (ev) => {
+              ev.stopPropagation();
+              latest.current.onSelectAnchor?.(single.id);
+            });
+          } else {
+            el.className = 'map-shore-cluster';
+            el.textContent = String(c.members.length);
+            el.setAttribute('aria-label', `${c.members.length} shores, tap to zoom in`);
+            const center = map.unproject([c.x, c.y]);
+            el.addEventListener('click', (ev) => {
+              ev.stopPropagation();
+              map.easeTo({
+                center,
+                zoom: Math.min(MAX_ZOOM, map.getZoom() + 1.6),
+                duration: reduced ? 0 : 500,
+              });
+            });
+          }
+          const lngLat = single
+            ? [single.geo.lng, single.geo.lat]
+            : map.unproject([c.x, c.y]).toArray();
+          m = new Marker({ element: el, anchor: single ? 'top' : 'center' })
+            .setLngLat(lngLat as [number, number])
+            .addTo(map);
+          anchorMarkersRef.current.set(key, m);
+        } else if (!single) {
+          m.setLngLat(map.unproject([c.x, c.y]));
+        }
+        if (single) {
+          const el = m.getElement();
+          el.querySelector('.label')!.textContent = single.name;
+          el.setAttribute('aria-label', `Shore: ${single.name}`);
+          el.setAttribute('aria-pressed', String(single.id === sel));
+          el.classList.toggle('selected', single.id === sel);
+          el.classList.toggle('compact', zoom < LABEL_ZOOM && single.id !== sel);
+        }
+      }
+    }
+    for (const [id, m] of anchorMarkersRef.current) {
+      if (!keep.has(id)) {
+        m.remove();
+        anchorMarkersRef.current.delete(id);
+      }
+    }
+  }, [reduced]);
 
   // Create the map once.
   useEffect(() => {
@@ -229,6 +343,16 @@ export function OceanMap({
           'circle-stroke-width': 1.4,
         },
       });
+      // Tapping a route line selects that bottle's journey.
+      for (const layer of ['planned', 'trail']) {
+        map.on('click', layer, (e) => {
+          const id = e.features?.[0]?.properties?.id as string | undefined;
+          if (id) latest.current.onSelectRoute?.(id);
+        });
+        map.on('mouseenter', layer, () => (map.getCanvas().style.cursor = 'pointer'));
+        map.on('mouseleave', layer, () => (map.getCanvas().style.cursor = ''));
+      }
+      map.on('moveend', () => layoutPins());
       setLoaded(true);
     });
     map.on('error', (e) => {
@@ -248,7 +372,7 @@ export function OceanMap({
       map.remove();
       mapRef.current = null;
     };
-  }, [unsupported]);
+  }, [unsupported, layoutPins]);
 
   // Routes, anchors and markers follow the data.
   useEffect(() => {
@@ -260,7 +384,7 @@ export function OceanMap({
     const seen = new Set<string>();
     for (const r of routes) {
       if (r.points.length < 2) continue;
-      const selected = r.id === selectedRouteId;
+      const selected = selectedRouteIds.includes(r.id);
       const progress = interpolatedProgress(r, now);
       const { point, index } = geoAlong(r.points, progress);
       planned.push({ ...lineFeature(r.id, r.points), properties: { id: r.id, selected } });
@@ -322,39 +446,17 @@ export function OceanMap({
         })),
     });
 
-    const seenAnchors = new Set<string>();
-    if (showAnchorLabels) {
-      for (const a of anchors) {
-        seenAnchors.add(a.id);
-        let m = anchorMarkersRef.current.get(a.id);
-        if (!m) {
-          const el = document.createElement('button');
-          el.type = 'button';
-          el.className = 'map-shore-pin';
-          el.innerHTML = `<span class="dot"></span><span class="label"></span>`;
-          el.addEventListener('click', (ev) => {
-            ev.stopPropagation();
-            latest.current.onSelectAnchor?.(a.id);
-          });
-          m = new Marker({ element: el, anchor: 'top' })
-            .setLngLat([a.geo.lng, a.geo.lat])
-            .addTo(map);
-          anchorMarkersRef.current.set(a.id, m);
-        }
-        const el = m.getElement();
-        el.querySelector('.label')!.textContent = a.name;
-        el.setAttribute('aria-label', `Shore: ${a.name}`);
-        el.setAttribute('aria-pressed', String(a.id === selectedAnchorId));
-        el.classList.toggle('selected', a.id === selectedAnchorId);
-      }
-    }
-    for (const [id, m] of anchorMarkersRef.current) {
-      if (!seenAnchors.has(id)) {
-        m.remove();
-        anchorMarkersRef.current.delete(id);
-      }
-    }
-  }, [routes, anchors, selectedRouteId, selectedAnchorId, showAnchorLabels, loaded, reduced]);
+    layoutPins();
+  }, [
+    routes,
+    anchors,
+    selectedRouteIds,
+    selectedAnchorId,
+    showAnchorLabels,
+    loaded,
+    reduced,
+    layoutPins,
+  ]);
 
   // Ticker: glide the marker along the polyline between server syncs (position stays server-owned).
   useEffect(() => {
@@ -373,7 +475,7 @@ export function OceanMap({
         if (progress > 0) {
           trail.push({
             ...lineFeature(r.id, [...r.points.slice(0, index + 1), point]),
-            properties: { id: r.id, selected: r.id === selectedRouteId },
+            properties: { id: r.id, selected: selectedRouteIds.includes(r.id) },
           });
         }
       }
@@ -381,7 +483,7 @@ export function OceanMap({
       if (trailSource) void trailSource.setData({ type: 'FeatureCollection', features: trail });
     }, 1000);
     return () => clearInterval(id);
-  }, [routes, selectedRouteId, loaded, reduced]);
+  }, [routes, selectedRouteIds, loaded, reduced]);
 
   // Camera: fit to the selection whenever the caller asks (fitKey) or on first data.
   const firstFit = useRef(false);

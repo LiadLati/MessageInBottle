@@ -12,6 +12,7 @@ import {
   type SentBottleDto,
 } from '@mib/shared';
 import { api, ApiError } from '../api/client.js';
+import { FontSelect } from '../components/FontSelect.js';
 import { LetterPaper, ensureLetterFaces, letterTextStyle } from '../components/LetterPaper.js';
 import { OceanMap, ReleaseSequence } from '../components/lazy.js';
 import type { MapAnchor, MapRoute } from '../components/OceanMap.js';
@@ -243,21 +244,12 @@ export function WriteScreen({ onReleased, onChooseShore, onImmersive }: Props) {
             </span>
           </div>
         </div>
-        <fieldset className="font-chips" style={{ border: 0, padding: 0, margin: 0 }}>
-          <legend className="sr-only">Visual font</legend>
-          {LETTER_FONTS.map((f) => (
-            <label key={f} className={`chip${draft.font === f ? ' selected' : ''}`}>
-              <input
-                type="radio"
-                name="font"
-                value={f}
-                checked={draft.font === f}
-                onChange={() => setDraft((d) => ({ ...d, font: f }))}
-              />
-              {FONT_DEFINITIONS[f].label}
-            </label>
-          ))}
-        </fieldset>
+        <FontSelect
+          label="Visual font"
+          options={LETTER_FONTS.map((f) => FONT_DEFINITIONS[f])}
+          value={draft.font}
+          onChange={(font) => setDraft((d) => ({ ...d, font }))}
+        />
         <p className="t-meta">
           Readable Print — same words, accessible face — is always available to the reader.
         </p>
@@ -317,7 +309,7 @@ export function WriteScreen({ onReleased, onChooseShore, onImmersive }: Props) {
           <OceanMap
             routes={routes}
             anchors={anchors}
-            selectedRouteId="preview"
+            selectedRouteIds={['preview']}
             fitKey={p ? 'preview' : ''}
             bottomPadding={420}
           />

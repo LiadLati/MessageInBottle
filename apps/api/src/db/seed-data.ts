@@ -77,6 +77,11 @@ export function edgeLength(a: SeedNode, b: SeedNode): number {
   return Math.max(1, Math.round(Math.hypot(a.x - b.x, a.y - b.y) / 10));
 }
 
+// DEVELOPMENT ONLY. Seed accounts exist so the flows can be exercised locally; they are created
+// exclusively by the dev-mode seed (never by the API at runtime) and share this password.
+// The seed refuses to run outside MIB_DEV_MODE, so a production database never gets them.
+export const DEV_SEED_PASSWORD = 'dev-password-2026';
+
 export const SEED_USERS = [
   { username: 'ada', displayName: 'Ada', shoreId: 'shore_lantern_cove' },
   { username: 'bo', displayName: 'Bo', shoreId: 'shore_driftmoor_strand' },

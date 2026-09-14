@@ -581,6 +581,175 @@ button.avatar {
   box-shadow: 0 0 0 3px rgba(143, 211, 204, 0.15);
 }
 
+.input.invalid {
+  border-color: rgba(231, 160, 140, 0.7);
+}
+.input:disabled {
+  opacity: 0.6;
+}
+/* Field messages live in a reserved slot so validation never moves the controls under a
+   finger mid-tap (the login card is anchored to the bottom of the screen). */
+.login-card .field {
+  position: relative;
+  padding-bottom: 20px;
+}
+.field-error {
+  font-size: 12.5px;
+  line-height: 1.35;
+  color: #f0b8a6;
+}
+.login-card .field-error {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  margin: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.login-card .stack {
+  gap: 10px;
+}
+.password-field {
+  position: relative;
+}
+.password-field .input {
+  padding-right: 76px;
+}
+.password-field .reveal {
+  position: absolute;
+  right: 6px;
+  top: 50%;
+  transform: translateY(-50%);
+  min-height: 36px;
+  padding: 0 12px;
+  font-size: 12.5px;
+}
+.auth-switch {
+  align-self: center;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.note.amber .btn-text {
+  display: block;
+  min-height: 36px;
+  padding: 0;
+}
+.dev-mail {
+  text-align: left;
+  font-weight: 400;
+}
+.dev-mail strong {
+  color: var(--status-storm);
+}
+.dev-mail-list {
+  gap: 6px;
+  margin-top: 6px;
+}
+.dev-mail-list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.dev-mail-list .btn-secondary {
+  min-height: 36px;
+  padding: 0 12px;
+  font-size: 12.5px;
+  text-decoration: none;
+}
+.forgot-link {
+  align-self: flex-end;
+  min-height: 32px;
+  margin-top: -6px;
+  font-size: 13px;
+}
+.note.success {
+  border-color: rgba(143, 199, 166, 0.5);
+  color: var(--status-arrived);
+}
+
+/* ---------- font dropdown (button + listbox) ---------- */
+.font-select {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.font-select-button {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  min-height: 52px;
+  padding: 8px 14px;
+  border-radius: var(--radius-card);
+  background: rgba(9, 26, 39, 0.55);
+  border: 1px solid rgba(215, 231, 228, 0.18);
+  color: var(--foam-white);
+  text-align: left;
+}
+.font-select-button[aria-expanded='true'] {
+  border-color: rgba(143, 211, 204, 0.7);
+}
+.font-select-list {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: calc(100% + 6px);
+  z-index: 15;
+  list-style: none;
+  margin: 0;
+  padding: 6px;
+  border-radius: var(--radius-card);
+  background: rgba(6, 20, 30, 0.96);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid rgba(215, 231, 228, 0.18);
+  box-shadow: var(--shadow-sheet);
+  /* An inline max-height measured from the real space available replaces this fallback. */
+  max-height: 300px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+}
+/* Opened upward when the space below the trigger is too small. */
+.font-select-list.up {
+  top: auto;
+  bottom: calc(100% + 6px);
+}
+.font-select-list:focus {
+  outline: 2px solid var(--foam);
+  outline-offset: 2px;
+}
+.font-select-option {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  column-gap: 10px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  cursor: pointer;
+  color: var(--foam-white);
+}
+.font-select-option .t-meta {
+  grid-column: 1;
+}
+.font-select-option .active,
+.font-select-option.active {
+  background: rgba(143, 211, 204, 0.14);
+}
+.font-select-option[aria-selected='true'] {
+  color: var(--foam);
+}
+.font-select-option > svg {
+  grid-column: 2;
+  grid-row: 1 / span 2;
+}
+
 .list {
   list-style: none;
   padding: 0;
@@ -730,10 +899,10 @@ button.avatar {
   bottom: 0;
   z-index: 20;
   height: calc(var(--nav-height) + var(--nav-safe-bottom) - 22px);
-  padding: 0 12px var(--nav-safe-bottom);
+  padding: 4px 8px var(--nav-safe-bottom);
   display: grid;
   grid-template-columns: repeat(5, 1fr);
-  align-items: end;
+  align-items: center;
   background: var(--nav-bg);
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
@@ -749,35 +918,21 @@ button.avatar {
   position: relative;
   display: flex;
   flex-direction: column;
+  justify-content: center;
   align-items: center;
-  gap: 5px;
+  gap: 4px;
   min-height: var(--min-touch);
-  padding-bottom: 2px;
+  padding: 4px 2px;
+  border-radius: 12px;
   color: rgba(222, 234, 233, 0.5);
   font-size: 9.5px;
   font-weight: 500;
   letter-spacing: 0.2px;
 }
+/* Current destination: the one highlight in the bar. */
 .nav-item[aria-current='page'] {
   color: var(--foam-white);
-}
-.nav-item.write {
-  gap: 6px;
-  color: rgba(222, 234, 233, 0.7);
-}
-.write-pill {
-  width: var(--write-pill-size);
-  height: var(--write-pill-size);
-  border-radius: var(--radius-nav-pill);
-  background: var(--write-pill);
-  color: var(--on-light);
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  box-shadow: var(--shadow-button);
-}
-.nav.on-3d .write-pill {
-  background: rgba(230, 240, 238, 0.85);
+  background: rgba(143, 211, 204, 0.12);
 }
 .nav-badge {
   position: absolute;
@@ -846,6 +1001,13 @@ button.avatar {
   min-height: 30px;
   padding: 4px 10px;
   font-size: 11.5px;
+}
+.dev-strip .outbox .chip {
+  text-decoration: none;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .dev-strip > button.toggle {
   color: inherit;
@@ -936,6 +1098,33 @@ button.avatar {
   font-weight: 600;
   letter-spacing: 0.4px;
   white-space: nowrap;
+}
+.map-shore-pin.compact .label {
+  display: none;
+}
+.map-shore-cluster {
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  background: rgba(6, 20, 30, 0.85);
+  border: 1.5px solid rgba(143, 211, 204, 0.8);
+  color: var(--foam-white);
+  font-size: 12.5px;
+  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 0 0 6px rgba(143, 211, 204, 0.12);
+}
+.phone-only {
+  display: block;
+}
+.desktop-only {
+  display: none;
+}
+.sheet.shore-card {
+  max-height: none;
+  padding: 14px 16px 16px;
 }
 .map-shore-pin.selected .dot {
   box-shadow:
@@ -1427,9 +1616,6 @@ button.avatar {
     background: rgba(4, 14, 22, 0.92);
     border-right: var(--nav-border);
   }
-  .nav-item.write {
-    order: -1;
-  }
   .world-screen {
     left: var(--rail-width);
   }
@@ -1492,6 +1678,12 @@ button.avatar {
     left: calc(var(--rail-width) + 24px);
     right: auto;
     width: 420px;
+  }
+  .phone-only {
+    display: none;
+  }
+  .desktop-only {
+    display: block;
   }
   .parchment.full {
     max-width: 720px;

@@ -20,6 +20,8 @@ export function createDb(databasePath: string) {
   return { db, sqlite };
 }
 
-export function runMigrations(db: Db) {
-  migrate(db, { migrationsFolder: path.join(API_ROOT, 'drizzle') });
+export const MIGRATIONS_FOLDER = path.join(API_ROOT, 'drizzle');
+
+export function runMigrations(db: Db, migrationsFolder = MIGRATIONS_FOLDER) {
+  migrate(db, { migrationsFolder });
 }

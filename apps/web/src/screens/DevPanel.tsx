@@ -18,6 +18,7 @@ export function DevPanel(props: { onChanged: () => void; refreshKey: number }) {
 function DevPanelInner({ onChanged, refreshKey }: { onChanged: () => void; refreshKey: number }) {
   const status = useAsync(() => api.devStatus(), [], 30_000);
   const sent = useAsync(() => api.sentBottles(), [refreshKey]);
+  const outbox = useAsync(() => api.devOutbox(), [refreshKey], 15_000);
   const [error, setError] = useState<Error | null>(null);
   const [open, setOpen] = useState(false);
   const slot = useTopSlot('dev');
@@ -82,6 +83,29 @@ function DevPanelInner({ onChanged, refreshKey }: { onChanged: () => void; refre
                   Land bottle to {b.recipient.displayName} now
                 </button>
               ))}
+            </div>
+          ) : null}
+          {outbox.data && outbox.data.provider !== 'smtp' ? (
+            <div className="row outbox">
+              <span className="t-meta">
+                Dev outbox · mail is captured here, never delivered
+                {outbox.data.messages.length === 0 ? ' · nothing captured yet' : ''}
+              </span>
+              {outbox.data.messages
+                .slice(-3)
+                .reverse()
+                .map((m) => {
+                  const link = /https?:\/\/\S+/.exec(m.text)?.[0];
+                  return link ? (
+                    <a key={m.id} className="chip" href={link}>
+                      Open reset link → {m.to}
+                    </a>
+                  ) : (
+                    <span key={m.id} className="chip">
+                      {m.subject} → {m.to}
+                    </span>
+                  );
+                })}
             </div>
           ) : null}
           <ErrorNote error={error} />
