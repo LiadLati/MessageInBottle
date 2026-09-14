@@ -16,7 +16,7 @@ import { getMyShore, getSentBottle, openBottle } from '../services/bottles.js';
 import { ManualClock, T0, createTestWorld, releaseInput, testConfig } from '../test/harness.js';
 
 type Row = Record<string, unknown>;
-const NEWEST = '0003_email_and_password_resets';
+const NEWEST = '0004_shore_regions';
 
 function tableNames(sqlite: Database.Database): string[] {
   return sqlite
@@ -86,8 +86,7 @@ describe('migrating a populated database', () => {
     const legacyDir = legacyMigrationsFolder();
     const { db, sqlite } = createDb(':memory:');
     runMigrations(db, legacyDir);
-    expect(columnsOf(sqlite, 'users')).not.toContain('email');
-    expect(tableNames(sqlite)).not.toContain('password_resets');
+    expect(columnsOf(sqlite, 'shores')).not.toContain('country_name');
     sqlite.pragma('foreign_keys = OFF');
     for (const [table, rows] of Object.entries(dump(sourceSqlite))) {
       if (!tableNames(sqlite).includes(table)) continue;
@@ -104,13 +103,13 @@ describe('migrating a populated database', () => {
     expect(before.route_plans).toHaveLength(1);
     expect(before.capacity_reservations).toHaveLength(1);
 
-    // 3. Upgrade in place.
+    // 3. Upgrade in place, then run the additive seed the server runs at boot.
     runMigrations(db);
-    expect(columnsOf(sqlite, 'users')).toContain('email');
-    expect(tableNames(sqlite)).toContain('password_resets');
+    expect(columnsOf(sqlite, 'shores')).toContain('country_name');
+    seedChart(db, testConfig().defaultShoreCapacity, T0);
 
     // 4. Every pre-existing table is row-for-row identical: ids, states, versions, timestamps,
-    //    node lists, progress, events, reservations. New columns are null on old rows.
+    //    node lists, progress, events, reservations. The seed only filled the new columns.
     const after = dump(sqlite);
     for (const [table, rows] of Object.entries(before)) {
       const kept = after[table]!.map((r) =>
@@ -118,8 +117,11 @@ describe('migrating a populated database', () => {
       );
       expect(kept, table).toEqual(rows);
     }
-    expect(after.users!.every((u) => u.email === null)).toBe(true);
-    expect(after.password_resets).toEqual([]);
+    expect(after.shores!.find((s) => s.id === 'shore_pt_lisbon')).toMatchObject({
+      country_name: 'Portugal',
+      sea: 'North Atlantic',
+    });
+    expect(after.shores!.find((s) => s.id === 'shore_lantern_cove')!.country_name).toBeNull();
 
     // 5. The upgraded database serves the current API and the journey completes on schedule.
     const clock = new ManualClock(source.clock.now());
@@ -147,6 +149,5 @@ describe('migrating a populated database', () => {
     fs.rmSync(legacyDir, { recursive: true, force: true });
     void app;
     void DEV_SEED_PASSWORD;
-    void seedChart;
   });
 });

@@ -17,17 +17,41 @@ export interface StyleLayerLike {
   'source-layer'?: string | undefined;
 }
 
-// Map style policy (MAP_DESIGN.md): the rendered style may contain land geometry and nothing
-// else. Rejects any symbol (text/icon) layer and any political source layer before the map is
-// created, so a provider style can never re-introduce labels or boundaries silently.
-export function assertNeutralStyle(style: { layers: StyleLayerLike[] }): void {
+// Map style policy (MAP_DESIGN.md, spec §6.2): land geometry, thin country border lines and
+// nothing else. Rejects any symbol (text/icon) layer and any place/label/road source layer
+// before the map is created, so a provider style can never re-introduce names silently. Border
+// data may only ever be drawn as a line layer (no fills, no labels).
+export function assertMapStylePolicy(style: { layers: StyleLayerLike[] }): void {
   for (const layer of style.layers) {
     if (layer.type === 'symbol') throw new Error(`map policy: symbol layer ${layer.id}`);
     const sl = layer['source-layer'] ?? '';
-    if (/admin|boundary|place|label|poi|road|country|border/i.test(sl)) {
-      throw new Error(`map policy: political source-layer ${sl}`);
+    if (/place|label|poi|road|transport|building|housenum|water_name/i.test(sl)) {
+      throw new Error(`map policy: labelled source-layer ${sl}`);
+    }
+    if (/admin|boundary|border|country/i.test(`${layer.id} ${sl}`) && layer.type !== 'line') {
+      throw new Error(`map policy: borders may only be drawn as lines (${layer.id})`);
     }
   }
+}
+
+// Shifts longitudes so consecutive points never jump more than 180°: a Pacific route drawn
+// from 175 to -170 becomes 175 → 190 and renders as one short line across the antimeridian
+// instead of a line around the globe. Points are otherwise untouched (no reprojection).
+export function unwrapAntimeridian(points: GeoPoint[]): GeoPoint[] {
+  const out: GeoPoint[] = [];
+  let offset = 0;
+  let prev: number | null = null;
+  for (const p of points) {
+    if (prev !== null) {
+      const d = p.lng + offset - prev;
+      if (d > 180) offset -= 360;
+      else if (d < -180) offset += 360;
+    }
+    const lng = p.lng + offset;
+    out.push({ lng, lat: p.lat });
+    prev = lng;
+  }
+  return out;
 }
 
 export function lineFeature(id: string, coords: GeoPoint[]): Feature<LineString> {

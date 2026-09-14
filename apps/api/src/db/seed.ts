@@ -1,3 +1,4 @@
+import type Database from 'better-sqlite3';
 import { and, eq, isNull } from 'drizzle-orm';
 import { loadConfig } from '../config.js';
 import { createDb, runMigrations, type Db } from './client.js';
@@ -11,6 +12,8 @@ import {
   SEED_USERS,
   edgeLength,
 } from './seed-data.js';
+import { GLOBAL_SHORES } from './geo/shores.js';
+import { chartXY, loadSeaGraph } from './geo/sea-graph.js';
 import { newId } from '../lib/ids.js';
 import { hashPassword } from '../lib/password.js';
 import { canonicalPair } from '../services/friends.js';
@@ -34,12 +37,17 @@ function backfillGeoAnchors(db: Db): void {
   });
 }
 
+// Chart seeding is additive and idempotent. The original fictional chart (graph version 1 and
+// its six shores) is written once and never modified afterwards; the global catalogue and the
+// world sea graph (version 2) are added beside it and become the active planning graph. Route
+// plans keep their own graph version, so bottles released on version 1 keep their snapshot.
 export function seedChart(db: Db, capacity: number, now: number): void {
-  const existing = db
-    .select()
-    .from(t.routeGraphVersions)
-    .where(eq(t.routeGraphVersions.active, true))
-    .get();
+  seedLegacyChart(db, capacity, now);
+  seedGlobalChart(db, capacity, now);
+}
+
+export function seedLegacyChart(db: Db, capacity: number, now: number): void {
+  const existing = db.select().from(t.routeGraphVersions).get();
   if (existing) {
     backfillGeoAnchors(db);
     return;
@@ -84,6 +92,63 @@ export function seedChart(db: Db, capacity: number, now: number): void {
         .values({ graphVersion: 1, fromNodeId: from, toNodeId: to, length: edgeLength(a, b) })
         .run();
     }
+  });
+}
+
+function seedGlobalChart(db: Db, capacity: number, now: number): void {
+  const graph = loadSeaGraph();
+  const sqlite = (db as unknown as { $client: Database.Database }).$client;
+  const present = db
+    .select()
+    .from(t.routeGraphVersions)
+    .where(eq(t.routeGraphVersions.version, graph.version))
+    .get();
+  db.transaction((tx) => {
+    for (const s of GLOBAL_SHORES) {
+      const { x, y } = chartXY(s.lng, s.lat);
+      tx.insert(t.shores)
+        .values({
+          id: s.id,
+          name: s.name,
+          chartX: x,
+          chartY: y,
+          lng: s.lng,
+          lat: s.lat,
+          capacity,
+          active: true,
+          countryId: s.country,
+          countryName: s.countryName,
+          sea: s.sea,
+        })
+        .onConflictDoNothing()
+        .run();
+      // Attribution columns are new; fill them on catalogue rows written before they existed.
+      tx.update(t.shores)
+        .set({ countryId: s.country, countryName: s.countryName, sea: s.sea })
+        .where(and(eq(t.shores.id, s.id), isNull(t.shores.countryName)))
+        .run();
+    }
+    if (!present) {
+      tx.insert(t.routeGraphVersions)
+        .values({ version: graph.version, active: false, createdAt: now })
+        .run();
+      // Tens of thousands of rows: prepared statements on the driver keep this under a second.
+      const insertNode = sqlite.prepare(
+        'INSERT INTO route_nodes (id, graph_version, kind, shore_id, chart_x, chart_y, lng, lat) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+      );
+      for (const n of graph.nodes)
+        insertNode.run(n.id, graph.version, n.kind, n.shoreId, n.x, n.y, n.lng, n.lat);
+      const insertEdge = sqlite.prepare(
+        'INSERT INTO route_edges (graph_version, from_node_id, to_node_id, length) VALUES (?, ?, ?, ?)',
+      );
+      for (const e of graph.edges) insertEdge.run(graph.version, e.from, e.to, e.length);
+    }
+    // The newest graph plans new journeys; older versions stay for their existing plans.
+    tx.update(t.routeGraphVersions).set({ active: false }).run();
+    tx.update(t.routeGraphVersions)
+      .set({ active: true })
+      .where(eq(t.routeGraphVersions.version, graph.version))
+      .run();
   });
 }
 

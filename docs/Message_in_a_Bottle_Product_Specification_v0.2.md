@@ -135,14 +135,16 @@ Proposed implementation:
 - Store the virtual shore identifier, not continuous GPS location.
 - Explain that assignment does not establish residence, nationality, or physical proximity to another person.
 
-The exact meaning of “nearest” and the supported shore catalog remain open. Do not encode a mandatory country-to-neighbor-country mapping. Proposed: shore changes affect future sends only; already-released bottles retain their origin and destination snapshots.
+The exact meaning of “nearest” remains open. Do not encode a mandatory country-to-neighbor-country mapping. Proposed: shore changes affect future sends only; already-released bottles retain their origin and destination snapshots.
+
+Shore catalog (decided 2026-09-14): the catalog is global. Every coastal country and inhabited coastal territory in the bundled Natural Earth 1:50m dataset has at least one selectable shore at a real, recognizable harbour or coastal town; large, island and multi-sea countries have several. Shores are verified to sit on the coast (never inland) and are attributed to the dataset geometry they lie in. Landlocked countries are served by the nearest harbours of neighbouring coastal countries: users anywhere pick any shore by hand. Caspian-only coasts and uninhabited territories are listed as explicit exclusions in the generated coverage report (`docs/SHORE_COVERAGE.md`). The six original fictional shores remain available unchanged.
 
 ### 6.2 Geographic presentation
 
 - Show recognizable land masses, coastlines, seas, oceans, islands, and virtual shores.
-- Do not show country names, borders, flags, or political territory labels.
-- Apply this policy to base-map tiles, zoom levels, search suggestions, legends, and accessibility labels—not just custom overlays.
-- Proposed: use neutral or fictional shore names, with a naming review before launch. Omitting borders cannot guarantee that every geographic name is perceived as neutral.
+- Amended 2026-09-14 (supersedes the earlier “no political borders” decision): show country borders as thin, understated lines from a bundled, offline, credential-free dataset (Natural Earth Admin 0, 1:50m, public domain, packaged by `world-atlas` under ISC) on both the Ocean map and Choose-Your-Shore. Borders are line work only, drawn beneath routes, bottle markers and shore markers.
+- Do not show country or city name labels, flags, or political territory fills on the map. Apply this policy to base-map tiles, zoom levels, legends, and accessibility labels—not just custom overlays.
+- Shore names are real harbour names; each shore also carries the dataset's country name and its sea for search and for the shore card. Country names never appear as map labels.
 - No user-location dots or GPS tracks appear on either map.
 
 ### 6.3 Connected maritime routing
@@ -150,6 +152,8 @@ The exact meaning of “nearest” and the supported shore catalog remain open. 
 Model supported water paths as a versioned graph of shore anchors, sea waypoints, island access points, and permitted passages. Edges must connect navigable virtual water paths. A bottle cannot cross land, jump between disconnected water bodies, or strand on an unreachable island.
 
 Only supported connected shores can be selected. If no route exists, block release with a clear explanation; never fabricate a direct line. Decide explicitly which canals or passages are included. Same-shore sends need an approved local sea-loop or minimum-duration rule rather than an instantaneous arrival.
+
+Decided 2026-09-14: the maritime network is a reusable world graph (version 2) generated offline from the bundled land data — a 1° water grid whose passages are checked against a land mask, plus authored straits and canals (Gibraltar, the Turkish straits, Messina, the Danish straits, Suez, Panama, Bab-el-Mandeb, Hormuz, Singapore, Sunda, Lombok, Torres, Tsugaru, Magellan, Bering, Kerch and several harbour inlets) and connectors from every shore. The Caspian Sea and lakes are excluded. Graph version 1 and every existing route snapshot are kept unchanged; bottles released on an earlier version keep their path and arrival time.
 
 The sender sees a dashed planned route to the chosen destination and a visually distinct completed trail. Storm deviations and rescues may produce a revised connected plan. Keep prior route versions in history. Handle date-line crossings and map wrapping correctly.
 
@@ -444,7 +448,7 @@ Confirmed behavior and proposed safeguards to verify once the relevant decisions
 1. Sender selects a friend; self-send is rejected and repeat sends to that friend are supported.
 2. Release fails safely for invalid recipients, blocks, full capacity, unsupported routes, or rejected content; the draft remains intact.
 3. Retried release creates exactly one bottle and one reservation.
-4. Manual shore selection works without GPS. No exact coordinates or country overlays appear in map responses.
+4. Manual shore selection works without GPS. No user coordinates appear in any response; shore anchors and the dataset's country name are app data. Country borders render as thin lines only, with no name labels (amended 2026-09-14).
 5. Every route and island deviation stays in the connected sea graph, including date-line and same-shore cases.
 6. Sender sees dashed destination route, current simulated position, elapsed time, and all their outgoing history.
 7. Recipient cannot retrieve the incoming bottle or receive prearrival alerts through any ordinary endpoint.
@@ -495,7 +499,7 @@ This roadmap is a plan only. The current task ends with the updated specificatio
 | Random recipient and language matching | Chosen friend with fixed destination |
 | One new bottle daily | Repeat sends, bounded by capacity and approved safeguards |
 | Future destination hidden from sender | Sender sees dashed destination route; recipient remains unaware |
-| General world regions | Country-free presentation and neutral shore naming |
+| General world regions | Real global harbours with thin, unlabelled country borders (amended 2026-09-14; previously country-free presentation) |
 | Decorative-only weather; no permanent loss | Consequential storms, stranding, sinking/destruction |
 | Private shared bottle chain | Conditional public discovery only while stranded |
 | Keep/release and appended notes | Recipient opening completes delivery; rescuer preserves the original letter |

@@ -1,28 +1,68 @@
 import { describe, expect, it } from 'vitest';
-import { assertNeutralStyle, boundsOf, geoAlong, interpolatedProgress } from './mapGeometry.js';
+import {
+  assertMapStylePolicy,
+  boundsOf,
+  geoAlong,
+  interpolatedProgress,
+  unwrapAntimeridian,
+} from './mapGeometry.js';
 
 describe('map style policy (MAP_DESIGN.md)', () => {
-  it('accepts a land-only style', () => {
+  it('accepts land plus thin border lines', () => {
     expect(() =>
-      assertNeutralStyle({
+      assertMapStylePolicy({
         layers: [
           { id: 'sea', type: 'background' },
           { id: 'land', type: 'fill' },
           { id: 'coast', type: 'line', 'source-layer': 'land' },
+          { id: 'borders', type: 'line' },
         ],
       }),
     ).not.toThrow();
   });
 
-  it('rejects labels and political layers', () => {
-    expect(() => assertNeutralStyle({ layers: [{ id: 'names', type: 'symbol' }] })).toThrow(
+  it('rejects labels, named places and borders drawn as anything but lines', () => {
+    expect(() => assertMapStylePolicy({ layers: [{ id: 'names', type: 'symbol' }] })).toThrow(
       /symbol/,
     );
-    for (const sl of ['admin', 'boundary', 'place', 'countries_label', 'poi', 'road', 'border']) {
+    for (const sl of ['place', 'countries_label', 'poi', 'road', 'transportation']) {
       expect(() =>
-        assertNeutralStyle({ layers: [{ id: 'x', type: 'line', 'source-layer': sl }] }),
-      ).toThrow(/political/);
+        assertMapStylePolicy({ layers: [{ id: 'x', type: 'line', 'source-layer': sl }] }),
+      ).toThrow(/labelled/);
     }
+    expect(() =>
+      assertMapStylePolicy({ layers: [{ id: 'x', type: 'fill', 'source-layer': 'boundary' }] }),
+    ).toThrow(/lines/);
+    expect(() => assertMapStylePolicy({ layers: [{ id: 'borders', type: 'fill' }] })).toThrow(
+      /lines/,
+    );
+  });
+});
+
+describe('antimeridian unwrapping', () => {
+  it('keeps a Pacific crossing short instead of wrapping around the globe', () => {
+    const pts = unwrapAntimeridian([
+      { lng: 174.8, lat: -36.8 },
+      { lng: 179.5, lat: -30.5 },
+      { lng: -175.5, lat: -25.5 },
+      { lng: -149.6, lat: -17.5 },
+    ]);
+    expect(pts.map((p) => p.lng)).toEqual([174.8, 179.5, 184.5, 210.4]);
+    expect(pts.map((p) => p.lat)).toEqual([-36.8, -30.5, -25.5, -17.5]);
+  });
+
+  it('leaves ordinary routes alone and handles the westward direction', () => {
+    const atlantic = [
+      { lng: -9.1, lat: 38.7 },
+      { lng: -40, lat: 40 },
+    ];
+    expect(unwrapAntimeridian(atlantic)).toEqual(atlantic);
+    const west = unwrapAntimeridian([
+      { lng: -170, lat: 0 },
+      { lng: 175, lat: 0 },
+    ]);
+    expect(west.map((p) => p.lng)).toEqual([-170, -185]);
+    expect(unwrapAntimeridian([])).toEqual([]);
   });
 });
 

@@ -15,15 +15,18 @@ import {
   type StyleSpecification,
 } from 'maplibre-gl';
 import maplibreWorkerUrl from 'maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url';
+// The SDK's stylesheet travels with this lazy chunk, so sign-in never fetches map assets.
+import 'maplibre-gl/dist/maplibre-gl.css';
 import type { Feature } from 'geojson';
 import type { GeoPoint } from '@mib/shared';
 import { prefersReducedMotion } from '../lib/format.js';
 import {
-  assertNeutralStyle,
+  assertMapStylePolicy,
   boundsOf,
   geoAlong,
   interpolatedProgress,
   lineFeature,
+  unwrapAntimeridian,
   type MapRoute,
 } from '../lib/mapGeometry.js';
 
@@ -40,6 +43,8 @@ export interface MapAnchor {
   role: 'origin' | 'destination' | 'shore';
 }
 
+type MapDebugHost = HTMLDivElement & { __mibMap?: MapLibreMap };
+
 export interface OceanMapHandle {
   zoomIn(): void;
   zoomOut(): void;
@@ -54,6 +59,8 @@ interface Props {
   selectedAnchorId?: string | null;
   // Shore pins as tappable DOM markers, clustered when they crowd and labelled from LABEL_ZOOM.
   showAnchorLabels?: boolean;
+  // Glide the camera to this anchor (e.g. a search result) whenever it changes.
+  focusAnchorId?: string | null;
   fitKey?: string;
   bottomPadding?: number;
   onSelectRoute?: (id: string) => void;
@@ -64,15 +71,21 @@ interface Props {
 const MIN_ZOOM = 1.6;
 const MAX_ZOOM = 7;
 // Shore pins: neighbours closer than this (screen px) fold into one cluster; names appear from
-// this zoom. Both keep a much larger shore catalogue readable on a phone.
+// this zoom (the selected pin is always named). With ~400 harbours worldwide, names only make
+// sense once a region fills the screen.
 const CLUSTER_PX = 44;
-const LABEL_ZOOM = 3.2;
+const LABEL_ZOOM = 4.5;
+const FOCUS_ZOOM = 5;
 const EMPTY_SELECTION: string[] = [];
 const LAND_URL = '/map/land-50m.geojson';
+// Interior country boundaries (Natural Earth admin-0, 1:50m, public domain via world-atlas).
+// Drawn as thin lines only: no fills, no names (spec §6.2).
+const BORDERS_URL = '/map/borders-50m.geojson';
 
-// Map style policy (MAP_DESIGN.md): land geometry and nothing else. The default source is the
-// bundled Natural Earth land polygons (public domain, offline, no credentials). A licensed vector
-// source can be supplied with VITE_MIB_MAP_TILES_URL — only its land layer is ever drawn.
+// Map style policy (MAP_DESIGN.md): land geometry, thin border lines and nothing else. The
+// default source is the bundled Natural Earth land polygons (public domain, offline, no
+// credentials). A licensed vector source can be supplied with VITE_MIB_MAP_TILES_URL — only its
+// land layer is ever drawn; borders always come from the bundled file.
 function buildStyle(): StyleSpecification {
   const tiles = import.meta.env.VITE_MIB_MAP_TILES_URL;
   const sourceLayer = import.meta.env.VITE_MIB_MAP_SOURCE_LAYER;
@@ -85,7 +98,7 @@ function buildStyle(): StyleSpecification {
     : { source: 'world' };
   return {
     version: 8,
-    sources: { world: source },
+    sources: { world: source, borders: { type: 'geojson', data: BORDERS_URL } },
     layers: [
       { id: 'sea', type: 'background', paint: { 'background-color': '#092331' } },
       {
@@ -99,6 +112,17 @@ function buildStyle(): StyleSpecification {
         type: 'line',
         ...landRef,
         paint: { 'line-color': '#6f8f92', 'line-width': 0.8, 'line-opacity': 0.45 },
+      },
+      {
+        id: 'borders',
+        type: 'line',
+        source: 'borders',
+        layout: { 'line-join': 'round' },
+        paint: {
+          'line-color': '#8ea3ab',
+          'line-width': ['interpolate', ['linear'], ['zoom'], 2, 0.45, 5, 0.9],
+          'line-opacity': ['interpolate', ['linear'], ['zoom'], 1.6, 0.22, 4, 0.38],
+        },
       },
     ],
   };
@@ -119,6 +143,7 @@ export function OceanMap({
   selectedRouteIds = EMPTY_SELECTION,
   selectedAnchorId = null,
   showAnchorLabels = false,
+  focusAnchorId = null,
   fitKey = '',
   bottomPadding = 280,
   onSelectRoute,
@@ -159,7 +184,8 @@ export function OceanMap({
     const { routes: rs, anchors: as, selectedRouteIds: sel } = latest.current;
     const chosen = rs.filter((r) => sel.includes(r.id));
     const shown = chosen.length > 0 ? chosen : rs;
-    const points = shown.length > 0 ? shown.flatMap((r) => r.points) : as.map((a) => a.geo);
+    const points =
+      shown.length > 0 ? shown.flatMap((r) => unwrapAntimeridian(r.points)) : as.map((a) => a.geo);
     const b = boundsOf(points);
     if (!b) return;
     const wide = map.getContainer().clientWidth >= 900;
@@ -273,7 +299,7 @@ export function OceanMap({
   useEffect(() => {
     if (!containerRef.current || unsupported) return;
     const style = buildStyle();
-    assertNeutralStyle(style);
+    assertMapStylePolicy(style);
     const map = new MapLibreMap({
       container: containerRef.current,
       style,
@@ -290,6 +316,8 @@ export function OceanMap({
     map.touchZoomRotate.disableRotation();
     map.keyboard.enable();
     mapRef.current = map;
+    // Development-only handle so browser checks can inspect layers; absent from production.
+    if (import.meta.env.DEV) (containerRef.current as MapDebugHost).__mibMap = map;
     map.on('load', () => {
       map.addSource('planned', {
         type: 'geojson',
@@ -386,11 +414,12 @@ export function OceanMap({
       if (r.points.length < 2) continue;
       const selected = selectedRouteIds.includes(r.id);
       const progress = interpolatedProgress(r, now);
-      const { point, index } = geoAlong(r.points, progress);
-      planned.push({ ...lineFeature(r.id, r.points), properties: { id: r.id, selected } });
+      const pts = unwrapAntimeridian(r.points);
+      const { point, index } = geoAlong(pts, progress);
+      planned.push({ ...lineFeature(r.id, pts), properties: { id: r.id, selected } });
       if (progress > 0) {
         trail.push({
-          ...lineFeature(r.id, [...r.points.slice(0, index + 1), point]),
+          ...lineFeature(r.id, [...pts.slice(0, index + 1), point]),
           properties: { id: r.id, selected },
         });
       }
@@ -470,11 +499,12 @@ export function OceanMap({
       for (const r of routes) {
         if (r.points.length < 2) continue;
         const progress = interpolatedProgress(r, now);
-        const { point, index } = geoAlong(r.points, progress);
+        const pts = unwrapAntimeridian(r.points);
+        const { point, index } = geoAlong(pts, progress);
         markersRef.current.get(r.id)?.setLngLat([point.lng, point.lat]);
         if (progress > 0) {
           trail.push({
-            ...lineFeature(r.id, [...r.points.slice(0, index + 1), point]),
+            ...lineFeature(r.id, [...pts.slice(0, index + 1), point]),
             properties: { id: r.id, selected: selectedRouteIds.includes(r.id) },
           });
         }
@@ -484,6 +514,19 @@ export function OceanMap({
     }, 1000);
     return () => clearInterval(id);
   }, [routes, selectedRouteIds, loaded, reduced]);
+
+  // Camera: glide to a focused anchor (search result) close enough for its name to show.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !loaded || !focusAnchorId) return;
+    const a = latest.current.anchors.find((x) => x.id === focusAnchorId);
+    if (!a) return;
+    map.easeTo({
+      center: [a.geo.lng, a.geo.lat],
+      zoom: Math.max(map.getZoom(), FOCUS_ZOOM),
+      duration: reduced ? 0 : 600,
+    });
+  }, [focusAnchorId, loaded, reduced]);
 
   // Camera: fit to the selection whenever the caller asks (fitKey) or on first data.
   const firstFit = useRef(false);

@@ -335,7 +335,12 @@ describe('migration compatibility', () => {
     const { db, sqlite } = createDb(':memory:');
     runMigrations(db, legacyDir);
     const config = testConfig();
-    seedChart(db, config.defaultShoreCapacity, T0);
+    // The chart rows an installation of that age held (written with the columns of the time).
+    sqlite
+      .prepare(
+        "INSERT INTO shores (id, name, chart_x, chart_y, lng, lat, capacity, active) VALUES ('shore_lantern_cove', 'Lantern Cove', 120, 140, -52.3, 47.4, 5, 1)",
+      )
+      .run();
     sqlite
       .prepare(
         "INSERT INTO users (id, username, display_name, shore_id, status, created_at) VALUES ('usr_old', 'oldtimer', 'Oldtimer', 'shore_lantern_cove', 'active', ?)",
@@ -359,6 +364,10 @@ describe('migration compatibility', () => {
     expect(old.username).toBe('oldtimer');
     expect(old.shoreId).toBe('shore_lantern_cove');
     expect(old.passwordHash).toBeNull();
+    // Seeding after the upgrade only adds: the existing shore row is untouched.
+    seedChart(db, config.defaultShoreCapacity, T0);
+    const cove = db.select().from(t.shores).where(eq(t.shores.id, 'shore_lantern_cove')).get()!;
+    expect(cove).toMatchObject({ name: 'Lantern Cove', chartX: 120, chartY: 140, capacity: 5 });
 
     // The upgraded database serves the new API: old accounts cannot sign in until they get a
     // password, new accounts register normally, and the dev seed backfills only seed accounts.

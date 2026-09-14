@@ -8,7 +8,6 @@ import '@fontsource/instrument-sans/600.css';
 import '@fontsource/eb-garamond/400.css';
 import '@fontsource/eb-garamond/400-italic.css';
 import '@fontsource/eb-garamond/500.css';
-import 'maplibre-gl/dist/maplibre-gl.css';
 import './design/tokens.css';
 import './styles.css';
 import { App } from './App.js';

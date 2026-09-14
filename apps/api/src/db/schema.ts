@@ -101,6 +101,11 @@ export const shores = sqliteTable('shores', {
   lat: real('lat'),
   capacity: integer('capacity').notNull(),
   active: integer('active', { mode: 'boolean' }).notNull().default(true),
+  // Real-world attribution for catalogue shores (null for the original fictional shores):
+  // the ISO 3166-1 numeric id of the dataset geometry, its display name and the body of water.
+  countryId: text('country_id'),
+  countryName: text('country_name'),
+  sea: text('sea'),
 });
 
 export const routeGraphVersions = sqliteTable('route_graph_versions', {
