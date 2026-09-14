@@ -632,6 +632,34 @@ button.avatar {
   align-items: center;
   gap: 6px;
 }
+.note.amber .btn-text {
+  display: block;
+  min-height: 36px;
+  padding: 0;
+}
+.dev-mail {
+  text-align: left;
+  font-weight: 400;
+}
+.dev-mail strong {
+  color: var(--status-storm);
+}
+.dev-mail-list {
+  gap: 6px;
+  margin-top: 6px;
+}
+.dev-mail-list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.dev-mail-list .btn-secondary {
+  min-height: 36px;
+  padding: 0 12px;
+  font-size: 12.5px;
+  text-decoration: none;
+}
 .forgot-link {
   align-self: flex-end;
   min-height: 32px;
@@ -682,8 +710,16 @@ button.avatar {
   -webkit-backdrop-filter: blur(20px);
   border: 1px solid rgba(215, 231, 228, 0.18);
   box-shadow: var(--shadow-sheet);
-  max-height: 60dvh;
-  overflow: auto;
+  /* An inline max-height measured from the real space available replaces this fallback. */
+  max-height: 300px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+}
+/* Opened upward when the space below the trigger is too small. */
+.font-select-list.up {
+  top: auto;
+  bottom: calc(100% + 6px);
 }
 .font-select-list:focus {
   outline: 2px solid var(--foam);
@@ -863,10 +899,10 @@ button.avatar {
   bottom: 0;
   z-index: 20;
   height: calc(var(--nav-height) + var(--nav-safe-bottom) - 22px);
-  padding: 0 12px var(--nav-safe-bottom);
+  padding: 4px 8px var(--nav-safe-bottom);
   display: grid;
   grid-template-columns: repeat(5, 1fr);
-  align-items: end;
+  align-items: center;
   background: var(--nav-bg);
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
@@ -882,35 +918,21 @@ button.avatar {
   position: relative;
   display: flex;
   flex-direction: column;
+  justify-content: center;
   align-items: center;
-  gap: 5px;
+  gap: 4px;
   min-height: var(--min-touch);
-  padding-bottom: 2px;
+  padding: 4px 2px;
+  border-radius: 12px;
   color: rgba(222, 234, 233, 0.5);
   font-size: 9.5px;
   font-weight: 500;
   letter-spacing: 0.2px;
 }
+/* Current destination: the one highlight in the bar. */
 .nav-item[aria-current='page'] {
   color: var(--foam-white);
-}
-.nav-item.write {
-  gap: 6px;
-  color: rgba(222, 234, 233, 0.7);
-}
-.write-pill {
-  width: var(--write-pill-size);
-  height: var(--write-pill-size);
-  border-radius: var(--radius-nav-pill);
-  background: var(--write-pill);
-  color: var(--on-light);
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  box-shadow: var(--shadow-button);
-}
-.nav.on-3d .write-pill {
-  background: rgba(230, 240, 238, 0.85);
+  background: rgba(143, 211, 204, 0.12);
 }
 .nav-badge {
   position: absolute;
@@ -1593,9 +1615,6 @@ button.avatar {
   .nav.on-3d {
     background: rgba(4, 14, 22, 0.92);
     border-right: var(--nav-border);
-  }
-  .nav-item.write {
-    order: -1;
   }
   .world-screen {
     left: var(--rail-width);

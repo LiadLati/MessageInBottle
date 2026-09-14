@@ -1,6 +1,6 @@
-import { useId, useState, type FormEvent } from 'react';
+import { useEffect, useId, useState, type FormEvent } from 'react';
 import { confirmationProblem, emailProblem, passwordProblem, usernameProblem } from '@mib/shared';
-import { ApiError, UNREACHABLE, api } from '../api/client.js';
+import { ApiError, UNREACHABLE, api, type HealthResponse } from '../api/client.js';
 import { Icon } from '../design/Icon.js';
 import { useSession } from '../state/session.js';
 
@@ -100,6 +100,70 @@ function PasswordInput({
   );
 }
 
+// Development builds do not deliver mail: the outbox captures it in memory instead. Saying so
+// on the recovery screen — and offering the captured messages — is the difference between a
+// flow that looks broken and one that is simply not wired to a mail provider yet. It states
+// nothing about the address that was just submitted, so it cannot reveal whether it is known.
+function DevMailNotice({ health }: { health: HealthResponse }) {
+  const [messages, setMessages] = useState<Array<{ id: number; to: string; text: string }> | null>(
+    null,
+  );
+  const [busy, setBusy] = useState(false);
+  const provider = health.mail?.provider ?? 'disabled';
+
+  const load = async () => {
+    setBusy(true);
+    try {
+      setMessages((await api.devOutbox()).messages);
+    } catch {
+      setMessages([]);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="note amber dev-mail" role="status">
+      <strong>Development mode: no email is sent.</strong>{' '}
+      {provider === 'outbox'
+        ? 'Messages are captured inside the app. Open the development outbox to find the reset link.'
+        : 'Mail is switched off entirely. Configure an SMTP provider to deliver messages.'}
+      {provider === 'outbox' ? (
+        <>
+          <button type="button" className="btn-text" disabled={busy} onClick={() => void load()}>
+            {busy
+              ? 'Opening…'
+              : messages
+                ? 'Refresh development outbox'
+                : 'Open development outbox'}
+          </button>
+          {messages ? (
+            messages.length === 0 ? (
+              <span className="t-meta">Nothing captured yet.</span>
+            ) : (
+              <ul className="list dev-mail-list">
+                {[...messages].reverse().map((m) => {
+                  const link = /https?:\/\/\S+/.exec(m.text)?.[0];
+                  return (
+                    <li key={m.id}>
+                      <span className="t-meta">{m.to}</span>
+                      {link ? (
+                        <a className="btn-secondary" href={link}>
+                          Open reset link
+                        </a>
+                      ) : null}
+                    </li>
+                  );
+                })}
+              </ul>
+            )
+          ) : null}
+        </>
+      ) : null}
+    </div>
+  );
+}
+
 export function LoginScreen({ resetToken, onResetDone }: Props) {
   const { login, register } = useSession();
   const [mode, setMode] = useState<Mode>(resetToken ? 'reset' : 'signin');
@@ -114,7 +178,24 @@ export function LoginScreen({ resetToken, onResetDone }: Props) {
   const [failure, setFailure] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [health, setHealth] = useState<HealthResponse | null>(null);
   const ids = { u: useId(), e: useId(), p: useId(), c: useId() };
+
+  // Only the recovery screens need to know how mail is handled.
+  const wantsMailInfo = mode === 'forgot' || mode === 'reset';
+  useEffect(() => {
+    if (!wantsMailInfo || health) return;
+    let cancelled = false;
+    void api
+      .health()
+      .then((h) => {
+        if (!cancelled) setHealth(h);
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [wantsMailInfo, health]);
 
   const registering = mode === 'register';
   const resetting = mode === 'reset';
@@ -329,6 +410,9 @@ export function LoginScreen({ resetToken, onResetDone }: Props) {
             <p className="note success" role="status">
               {success}
             </p>
+          ) : null}
+          {forgot && health?.devMode && health.mail?.delivers === false ? (
+            <DevMailNotice health={health} />
           ) : null}
           {forgot && success ? null : (
             <button type="submit" className="btn-primary" disabled={busy}>

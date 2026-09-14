@@ -7,6 +7,10 @@ import type { AppContext } from './services/context.js';
 // That is why the imports below are dynamic: a failure to load a native module or a missing
 // dependency is reported here instead of as a bare stack trace from Node's loader.
 async function main(): Promise<void> {
+  // Before anything reads configuration: a .env file is how the README tells people to supply
+  // SMTP credentials, so it has to be in process.env by the time loadConfig runs.
+  const { loadEnvFiles } = await import('./lib/env.js');
+  const loadedEnv = loadEnvFiles();
   const { loadConfig } = await import('./config.js');
   const { createDb, runMigrations } = await import('./db/client.js');
   const { seedChart, seedUsers } = await import('./db/seed.js');
@@ -41,9 +45,17 @@ async function main(): Promise<void> {
   worker.unref();
 
   const server = serve({ fetch: app.fetch, port: config.port }, (info) => {
+    for (const file of loadedEnv) console.log(`Loaded environment from ${file}`);
     console.log(
       `Message in a Bottle API listening on http://localhost:${info.port} (devMode=${config.devMode}, mail=${config.mail.provider})`,
     );
+    if (config.mail.provider !== 'smtp') {
+      console.log(
+        config.mail.provider === 'outbox'
+          ? '  Mail is CAPTURED, not delivered: read it at GET /api/dev/outbox or in the app’s dev bar.'
+          : '  Mail is DISABLED: nothing is delivered. Set MIB_MAIL_PROVIDER=smtp with MIB_SMTP_* to send.',
+      );
+    }
   });
   server.on('error', (err) => fatal(err, config.port));
 }

@@ -24,7 +24,21 @@ export function createApp(ctx: AppContext) {
   app.use('/api/*', cors({ origin: ctx.config.corsOrigin, credentials: false }));
 
   app.get('/api/health', (c) =>
-    c.json({ ok: true, serverTime: new Date(ctx.clock.now()).toISOString() }),
+    c.json({
+      ok: true,
+      serverTime: new Date(ctx.clock.now()).toISOString(),
+      // Development builds say how mail is handled, so the password-recovery screen can state
+      // plainly that nothing will be delivered. Omitted entirely outside development.
+      ...(ctx.config.devMode
+        ? {
+            devMode: true,
+            mail: {
+              provider: ctx.config.mail.provider,
+              delivers: ctx.config.mail.provider === 'smtp',
+            },
+          }
+        : {}),
+    }),
   );
   app.route('/api/auth', authRoutes());
   app.route('/api/chart', chartRoutes());

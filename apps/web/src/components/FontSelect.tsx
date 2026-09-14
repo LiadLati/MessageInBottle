@@ -1,4 +1,12 @@
-import { useEffect, useId, useRef, useState, type KeyboardEvent } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useId,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type KeyboardEvent,
+} from 'react';
 import type { FontDefinition, LetterFont } from '@mib/shared';
 import { Icon } from '../design/Icon.js';
 import { letterTextStyle } from './LetterPaper.js';
@@ -8,6 +16,24 @@ interface Props {
   options: FontDefinition[];
   value: LetterFont;
   onChange: (font: LetterFont) => void;
+}
+
+// The open list never grows past the space it actually has: it is capped well short of the
+// viewport, and it opens upward when there is more room above the trigger than below. Whatever
+// does not fit scrolls inside the list, so every face stays reachable on short phones.
+const MAX_LIST_HEIGHT = 300;
+const COMFORTABLE = 200;
+const GAP = 6;
+const EDGE = 12;
+
+// How much of the bottom of the viewport is covered by the fixed navigation. The desktop layout
+// puts the same element down the left side as a full-height rail, which obstructs nothing here.
+function bottomObstruction(): number {
+  const nav = document.querySelector('nav.nav');
+  if (!nav) return 0;
+  const r = nav.getBoundingClientRect();
+  const bottomDocked = r.top > window.innerHeight / 2 && r.width > window.innerWidth * 0.6;
+  return bottomDocked ? Math.max(0, window.innerHeight - r.top) : 0;
 }
 
 // Accessible single-select dropdown (button + listbox) for the visual font. Every option is
@@ -21,21 +47,62 @@ export function FontSelect({ label, options, value, onChange }: Props) {
       options.findIndex((o) => o.id === value),
     ),
   );
+  const [placement, setPlacement] = useState({ up: false, maxHeight: COMFORTABLE });
   const buttonRef = useRef<HTMLButtonElement>(null);
   const listRef = useRef<HTMLUListElement>(null);
   const rootRef = useRef<HTMLDivElement>(null);
   const id = useId();
   const current = options.find((o) => o.id === value) ?? options[0]!;
 
+  const measure = useCallback(() => {
+    // Measured against the field box, not the trigger: the list is anchored to this element
+    // (`top`/`bottom: calc(100% + gap)`), and it also contains the label above the button, so
+    // using the trigger would over-estimate the room above by the height of that label.
+    const anchor = rootRef.current;
+    if (!anchor) return;
+    const rect = anchor.getBoundingClientRect();
+    const below = window.innerHeight - rect.bottom - GAP - bottomObstruction() - EDGE;
+    const above = rect.top - GAP - EDGE;
+    const up = below < COMFORTABLE && above > below;
+    const room = Math.max(0, up ? above : below);
+    setPlacement({ up, maxHeight: Math.min(MAX_LIST_HEIGHT, room) });
+  }, []);
+
+  // Measured before paint so the list is never drawn at the wrong size or on the wrong side.
+  useLayoutEffect(() => {
+    if (open) measure();
+  }, [open, measure]);
+
   useEffect(() => {
     if (!open) return;
-    listRef.current?.focus();
+    // preventScroll matters: focusing the list can otherwise scroll the page to reveal it,
+    // which moves the trigger and would leave the size measured a moment ago wrong. Measure
+    // once more on the next frame in case anything else shifted the layout.
+    listRef.current?.focus({ preventScroll: true });
+    const frame = requestAnimationFrame(() => measure());
     const onDown = (e: MouseEvent) => {
       if (!rootRef.current?.contains(e.target as Node)) setOpen(false);
     };
+    // Capture phase: the page behind the dropdown scrolls, and so may an ancestor.
+    const reflow = () => measure();
     document.addEventListener('mousedown', onDown);
-    return () => document.removeEventListener('mousedown', onDown);
-  }, [open]);
+    window.addEventListener('scroll', reflow, true);
+    window.addEventListener('resize', reflow);
+    window.visualViewport?.addEventListener('resize', reflow);
+    return () => {
+      cancelAnimationFrame(frame);
+      document.removeEventListener('mousedown', onDown);
+      window.removeEventListener('scroll', reflow, true);
+      window.removeEventListener('resize', reflow);
+      window.visualViewport?.removeEventListener('resize', reflow);
+    };
+  }, [open, measure]);
+
+  // Keep the highlighted option inside the scrolled area as the selection moves by keyboard.
+  useEffect(() => {
+    if (!open) return;
+    document.getElementById(`${id}-opt-${active}`)?.scrollIntoView({ block: 'nearest' });
+  }, [open, active, id]);
 
   const choose = (index: number) => {
     const opt = options[index];
@@ -126,7 +193,8 @@ export function FontSelect({ label, options, value, onChange }: Props) {
       {open ? (
         <ul
           ref={listRef}
-          className="font-select-list"
+          className={`font-select-list${placement.up ? ' up' : ''}`}
+          style={{ maxHeight: placement.maxHeight }}
           role="listbox"
           tabIndex={-1}
           aria-labelledby={`${id}-label`}

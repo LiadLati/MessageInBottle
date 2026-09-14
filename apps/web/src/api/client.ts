@@ -28,6 +28,14 @@ export class ApiError extends Error {
 // the API answered with a server error that is not an API response (a dev proxy whose upstream
 // is down answers exactly this way: 5xx with an empty body). Kept distinct from a real server
 // error so the UI can say "the server is not running" instead of blaming the request.
+// Reported by the API. `mail` and `devMode` are present only in development builds.
+export interface HealthResponse {
+  ok: boolean;
+  serverTime: string;
+  devMode?: boolean;
+  mail?: { provider: string; delivers: boolean };
+}
+
 export const UNREACHABLE = 'unreachable';
 export const UNREACHABLE_MESSAGE =
   'Cannot reach the Message in a Bottle server. Check that the API is running, then try again.';
@@ -79,6 +87,7 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
 }
 
 export const api = {
+  health: () => request<HealthResponse>('GET', '/health'),
   register: (username: string, email: string, password: string) =>
     request<SessionResponse>('POST', '/auth/register', { username, email, password }),
   forgotPassword: (email: string) =>

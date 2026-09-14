@@ -15,19 +15,11 @@ import { jsonBody } from '../validate.js';
 // Mounted only when MIB_DEV_MODE=true; time only ever moves forward.
 export function devRoutes() {
   const r = new Hono<AppEnv>();
-  r.use('*', requireAuth);
 
-  const status = (ctx: AppEnv['Variables']['ctx']): DevStatus => ({
-    devMode: ctx.config.devMode,
-    serverTime: new Date(ctx.clock.now()).toISOString(),
-    clockOffsetMs: ctx.clock instanceof DevClock ? ctx.clock.offset() : 0,
-    msPerChartUnit: ctx.config.msPerChartUnit,
-  });
-
-  r.get('/status', (c) => c.json(status(c.get('ctx'))));
-
-  // Development outbox: the captured e-mails (password-reset links) so the recovery flow can be
-  // exercised locally. Only exists with the outbox mailer, which itself exists only in dev mode.
+  // Registered before the authentication middleware on purpose: password recovery is used while
+  // signed out, so the captured message has to be readable then. This router is mounted only
+  // when MIB_DEV_MODE is on, and the outbox only ever exists for the development mailer, so no
+  // production deployment can reach it.
   r.get('/outbox', (c) => {
     const mailer = c.get('ctx').mailer;
     const messages =
@@ -42,6 +34,17 @@ export function devRoutes() {
         : [];
     return c.json({ provider: mailer.kind, messages });
   });
+
+  r.use('*', requireAuth);
+
+  const status = (ctx: AppEnv['Variables']['ctx']): DevStatus => ({
+    devMode: ctx.config.devMode,
+    serverTime: new Date(ctx.clock.now()).toISOString(),
+    clockOffsetMs: ctx.clock instanceof DevClock ? ctx.clock.offset() : 0,
+    msPerChartUnit: ctx.config.msPerChartUnit,
+  });
+
+  r.get('/status', (c) => c.json(status(c.get('ctx'))));
 
   r.post('/advance', jsonBody(DevAdvanceRequestSchema), (c) => {
     const ctx = c.get('ctx');

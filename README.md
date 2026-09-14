@@ -115,6 +115,35 @@ set in `apps/web/.env` (see `.env.example`):
 Only that one layer is ever drawn; `assertNeutralStyle` refuses any style containing symbol
 (label) layers or administrative/boundary/place source layers before the map is created.
 
+### Email delivery (password recovery)
+
+`MIB_MAIL_PROVIDER` decides what happens to the reset message, and **the development default
+delivers nothing**:
+
+| Provider   | What happens                                                                   |
+| ---------- | ------------------------------------------------------------------------------ |
+| `outbox`   | Default in dev mode. Captured in memory; read it in the app's dev bar under "Dev outbox", on the Forgot-password screen, or at `GET /api/dev/outbox`. Refused outside dev mode. |
+| `smtp`     | Sent through your own SMTP provider using `MIB_SMTP_*`.                          |
+| `disabled` | Default outside dev mode. Silently dropped.                                      |
+
+The endpoint answers identically in every case, so the response never reveals whether an address
+is registered. To actually receive mail, put these in `apps/api/.env` (loaded on start; real
+environment variables take precedence, and the file is git-ignored):
+
+```
+MIB_MAIL_PROVIDER=smtp
+MIB_MAIL_FROM="Message in a Bottle <no-reply@your-domain>"
+MIB_SMTP_HOST=smtp.your-provider.example
+MIB_SMTP_PORT=587
+MIB_SMTP_SECURE=false        # true for port 465
+MIB_SMTP_USER=your-username
+MIB_SMTP_PASS=your-password
+MIB_APP_URL=http://localhost:5173   # base of the link in the message
+```
+
+You supply the provider and credentials; none are bundled. Restart the API afterwards — its
+startup line reports the active provider, and warns when mail is captured or disabled.
+
 ### If the app says it cannot reach the server
 
 Sign-in (and every other action) reports `Cannot reach the Message in a Bottle server` when the

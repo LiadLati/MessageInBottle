@@ -85,21 +85,27 @@ function DevPanelInner({ onChanged, refreshKey }: { onChanged: () => void; refre
               ))}
             </div>
           ) : null}
-          {outbox.data && outbox.data.messages.length > 0 ? (
+          {outbox.data && outbox.data.provider !== 'smtp' ? (
             <div className="row outbox">
-              <span className="t-meta">Mail outbox ({outbox.data.provider}):</span>
-              {outbox.data.messages.slice(-3).map((m) => {
-                const link = /https?:\/\/\S+/.exec(m.text)?.[0];
-                return link ? (
-                  <a key={m.id} className="chip" href={link}>
-                    {m.subject} → {m.to}
-                  </a>
-                ) : (
-                  <span key={m.id} className="chip">
-                    {m.subject} → {m.to}
-                  </span>
-                );
-              })}
+              <span className="t-meta">
+                Dev outbox · mail is captured here, never delivered
+                {outbox.data.messages.length === 0 ? ' · nothing captured yet' : ''}
+              </span>
+              {outbox.data.messages
+                .slice(-3)
+                .reverse()
+                .map((m) => {
+                  const link = /https?:\/\/\S+/.exec(m.text)?.[0];
+                  return link ? (
+                    <a key={m.id} className="chip" href={link}>
+                      Open reset link → {m.to}
+                    </a>
+                  ) : (
+                    <span key={m.id} className="chip">
+                      {m.subject} → {m.to}
+                    </span>
+                  );
+                })}
             </div>
           ) : null}
           <ErrorNote error={error} />

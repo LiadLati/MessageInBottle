@@ -19,28 +19,19 @@ interface Props {
   onSelect: (tab: Tab) => void;
 }
 
-// Bottom nav on phones (Write is the raised pill), left rail from 900px up.
+// Bottom bar on phones, left rail from 900px up. Every destination is drawn the same way and
+// sits inside the bar's own height; the only difference between them is which one is current,
+// so exactly one is ever highlighted — the screen you are on.
 export function Nav({ active, on3d = false, unread = 0, pendingFriends = 0, onSelect }: Props) {
   return (
     <nav className={`nav${on3d ? ' on-3d' : ''}`} aria-label="Main">
       {ITEMS.map((item) => {
         const current = item.id === active;
-        if (item.id === 'write') {
-          return (
-            <button
-              key={item.id}
-              type="button"
-              className="nav-item write"
-              aria-current={current ? 'page' : undefined}
-              onClick={() => onSelect(item.id)}
-            >
-              <span className="write-pill">
-                <Icon name="write" size={20} />
-              </span>
-              <span>{item.label}</span>
-            </button>
-          );
-        }
+        const count = item.id === 'shore' ? unread : item.id === 'friends' ? pendingFriends : 0;
+        const countLabel =
+          item.id === 'shore'
+            ? `${count} unread`
+            : `${count} pending friend ${count === 1 ? 'request' : 'requests'}`;
         return (
           <button
             key={item.id}
@@ -51,17 +42,9 @@ export function Nav({ active, on3d = false, unread = 0, pendingFriends = 0, onSe
           >
             <Icon name={item.icon} />
             <span>{item.label}</span>
-            {item.id === 'shore' && unread > 0 ? (
-              <span className="nav-badge" aria-label={`${unread} unread`}>
-                {unread}
-              </span>
-            ) : null}
-            {item.id === 'friends' && pendingFriends > 0 ? (
-              <span
-                className="nav-badge"
-                aria-label={`${pendingFriends} pending friend ${pendingFriends === 1 ? 'request' : 'requests'}`}
-              >
-                {pendingFriends > 9 ? '9+' : pendingFriends}
+            {count > 0 ? (
+              <span className="nav-badge" aria-label={countLabel}>
+                {count > 9 ? '9+' : count}
               </span>
             ) : null}
           </button>
