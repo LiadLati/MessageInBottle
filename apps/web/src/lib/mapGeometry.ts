@@ -17,17 +17,41 @@ export interface StyleLayerLike {
   'source-layer'?: string | undefined;
 }
 
-// Map style policy (MAP_DESIGN.md): the rendered style may contain land geometry and nothing
-// else. Rejects any symbol (text/icon) layer and any political source layer before the map is
-// created, so a provider style can never re-introduce labels or boundaries silently.
-export function assertNeutralStyle(style: { layers: StyleLayerLike[] }): void {
+// Map style policy (MAP_DESIGN.md, spec §6.2): land geometry, thin country border lines and
+// nothing else. Rejects any symbol (text/icon) layer and any place/label/road source layer
+// before the map is created, so a provider style can never re-introduce names silently. Border
+// data may only ever be drawn as a line layer (no fills, no labels).
+export function assertMapStylePolicy(style: { layers: StyleLayerLike[] }): void {
   for (const layer of style.layers) {
     if (layer.type === 'symbol') throw new Error(`map policy: symbol layer ${layer.id}`);
     const sl = layer['source-layer'] ?? '';
-    if (/admin|boundary|place|label|poi|road|country|border/i.test(sl)) {
-      throw new Error(`map policy: political source-layer ${sl}`);
+    if (/place|label|poi|road|transport|building|housenum|water_name/i.test(sl)) {
+      throw new Error(`map policy: labelled source-layer ${sl}`);
+    }
+    if (/admin|boundary|border|country/i.test(`${layer.id} ${sl}`) && layer.type !== 'line') {
+      throw new Error(`map policy: borders may only be drawn as lines (${layer.id})`);
     }
   }
+}
+
+// Shifts longitudes so consecutive points never jump more than 180°: a Pacific route drawn
+// from 175 to -170 becomes 175 → 190 and renders as one short line across the antimeridian
+// instead of a line around the globe. Points are otherwise untouched (no reprojection).
+export function unwrapAntimeridian(points: GeoPoint[]): GeoPoint[] {
+  const out: GeoPoint[] = [];
+  let offset = 0;
+  let prev: number | null = null;
+  for (const p of points) {
+    if (prev !== null) {
+      const d = p.lng + offset - prev;
+      if (d > 180) offset -= 360;
+      else if (d < -180) offset += 360;
+    }
+    const lng = p.lng + offset;
+    out.push({ lng, lat: p.lat });
+    prev = lng;
+  }
+  return out;
 }
 
 export function lineFeature(id: string, coords: GeoPoint[]): Feature<LineString> {
@@ -102,4 +126,65 @@ export function boundsOf(points: GeoPoint[]): Bounds | null {
     [minLng, minLat],
     [maxLng, maxLat],
   ];
+}
+
+// ---------- shore pin clustering ----------
+export interface PinPoint<T> {
+  item: T;
+  x: number;
+  y: number;
+}
+export interface PinCluster<T> {
+  members: T[];
+  x: number;
+  y: number;
+  // Screen offset per member when the cluster is spread ("spiderfied") because zooming can no
+  // longer separate its harbours; empty for a real cluster or a single pin.
+  offsets: Array<[number, number]>;
+}
+
+// Greedy screen-space clustering. A cluster only survives while zooming in could still pull
+// its members `clusterPx` apart before `maxZoom`; otherwise (harbours a few km apart, e.g. the
+// two sides of one gulf) it dissolves into a ring of offset pins around the real position, so
+// every harbour stays individually visible and selectable. Offsets are purely visual.
+export function clusterPins<T>(
+  points: Array<PinPoint<T>>,
+  zoom: number,
+  maxZoom: number,
+  clusterPx: number,
+): Array<PinCluster<T>> {
+  const groups: Array<{ points: Array<PinPoint<T>>; x: number; y: number }> = [];
+  for (const pt of points) {
+    const near = groups.find((g) => Math.hypot(g.x - pt.x, g.y - pt.y) < clusterPx);
+    if (near) {
+      near.points.push(pt);
+      near.x = (near.x * (near.points.length - 1) + pt.x) / near.points.length;
+      near.y = (near.y * (near.points.length - 1) + pt.y) / near.points.length;
+    } else groups.push({ points: [pt], x: pt.x, y: pt.y });
+  }
+  const scale = Math.pow(2, Math.max(0, maxZoom - zoom));
+  return groups.map((g) => {
+    const members = g.points.map((p) => p.item);
+    if (members.length === 1) return { members, x: g.x, y: g.y, offsets: [] };
+    // Would the two farthest members be apart at max zoom? Then zooming still helps.
+    let spread = 0;
+    for (let i = 0; i < g.points.length; i++)
+      for (let j = i + 1; j < g.points.length; j++) {
+        const a = g.points[i]!;
+        const b = g.points[j]!;
+        spread = Math.max(spread, Math.hypot(a.x - b.x, a.y - b.y));
+      }
+    const atMax = zoom >= maxZoom - 0.05;
+    if (!atMax && spread * scale >= clusterPx) return { members, x: g.x, y: g.y, offsets: [] };
+    return { members, x: g.x, y: g.y, offsets: spreadOffsets(members.length) };
+  });
+}
+
+// Ring offsets (px) for n pins around their shared position, starting at the top.
+export function spreadOffsets(n: number): Array<[number, number]> {
+  const radius = 26 + 6 * Math.max(0, n - 2);
+  return Array.from({ length: n }, (_, i) => {
+    const angle = -Math.PI / 2 + (2 * Math.PI * i) / n;
+    return [Math.round(Math.cos(angle) * radius), Math.round(Math.sin(angle) * radius)];
+  });
 }

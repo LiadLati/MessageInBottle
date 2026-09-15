@@ -48,34 +48,79 @@ export function shoreNodeId(graph: RouteGraph, shoreId: string): string | null {
   return null;
 }
 
+// Binary min-heap keyed on tentative distance; entries are never decreased in place, stale
+// ones are skipped on pop (lazy deletion), which keeps the code short and the run O(E log V).
+class MinHeap {
+  private readonly items: Array<{ id: string; d: number }> = [];
+  get size(): number {
+    return this.items.length;
+  }
+  push(id: string, d: number): void {
+    const items = this.items;
+    items.push({ id, d });
+    let i = items.length - 1;
+    while (i > 0) {
+      const parent = (i - 1) >> 1;
+      if (items[parent]!.d <= items[i]!.d) break;
+      [items[parent], items[i]] = [items[i]!, items[parent]!];
+      i = parent;
+    }
+  }
+  pop(): { id: string; d: number } | undefined {
+    const items = this.items;
+    const top = items[0];
+    const last = items.pop();
+    if (top === undefined || last === undefined) return undefined;
+    if (items.length > 0) {
+      items[0] = last;
+      let i = 0;
+      for (;;) {
+        const l = 2 * i + 1;
+        const r = l + 1;
+        let m = i;
+        if (l < items.length && items[l]!.d < items[m]!.d) m = l;
+        if (r < items.length && items[r]!.d < items[m]!.d) m = r;
+        if (m === i) break;
+        [items[m], items[i]] = [items[i]!, items[m]!];
+        i = m;
+      }
+    }
+    return top;
+  }
+}
+
 // Islands are stranding points, never through-passages; only the connected water graph is
 // used for planning. Returns null when no connected sea path exists (spec §6.3).
 function dijkstra(graph: RouteGraph, from: string, to: string): PlannedPath | null {
   const dist = new Map<string, number>([[from, 0]]);
   const prev = new Map<string, string>();
-  const visited = new Set<string>();
-  while (true) {
-    let current: string | null = null;
-    let best = Infinity;
-    for (const [id, d] of dist) {
-      if (!visited.has(id) && d < best) {
-        best = d;
-        current = id;
-      }
+  const done = new Set<string>();
+  const heap = new MinHeap();
+  heap.push(from, 0);
+  let reached = false;
+  while (heap.size > 0) {
+    const { id: current, d } = heap.pop()!;
+    if (done.has(current)) continue;
+    if (current === to) {
+      reached = true;
+      break;
     }
-    if (current === null) return null;
-    if (current === to) break;
-    visited.add(current);
+    done.add(current);
+    // Shores and islands are endpoints, never passages: a harbour's connectors may not be
+    // chained to cut across its headland.
+    if (current !== from && graph.nodes.get(current)!.kind === 'shore') continue;
     for (const edge of graph.adjacency.get(current) ?? []) {
       const nextNode = graph.nodes.get(edge.to)!;
       if (nextNode.kind === 'island' && edge.to !== to) continue;
-      const candidate = best + edge.length;
+      const candidate = d + edge.length;
       if (candidate < (dist.get(edge.to) ?? Infinity)) {
         dist.set(edge.to, candidate);
         prev.set(edge.to, current);
+        heap.push(edge.to, candidate);
       }
     }
   }
+  if (!reached) return null;
   const nodeIds: string[] = [];
   for (let cursor: string | undefined = to; cursor !== undefined; cursor = prev.get(cursor)) {
     nodeIds.unshift(cursor);

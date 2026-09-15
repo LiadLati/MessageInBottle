@@ -1,11 +1,12 @@
 import { useMemo, useState } from 'react';
-import type { ChartResponse } from '@mib/shared';
+import type { ShoreDto } from '@mib/shared';
 import { api } from '../api/client.js';
 import { OceanMap } from '../components/lazy.js';
 import type { MapAnchor } from '../components/OceanMap.js';
 import { ErrorNote, Skeleton } from '../components/ui.js';
 import { Icon } from '../design/Icon.js';
 import { useAsync } from '../lib/useAsync.js';
+import { describeShore, matchesShore } from '../lib/shores.js';
 import { useSession } from '../state/session.js';
 
 interface Props {
@@ -13,37 +14,39 @@ interface Props {
   onCancel?: (() => void) | undefined;
 }
 
-function passagesPerShore(chart: ChartResponse): Record<string, number> {
-  const nodeShore = new Map(chart.nodes.map((n) => [n.id, n.shoreId]));
-  const out: Record<string, number> = {};
-  for (const e of chart.edges) {
-    for (const end of [e.from, e.to]) {
-      const shoreId = nodeShore.get(end);
-      if (shoreId) out[shoreId] = (out[shoreId] ?? 0) + 1;
-    }
-  }
-  return out;
-}
-
 // Shore selection over the real map (IA S9c). Manual only: no GPS, no coordinates collected.
-// On phones the map is the whole screen: pins (clustered when dense) are the list; picking one
-// raises a compact card with the shore's details and "Anchor here". Desktop keeps the side pane.
+// On phones the map is the whole screen: pins (clustered when dense) are the list, a search
+// field finds a harbour by name or sea; picking one raises a compact card with the
+// shore's details and "Anchor here". Desktop keeps a searchable side pane.
 export function ShoreSetupScreen({ onDone, onCancel }: Props) {
   const { user, refresh } = useSession();
   const chart = useAsync(() => api.chart(), []);
   const [choice, setChoice] = useState<string | null>(user?.shoreId ?? null);
+  const [focus, setFocus] = useState<string | null>(null);
+  const [query, setQuery] = useState('');
   const [error, setError] = useState<Error | null>(null);
   const [busy, setBusy] = useState(false);
 
-  const anchors: MapAnchor[] = useMemo(
-    () =>
-      (chart.data?.shores ?? [])
-        .filter((s) => s.geo)
-        .map((s) => ({ id: s.id, name: s.name, geo: s.geo!, role: 'shore' as const })),
+  const shores = useMemo(
+    () => [...(chart.data?.shores ?? [])].sort((a, b) => a.name.localeCompare(b.name)),
     [chart.data],
   );
-  const passages = useMemo(() => (chart.data ? passagesPerShore(chart.data) : {}), [chart.data]);
-  const chosen = chart.data?.shores.find((s) => s.id === choice) ?? null;
+  const anchors: MapAnchor[] = useMemo(
+    () =>
+      shores
+        .filter((s) => s.geo)
+        .map((s) => ({ id: s.id, name: s.name, geo: s.geo!, role: 'shore' as const })),
+    [shores],
+  );
+  const filtered = useMemo(() => shores.filter((s) => matchesShore(s, query)), [shores, query]);
+  const chosen = shores.find((s) => s.id === choice) ?? null;
+  const searching = query.trim().length > 0;
+
+  const pick = (id: string) => {
+    setChoice(id);
+    setFocus(id);
+    setQuery('');
+  };
 
   const save = async () => {
     if (!choice) return;
@@ -61,8 +64,6 @@ export function ShoreSetupScreen({ onDone, onCancel }: Props) {
   };
 
   const changing = Boolean(user?.shoreId);
-  const details = (id: string, capacity: number) =>
-    `Connected to ${passages[id] ?? 0} ${passages[id] === 1 ? 'passage' : 'passages'} · ${capacity} places`;
   const anchorButton = (
     <button
       type="button"
@@ -73,6 +74,57 @@ export function ShoreSetupScreen({ onDone, onCancel }: Props) {
       {busy ? 'Anchoring…' : choice === user?.shoreId ? 'Anchored here' : 'Anchor here'}
     </button>
   );
+  const searchField = (id: string) => (
+    <div className="shore-search-field">
+      <Icon name="search" size={16} />
+      <input
+        id={id}
+        className="input"
+        type="search"
+        autoComplete="off"
+        placeholder="Search a harbour or sea"
+        aria-label="Search shores"
+        value={query}
+        onChange={(e) => setQuery(e.target.value)}
+      />
+      {searching ? (
+        <button
+          type="button"
+          className="clear"
+          aria-label="Clear search"
+          onClick={() => setQuery('')}
+        >
+          <Icon name="close" size={14} />
+        </button>
+      ) : null}
+    </div>
+  );
+  const shoreRow = (s: ShoreDto) => {
+    const selected = choice === s.id;
+    return (
+      <li key={s.id}>
+        <button
+          type="button"
+          role="radio"
+          aria-checked={selected}
+          className={`row-item selectable${selected ? ' selected' : ''}`}
+          onClick={() => pick(s.id)}
+        >
+          <span className="grow">
+            <span className="t-card-title" style={{ display: 'block' }}>
+              {s.name}
+            </span>
+            <span className="t-meta">{describeShore(s)}</span>
+          </span>
+          {selected ? (
+            <span className="check-circle" aria-hidden>
+              <Icon name="check" size={14} />
+            </span>
+          ) : null}
+        </button>
+      </li>
+    );
+  };
 
   return (
     <div className="world-screen two-pane shore-setup">
@@ -82,6 +134,7 @@ export function ShoreSetupScreen({ onDone, onCancel }: Props) {
           anchors={anchors}
           showAnchorLabels
           selectedAnchorId={choice}
+          focusAnchorId={focus}
           onSelectAnchor={(id) => setChoice((c) => (c === id ? null : id))}
           bottomPadding={200}
           fitKey="shores"
@@ -92,7 +145,7 @@ export function ShoreSetupScreen({ onDone, onCancel }: Props) {
       <header className="world-header">
         <div>
           <h1 className="t-title">{changing ? 'Change your shore' : 'Choose your shore'}</h1>
-          <p className="t-meta">Tap a coast · nothing about you is located</p>
+          <p className="t-meta">Tap a coast or search · nothing about you is located</p>
         </div>
         {onCancel ? (
           <button type="button" className="glass-control" aria-label="Cancel" onClick={onCancel}>
@@ -101,13 +154,27 @@ export function ShoreSetupScreen({ onDone, onCancel }: Props) {
         ) : null}
       </header>
 
+      {/* Phone: search floats under the header; results replace the map pins as the list. */}
+      <div className="shore-search phone-only">
+        {searchField('shore-search-phone')}
+        {searching ? (
+          <ul className="list shore-results" role="radiogroup" aria-label="Matching shores">
+            {filtered.slice(0, 8).map(shoreRow)}
+            {filtered.length === 0 ? <li className="t-meta empty">No shore matches.</li> : null}
+            {filtered.length > 8 ? (
+              <li className="t-meta empty">{filtered.length - 8} more · keep typing</li>
+            ) : null}
+          </ul>
+        ) : null}
+      </div>
+
       {/* Phone: a compact card only once a pin is chosen; closing it restores the clean map. */}
-      {chosen ? (
+      {chosen && !searching ? (
         <section className="sheet shore-card phone-only" aria-label="Selected shore">
           <div className="row">
             <div className="grow">
               <h2 className="t-card-title">{chosen.name}</h2>
-              <p className="t-meta">{details(chosen.id, chosen.capacity)}</p>
+              <p className="t-meta">{describeShore(chosen)}</p>
             </div>
             <button
               type="button"
@@ -131,39 +198,21 @@ export function ShoreSetupScreen({ onDone, onCancel }: Props) {
         </section>
       ) : null}
 
-      {/* Desktop: the side pane lists every shore next to the map. */}
+      {/* Desktop: the side pane lists every shore next to the map, filtered by the search. */}
       <section className="sheet desktop-only" aria-label="Shores">
         {chart.loading || !chart.data ? (
           <Skeleton />
         ) : (
           <div className="stack">
-            <ul className="list" role="radiogroup" aria-label="Available shores">
-              {chart.data.shores.map((s) => {
-                const selected = choice === s.id;
-                return (
-                  <li key={s.id}>
-                    <button
-                      type="button"
-                      role="radio"
-                      aria-checked={selected}
-                      className={`row-item selectable${selected ? ' selected' : ''}`}
-                      onClick={() => setChoice(s.id)}
-                    >
-                      <span className="grow">
-                        <span className="t-card-title" style={{ display: 'block' }}>
-                          {s.name}
-                        </span>
-                        <span className="t-meta">{details(s.id, s.capacity)}</span>
-                      </span>
-                      {selected ? (
-                        <span className="check-circle" aria-hidden>
-                          <Icon name="check" size={14} />
-                        </span>
-                      ) : null}
-                    </button>
-                  </li>
-                );
-              })}
+            {searchField('shore-search-desktop')}
+            <p className="t-meta">
+              {searching
+                ? `${filtered.length} of ${shores.length} shores`
+                : `${shores.length} shores across every coast`}
+            </p>
+            <ul className="list shore-list" role="radiogroup" aria-label="Available shores">
+              {filtered.map(shoreRow)}
+              {filtered.length === 0 ? <li className="t-meta empty">No shore matches.</li> : null}
             </ul>
             {anchorButton}
             <p className="t-meta">

@@ -59,22 +59,17 @@ export const ShoreSchema = z.object({
   position: ChartPointSchema,
   geo: GeoPointSchema.nullable(),
   capacity: z.number().int().nonnegative(),
+  // Body of water of a catalogue shore; null on the original fictional shores. Country names
+  // are deliberately never sent to clients (spec §6.2): borders are drawn, names are not.
+  sea: z.string().nullable(),
 });
 export type ShoreDto = z.infer<typeof ShoreSchema>;
 
-export const ChartNodeSchema = z.object({
-  id: IdSchema,
-  kind: z.enum(['shore', 'waypoint', 'island']),
-  position: ChartPointSchema,
-  geo: GeoPointSchema.nullable(),
-  shoreId: IdSchema.nullable(),
-});
-export const ChartEdgeSchema = z.object({ from: IdSchema, to: IdSchema });
+// Selectable shores only: the sea-route graph stays on the server (it has tens of thousands of
+// water nodes); bottles carry their own planned polyline.
 export const ChartResponseSchema = z.object({
   graphVersion: z.number().int(),
   bounds: z.object({ width: z.number(), height: z.number() }),
-  nodes: z.array(ChartNodeSchema),
-  edges: z.array(ChartEdgeSchema),
   shores: z.array(ShoreSchema),
 });
 export type ChartResponse = z.infer<typeof ChartResponseSchema>;

@@ -65,20 +65,28 @@ describe('HTTP surface', () => {
     expect(sent.bottles).toEqual([]);
   });
 
-  it('chart responses carry no political data and coordinates only on fictional app anchors', async () => {
+  it('chart responses list shores with app anchors and seas, never people or country names', async () => {
     const w = createTestWorld();
     const app = createApp(w.ctx);
     const ada = await login(app, 'ada');
     const res = await app.request('/api/chart', { headers: auth(ada.token) });
     const text = await res.text();
-    expect(text).not.toMatch(/country|border|boundary|flag|gps|user/i);
+    // No user data, no device location, no route graph internals, no country attribution.
+    expect(text).not.toMatch(/gps|user|flag|"nodes"|"edges"|country/i);
+    for (const name of ['Portugal', 'Germany', 'France', 'United States of America', 'Russia'])
+      expect(text, name).not.toContain(name);
     const chart = JSON.parse(text) as {
-      shores: Array<{ geo: { lng: number; lat: number } | null }>;
-      nodes: Array<{ kind: string; geo: { lng: number; lat: number } | null }>;
+      graphVersion: number;
+      shores: Array<{ id: string; geo: { lng: number; lat: number } | null; sea: string | null }>;
     };
-    // Every anchor is a named app shore or a sea waypoint, never a person.
-    for (const s of chart.shores) expect(s.geo).not.toBeNull();
-    for (const n of chart.nodes) expect(['shore', 'waypoint', 'island']).toContain(n.kind);
+    expect(chart.graphVersion).toBe(2);
+    for (const s of chart.shores) {
+      expect(s.geo).not.toBeNull();
+      expect(Object.keys(s).sort()).toEqual(['capacity', 'geo', 'id', 'name', 'position', 'sea']);
+    }
+    expect(chart.shores.find((s) => s.id === 'shore_lantern_cove')!.sea).toBeNull();
+    expect(chart.shores.find((s) => s.id === 'shore_jp_tokyo')!.sea).toBe('Tokyo Bay');
+    expect(chart.shores.length).toBeGreaterThan(300);
   });
 
   it('user-facing responses never contain coordinates', async () => {

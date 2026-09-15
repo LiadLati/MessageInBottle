@@ -3,29 +3,28 @@ import type { ChartResponse, GeoPoint, ShoreDto } from '@mib/shared';
 import type { DbOrTx } from '../db/client.js';
 import * as t from '../db/schema.js';
 import { CHART_BOUNDS } from '../db/seed-data.js';
-import { buildGraph, type RouteGraph } from '../domain/routing.js';
+import { buildGraph, shoreNodeId, type RouteGraph } from '../domain/routing.js';
 import { badRequest, notFound } from '../lib/errors.js';
 import type { AppContext } from './context.js';
 
-export function loadActiveGraph(db: DbOrTx): RouteGraph {
-  const version = db
-    .select()
-    .from(t.routeGraphVersions)
-    .where(eq(t.routeGraphVersions.active, true))
-    .get();
-  if (!version) throw new Error('no active route graph');
-  const nodes = db
-    .select()
-    .from(t.routeNodes)
-    .where(eq(t.routeNodes.graphVersion, version.version))
-    .all();
-  const edges = db
-    .select()
-    .from(t.routeEdges)
-    .where(eq(t.routeEdges.graphVersion, version.version))
-    .all();
-  return buildGraph(
-    version.version,
+// Graphs are immutable once written, so each (database, version) pair is built once. The active
+// version is still read per call: it is one row and it changes when a new graph is seeded.
+const graphCache = new WeakMap<object, Map<number, RouteGraph>>();
+
+function cacheFor(db: DbOrTx): Map<number, RouteGraph> {
+  let map = graphCache.get(db);
+  if (!map) graphCache.set(db, (map = new Map<number, RouteGraph>()));
+  return map;
+}
+
+export function loadGraphVersion(db: DbOrTx, version: number): RouteGraph {
+  const cache = cacheFor(db);
+  const hit = cache.get(version);
+  if (hit) return hit;
+  const nodes = db.select().from(t.routeNodes).where(eq(t.routeNodes.graphVersion, version)).all();
+  const edges = db.select().from(t.routeEdges).where(eq(t.routeEdges.graphVersion, version)).all();
+  const graph = buildGraph(
+    version,
     nodes.map((n) => ({
       id: n.id,
       kind: n.kind,
@@ -35,6 +34,23 @@ export function loadActiveGraph(db: DbOrTx): RouteGraph {
     })),
     edges.map((e) => ({ from: e.fromNodeId, to: e.toNodeId, length: e.length })),
   );
+  cache.set(version, graph);
+  return graph;
+}
+
+export function loadActiveGraph(db: DbOrTx): RouteGraph {
+  const version = db
+    .select()
+    .from(t.routeGraphVersions)
+    .where(eq(t.routeGraphVersions.active, true))
+    .get();
+  if (!version) throw new Error('no active route graph');
+  return loadGraphVersion(db, version.version);
+}
+
+// Tests that edit graph rows directly call this to drop the memoised graph.
+export function invalidateGraphCache(db: DbOrTx): void {
+  graphCache.delete(db);
 }
 
 export function geoOf(row: { lng: number | null; lat: number | null }): GeoPoint | null {
@@ -48,33 +64,18 @@ export function toShoreDto(row: typeof t.shores.$inferSelect): ShoreDto {
     position: { x: row.chartX, y: row.chartY },
     geo: geoOf(row),
     capacity: row.capacity,
+    sea: row.sea,
   };
 }
 
+// The chart lists selectable shores only. The planning graph (tens of thousands of water
+// nodes) stays server-side; clients receive the planned polyline of each bottle instead.
 export function getChart(ctx: AppContext): ChartResponse {
   const graph = loadActiveGraph(ctx.db);
   const shores = ctx.db.select().from(t.shores).where(eq(t.shores.active, true)).all();
-  const edges: ChartResponse['edges'] = [];
-  const seen = new Set<string>();
-  for (const [from, list] of graph.adjacency) {
-    for (const { to } of list) {
-      const key = from < to ? `${from}|${to}` : `${to}|${from}`;
-      if (seen.has(key)) continue;
-      seen.add(key);
-      edges.push({ from, to });
-    }
-  }
   return {
     graphVersion: graph.version,
     bounds: { ...CHART_BOUNDS },
-    nodes: [...graph.nodes.values()].map((n) => ({
-      id: n.id,
-      kind: n.kind,
-      position: n.position,
-      geo: n.geo,
-      shoreId: n.shoreId,
-    })),
-    edges,
     shores: shores.map(toShoreDto),
   };
 }
@@ -92,10 +93,7 @@ export function setUserShore(ctx: AppContext, userId: string, shoreId: string): 
   const shore = getShore(ctx.db, shoreId);
   if (!shore) throw notFound('shore');
   const graph = loadActiveGraph(ctx.db);
-  const connected = [...graph.nodes.values()].some(
-    (n) => n.kind === 'shore' && n.shoreId === shoreId,
-  );
-  if (!connected)
+  if (shoreNodeId(graph, shoreId) === null)
     throw badRequest('shore_unsupported', 'this shore is not connected to the sea routes');
   ctx.db.update(t.users).set({ shoreId }).where(eq(t.users.id, userId)).run();
 }

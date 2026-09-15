@@ -19,7 +19,7 @@ import {
   progressAt,
 } from '../domain/routing.js';
 import { conflict, notFound } from '../lib/errors.js';
-import { geoOf, loadActiveGraph, toShoreDto } from './chart.js';
+import { loadGraphVersion, toShoreDto } from './chart.js';
 import type { AppContext, AuthUser } from './context.js';
 import { activePlan, appendEvent, releaseCapacityOnce, transitionBottle } from './journey.js';
 
@@ -29,26 +29,10 @@ type PlanRow = typeof t.routePlans.$inferSelect;
 const iso = (ms: number) => new Date(ms).toISOString();
 const isoOrNull = (ms: number | null) => (ms === null ? null : iso(ms));
 
+// A plan is rendered with the graph version it was planned on, so a newer active graph never
+// moves a released bottle (spec §7, §11 inv. 7).
 function graphForPlan(ctx: AppContext, plan: PlanRow) {
-  const graph = loadActiveGraph(ctx.db);
-  if (graph.version !== plan.graphVersion) {
-    // Historic graph versions are kept in the DB; loading them lazily is a stage-4 concern.
-    const nodes = ctx.db
-      .select()
-      .from(t.routeNodes)
-      .where(eq(t.routeNodes.graphVersion, plan.graphVersion))
-      .all();
-    for (const n of nodes) {
-      graph.nodes.set(n.id, {
-        id: n.id,
-        kind: n.kind,
-        shoreId: n.shoreId,
-        position: { x: n.chartX, y: n.chartY },
-        geo: geoOf(n),
-      });
-    }
-  }
-  return graph;
+  return loadGraphVersion(ctx.db, plan.graphVersion);
 }
 
 function sentSummary(

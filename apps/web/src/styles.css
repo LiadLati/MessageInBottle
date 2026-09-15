@@ -1021,7 +1021,10 @@ button.avatar {
 }
 
 /* ---------- map ---------- */
-.ocean-map {
+/* The SDK stylesheet arrives with the lazy map chunk (after this file) and sets
+   .maplibregl-map { position: relative }; the doubled selector keeps our layout winning. */
+.ocean-map,
+.ocean-map.maplibregl-map {
   position: absolute;
   inset: 0;
   background: var(--map-water);
@@ -1099,6 +1102,22 @@ button.avatar {
   letter-spacing: 0.4px;
   white-space: nowrap;
 }
+.map-shore-pin {
+  position: relative;
+}
+.map-shore-pin .leg {
+  display: none;
+  position: absolute;
+  top: 6px;
+  left: 50%;
+  width: 1px;
+  transform-origin: top center;
+  background: rgba(143, 211, 204, 0.55);
+  pointer-events: none;
+}
+.map-shore-pin.spread .leg {
+  display: block;
+}
 .map-shore-pin.compact .label {
   display: none;
 }
@@ -1125,6 +1144,71 @@ button.avatar {
 .sheet.shore-card {
   max-height: none;
   padding: 14px 16px 16px;
+}
+/* Shore search: a compact field under the header on phones (the results list sits over the
+   map), inline at the top of the side pane on desktop. */
+.shore-search {
+  position: absolute;
+  left: var(--gutter-overlay);
+  right: var(--gutter-overlay);
+  top: calc(var(--header-pad-top) + 74px);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  z-index: 3;
+}
+.shore-search-field {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+.shore-search-field > svg {
+  position: absolute;
+  left: 14px;
+  color: var(--text-faint);
+  pointer-events: none;
+}
+.shore-search-field .input {
+  padding-left: 40px;
+  padding-right: 40px;
+  min-height: 44px;
+  background: rgba(6, 20, 30, 0.78);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+.shore-search-field .input::-webkit-search-cancel-button {
+  display: none;
+}
+.shore-search-field .clear {
+  position: absolute;
+  right: 6px;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--foam-white);
+  background: transparent;
+}
+.shore-results {
+  max-height: calc(100dvh - var(--header-pad-top) - 74px - 60px - var(--nav-height));
+  overflow: auto;
+  padding: 6px;
+  border-radius: var(--radius-sheet);
+  background: var(--glass-panel-bg);
+  backdrop-filter: blur(var(--glass-panel-blur));
+  -webkit-backdrop-filter: blur(var(--glass-panel-blur));
+  border: var(--glass-panel-border);
+  box-shadow: var(--shadow-sheet);
+}
+.list .empty {
+  padding: 12px 14px;
+}
+.shore-list {
+  max-height: 46vh;
+  overflow: auto;
+  padding-right: 4px;
 }
 .map-shore-pin.selected .dot {
   box-shadow:
@@ -1684,6 +1768,9 @@ button.avatar {
   }
   .desktop-only {
     display: block;
+  }
+  .shore-search {
+    display: none;
   }
   .parchment.full {
     max-width: 720px;

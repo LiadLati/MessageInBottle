@@ -1,0 +1,1852 @@
+{
+  "generatedBy": "apps/api/src/tools/geo/build-world.ts",
+  "dataset": "world-atlas@2.0.2 / Natural Earth 4.1.0 countries-50m",
+  "totals": {
+    "geometries": 241,
+    "coastal": 198,
+    "coastalWithShores": 185,
+    "coastalExcluded": 13,
+    "landlocked": 43,
+    "catalogueShores": 386,
+    "legacyShores": 6
+  },
+  "included": [
+    {
+      "id": "248",
+      "name": "Åland",
+      "shores": [
+        "shore_ax_mariehamn"
+      ]
+    },
+    {
+      "id": "008",
+      "name": "Albania",
+      "shores": [
+        "shore_al_durres"
+      ]
+    },
+    {
+      "id": "012",
+      "name": "Algeria",
+      "shores": [
+        "shore_dz_algiers",
+        "shore_dz_oran"
+      ]
+    },
+    {
+      "id": "016",
+      "name": "American Samoa",
+      "shores": [
+        "shore_as_pago_pago"
+      ]
+    },
+    {
+      "id": "024",
+      "name": "Angola",
+      "shores": [
+        "shore_ao_luanda",
+        "shore_ao_lobito"
+      ]
+    },
+    {
+      "id": "660",
+      "name": "Anguilla",
+      "shores": [
+        "shore_ai_sandy_ground"
+      ]
+    },
+    {
+      "id": "028",
+      "name": "Antigua and Barb.",
+      "shores": [
+        "shore_ag_st_johns"
+      ]
+    },
+    {
+      "id": "032",
+      "name": "Argentina",
+      "shores": [
+        "shore_ar_buenos_aires",
+        "shore_ar_mar_del_plata",
+        "shore_ar_ushuaia",
+        "shore_ar_bahia_blanca"
+      ]
+    },
+    {
+      "id": "533",
+      "name": "Aruba",
+      "shores": [
+        "shore_aw_oranjestad"
+      ]
+    },
+    {
+      "id": "036",
+      "name": "Australia",
+      "shores": [
+        "shore_au_sydney",
+        "shore_au_melbourne",
+        "shore_au_brisbane",
+        "shore_au_fremantle",
+        "shore_au_darwin",
+        "shore_au_port_adelaide",
+        "shore_au_hobart",
+        "shore_au_cairns"
+      ]
+    },
+    {
+      "id": "044",
+      "name": "Bahamas",
+      "shores": [
+        "shore_bs_nassau"
+      ]
+    },
+    {
+      "id": "048",
+      "name": "Bahrain",
+      "shores": [
+        "shore_bh_manama"
+      ]
+    },
+    {
+      "id": "050",
+      "name": "Bangladesh",
+      "shores": [
+        "shore_bd_chittagong"
+      ]
+    },
+    {
+      "id": "052",
+      "name": "Barbados",
+      "shores": [
+        "shore_bb_bridgetown"
+      ]
+    },
+    {
+      "id": "056",
+      "name": "Belgium",
+      "shores": [
+        "shore_be_ostend",
+        "shore_be_zeebrugge"
+      ]
+    },
+    {
+      "id": "084",
+      "name": "Belize",
+      "shores": [
+        "shore_bz_belize_city"
+      ]
+    },
+    {
+      "id": "204",
+      "name": "Benin",
+      "shores": [
+        "shore_bj_cotonou"
+      ]
+    },
+    {
+      "id": "060",
+      "name": "Bermuda",
+      "shores": [
+        "shore_bm_hamilton"
+      ]
+    },
+    {
+      "id": "070",
+      "name": "Bosnia and Herz.",
+      "shores": [
+        "shore_ba_neum"
+      ]
+    },
+    {
+      "id": "076",
+      "name": "Brazil",
+      "shores": [
+        "shore_br_rio_de_janeiro",
+        "shore_br_santos",
+        "shore_br_salvador",
+        "shore_br_recife",
+        "shore_br_fortaleza",
+        "shore_br_belem",
+        "shore_br_rio_grande",
+        "shore_br_vitoria"
+      ]
+    },
+    {
+      "id": "092",
+      "name": "British Virgin Is.",
+      "shores": [
+        "shore_vg_road_town"
+      ]
+    },
+    {
+      "id": "096",
+      "name": "Brunei",
+      "shores": [
+        "shore_bn_muara"
+      ]
+    },
+    {
+      "id": "100",
+      "name": "Bulgaria",
+      "shores": [
+        "shore_bg_varna",
+        "shore_bg_burgas"
+      ]
+    },
+    {
+      "id": "132",
+      "name": "Cabo Verde",
+      "shores": [
+        "shore_cv_praia",
+        "shore_cv_mindelo"
+      ]
+    },
+    {
+      "id": "116",
+      "name": "Cambodia",
+      "shores": [
+        "shore_kh_sihanoukville"
+      ]
+    },
+    {
+      "id": "120",
+      "name": "Cameroon",
+      "shores": [
+        "shore_cm_kribi",
+        "shore_cm_douala"
+      ]
+    },
+    {
+      "id": "124",
+      "name": "Canada",
+      "shores": [
+        "shore_ca_halifax",
+        "shore_ca_vancouver",
+        "shore_ca_st_johns",
+        "shore_ca_churchill",
+        "shore_ca_iqaluit",
+        "shore_ca_victoria"
+      ]
+    },
+    {
+      "id": "136",
+      "name": "Cayman Is.",
+      "shores": [
+        "shore_ky_george_town"
+      ]
+    },
+    {
+      "id": "152",
+      "name": "Chile",
+      "shores": [
+        "shore_cl_valparaiso",
+        "shore_cl_punta_arenas",
+        "shore_cl_antofagasta",
+        "shore_cl_puerto_montt"
+      ]
+    },
+    {
+      "id": "156",
+      "name": "China",
+      "shores": [
+        "shore_cn_shanghai",
+        "shore_cn_shenzhen",
+        "shore_cn_qingdao",
+        "shore_cn_tianjin",
+        "shore_cn_dalian",
+        "shore_cn_xiamen",
+        "shore_cn_haikou",
+        "shore_cn_ningbo"
+      ]
+    },
+    {
+      "id": "170",
+      "name": "Colombia",
+      "shores": [
+        "shore_co_cartagena",
+        "shore_co_buenaventura",
+        "shore_co_santa_marta"
+      ]
+    },
+    {
+      "id": "174",
+      "name": "Comoros",
+      "shores": [
+        "shore_km_moroni"
+      ]
+    },
+    {
+      "id": "178",
+      "name": "Congo",
+      "shores": [
+        "shore_cg_pointe_noire"
+      ]
+    },
+    {
+      "id": "184",
+      "name": "Cook Is.",
+      "shores": [
+        "shore_ck_rarotonga"
+      ]
+    },
+    {
+      "id": "188",
+      "name": "Costa Rica",
+      "shores": [
+        "shore_cr_limon",
+        "shore_cr_puntarenas"
+      ]
+    },
+    {
+      "id": "384",
+      "name": "Côte d'Ivoire",
+      "shores": [
+        "shore_ci_abidjan",
+        "shore_ci_san_pedro"
+      ]
+    },
+    {
+      "id": "191",
+      "name": "Croatia",
+      "shores": [
+        "shore_hr_split",
+        "shore_hr_rijeka",
+        "shore_hr_dubrovnik"
+      ]
+    },
+    {
+      "id": "192",
+      "name": "Cuba",
+      "shores": [
+        "shore_cu_havana",
+        "shore_cu_santiago"
+      ]
+    },
+    {
+      "id": "531",
+      "name": "Curaçao",
+      "shores": [
+        "shore_cw_willemstad"
+      ]
+    },
+    {
+      "id": "196",
+      "name": "Cyprus",
+      "shores": [
+        "shore_cy_limassol"
+      ]
+    },
+    {
+      "id": "180",
+      "name": "Dem. Rep. Congo",
+      "shores": [
+        "shore_cd_banana"
+      ]
+    },
+    {
+      "id": "208",
+      "name": "Denmark",
+      "shores": [
+        "shore_dk_copenhagen",
+        "shore_dk_esbjerg",
+        "shore_dk_aarhus"
+      ]
+    },
+    {
+      "id": "262",
+      "name": "Djibouti",
+      "shores": [
+        "shore_dj_djibouti"
+      ]
+    },
+    {
+      "id": "212",
+      "name": "Dominica",
+      "shores": [
+        "shore_dm_roseau"
+      ]
+    },
+    {
+      "id": "214",
+      "name": "Dominican Rep.",
+      "shores": [
+        "shore_do_santo_domingo"
+      ]
+    },
+    {
+      "id": "218",
+      "name": "Ecuador",
+      "shores": [
+        "shore_ec_manta",
+        "shore_ec_esmeraldas"
+      ]
+    },
+    {
+      "id": "818",
+      "name": "Egypt",
+      "shores": [
+        "shore_eg_alexandria",
+        "shore_eg_port_said",
+        "shore_eg_suez",
+        "shore_eg_hurghada"
+      ]
+    },
+    {
+      "id": "222",
+      "name": "El Salvador",
+      "shores": [
+        "shore_sv_acajutla"
+      ]
+    },
+    {
+      "id": "226",
+      "name": "Eq. Guinea",
+      "shores": [
+        "shore_gq_malabo",
+        "shore_gq_bata"
+      ]
+    },
+    {
+      "id": "232",
+      "name": "Eritrea",
+      "shores": [
+        "shore_er_massawa"
+      ]
+    },
+    {
+      "id": "233",
+      "name": "Estonia",
+      "shores": [
+        "shore_ee_tallinn"
+      ]
+    },
+    {
+      "id": "234",
+      "name": "Faeroe Is.",
+      "shores": [
+        "shore_fo_torshavn"
+      ]
+    },
+    {
+      "id": "238",
+      "name": "Falkland Is.",
+      "shores": [
+        "shore_fk_stanley"
+      ]
+    },
+    {
+      "id": "242",
+      "name": "Fiji",
+      "shores": [
+        "shore_fj_suva"
+      ]
+    },
+    {
+      "id": "246",
+      "name": "Finland",
+      "shores": [
+        "shore_fi_helsinki",
+        "shore_fi_turku"
+      ]
+    },
+    {
+      "id": "258",
+      "name": "Fr. Polynesia",
+      "shores": [
+        "shore_pf_papeete"
+      ]
+    },
+    {
+      "id": "250",
+      "name": "France",
+      "shores": [
+        "shore_fr_marseille",
+        "shore_fr_brest",
+        "shore_fr_la_rochelle",
+        "shore_fr_le_havre",
+        "shore_fr_nice",
+        "shore_fr_ajaccio",
+        "shore_fr_cayenne"
+      ]
+    },
+    {
+      "id": "266",
+      "name": "Gabon",
+      "shores": [
+        "shore_ga_libreville",
+        "shore_ga_port_gentil"
+      ]
+    },
+    {
+      "id": "270",
+      "name": "Gambia",
+      "shores": [
+        "shore_gm_banjul"
+      ]
+    },
+    {
+      "id": "268",
+      "name": "Georgia",
+      "shores": [
+        "shore_ge_batumi"
+      ]
+    },
+    {
+      "id": "276",
+      "name": "Germany",
+      "shores": [
+        "shore_de_cuxhaven",
+        "shore_de_kiel",
+        "shore_de_rostock",
+        "shore_de_bremerhaven"
+      ]
+    },
+    {
+      "id": "288",
+      "name": "Ghana",
+      "shores": [
+        "shore_gh_tema",
+        "shore_gh_takoradi"
+      ]
+    },
+    {
+      "id": "300",
+      "name": "Greece",
+      "shores": [
+        "shore_gr_piraeus",
+        "shore_gr_thessaloniki",
+        "shore_gr_heraklion",
+        "shore_gr_rhodes"
+      ]
+    },
+    {
+      "id": "304",
+      "name": "Greenland",
+      "shores": [
+        "shore_gl_nuuk"
+      ]
+    },
+    {
+      "id": "308",
+      "name": "Grenada",
+      "shores": [
+        "shore_gd_st_georges"
+      ]
+    },
+    {
+      "id": "316",
+      "name": "Guam",
+      "shores": [
+        "shore_gu_hagatna"
+      ]
+    },
+    {
+      "id": "320",
+      "name": "Guatemala",
+      "shores": [
+        "shore_gt_puerto_barrios",
+        "shore_gt_puerto_quetzal"
+      ]
+    },
+    {
+      "id": "831",
+      "name": "Guernsey",
+      "shores": [
+        "shore_gg_st_peter_port"
+      ]
+    },
+    {
+      "id": "324",
+      "name": "Guinea",
+      "shores": [
+        "shore_gn_conakry"
+      ]
+    },
+    {
+      "id": "624",
+      "name": "Guinea-Bissau",
+      "shores": [
+        "shore_gw_bissau"
+      ]
+    },
+    {
+      "id": "328",
+      "name": "Guyana",
+      "shores": [
+        "shore_gy_georgetown"
+      ]
+    },
+    {
+      "id": "332",
+      "name": "Haiti",
+      "shores": [
+        "shore_ht_port_au_prince"
+      ]
+    },
+    {
+      "id": "340",
+      "name": "Honduras",
+      "shores": [
+        "shore_hn_puerto_cortes",
+        "shore_hn_san_lorenzo"
+      ]
+    },
+    {
+      "id": "344",
+      "name": "Hong Kong",
+      "shores": [
+        "shore_hk_victoria_harbour"
+      ]
+    },
+    {
+      "id": "352",
+      "name": "Iceland",
+      "shores": [
+        "shore_is_reykjavik"
+      ]
+    },
+    {
+      "id": "356",
+      "name": "India",
+      "shores": [
+        "shore_in_mumbai",
+        "shore_in_chennai",
+        "shore_in_kochi",
+        "shore_in_visakhapatnam",
+        "shore_in_paradip",
+        "shore_in_mormugao",
+        "shore_in_port_blair"
+      ]
+    },
+    {
+      "id": "360",
+      "name": "Indonesia",
+      "shores": [
+        "shore_id_jakarta",
+        "shore_id_surabaya",
+        "shore_id_makassar",
+        "shore_id_belawan",
+        "shore_id_manado",
+        "shore_id_jayapura",
+        "shore_id_benoa",
+        "shore_id_balikpapan",
+        "shore_id_ambon"
+      ]
+    },
+    {
+      "id": "364",
+      "name": "Iran",
+      "shores": [
+        "shore_ir_bandar_abbas",
+        "shore_ir_bushehr",
+        "shore_ir_chabahar"
+      ]
+    },
+    {
+      "id": "368",
+      "name": "Iraq",
+      "shores": [
+        "shore_iq_umm_qasr"
+      ]
+    },
+    {
+      "id": "372",
+      "name": "Ireland",
+      "shores": [
+        "shore_ie_dublin",
+        "shore_ie_cobh",
+        "shore_ie_galway"
+      ]
+    },
+    {
+      "id": "833",
+      "name": "Isle of Man",
+      "shores": [
+        "shore_im_douglas"
+      ]
+    },
+    {
+      "id": "376",
+      "name": "Israel",
+      "shores": [
+        "shore_il_haifa",
+        "shore_il_eilat"
+      ]
+    },
+    {
+      "id": "380",
+      "name": "Italy",
+      "shores": [
+        "shore_it_genoa",
+        "shore_it_naples",
+        "shore_it_venice",
+        "shore_it_bari",
+        "shore_it_palermo",
+        "shore_it_cagliari"
+      ]
+    },
+    {
+      "id": "388",
+      "name": "Jamaica",
+      "shores": [
+        "shore_jm_kingston"
+      ]
+    },
+    {
+      "id": "392",
+      "name": "Japan",
+      "shores": [
+        "shore_jp_tokyo",
+        "shore_jp_osaka",
+        "shore_jp_yokohama",
+        "shore_jp_nagasaki",
+        "shore_jp_otaru",
+        "shore_jp_naha",
+        "shore_jp_sendai",
+        "shore_jp_niigata"
+      ]
+    },
+    {
+      "id": "832",
+      "name": "Jersey",
+      "shores": [
+        "shore_je_st_helier"
+      ]
+    },
+    {
+      "id": "400",
+      "name": "Jordan",
+      "shores": [
+        "shore_jo_aqaba"
+      ]
+    },
+    {
+      "id": "404",
+      "name": "Kenya",
+      "shores": [
+        "shore_ke_mombasa"
+      ]
+    },
+    {
+      "id": "296",
+      "name": "Kiribati",
+      "shores": [
+        "shore_ki_tarawa"
+      ]
+    },
+    {
+      "id": "414",
+      "name": "Kuwait",
+      "shores": [
+        "shore_kw_kuwait_city"
+      ]
+    },
+    {
+      "id": "428",
+      "name": "Latvia",
+      "shores": [
+        "shore_lv_riga"
+      ]
+    },
+    {
+      "id": "422",
+      "name": "Lebanon",
+      "shores": [
+        "shore_lb_beirut"
+      ]
+    },
+    {
+      "id": "430",
+      "name": "Liberia",
+      "shores": [
+        "shore_lr_monrovia"
+      ]
+    },
+    {
+      "id": "434",
+      "name": "Libya",
+      "shores": [
+        "shore_ly_tripoli",
+        "shore_ly_benghazi"
+      ]
+    },
+    {
+      "id": "440",
+      "name": "Lithuania",
+      "shores": [
+        "shore_lt_klaipeda"
+      ]
+    },
+    {
+      "id": "446",
+      "name": "Macao",
+      "shores": [
+        "shore_mo_macao"
+      ]
+    },
+    {
+      "id": "450",
+      "name": "Madagascar",
+      "shores": [
+        "shore_mg_toamasina",
+        "shore_mg_antsiranana",
+        "shore_mg_toliara"
+      ]
+    },
+    {
+      "id": "458",
+      "name": "Malaysia",
+      "shores": [
+        "shore_my_port_klang",
+        "shore_my_penang",
+        "shore_my_kota_kinabalu",
+        "shore_my_kuantan"
+      ]
+    },
+    {
+      "id": "462",
+      "name": "Maldives",
+      "shores": [
+        "shore_mv_male"
+      ]
+    },
+    {
+      "id": "470",
+      "name": "Malta",
+      "shores": [
+        "shore_mt_valletta"
+      ]
+    },
+    {
+      "id": "584",
+      "name": "Marshall Is.",
+      "shores": [
+        "shore_mh_majuro"
+      ]
+    },
+    {
+      "id": "478",
+      "name": "Mauritania",
+      "shores": [
+        "shore_mr_nouakchott",
+        "shore_mr_nouadhibou"
+      ]
+    },
+    {
+      "id": "480",
+      "name": "Mauritius",
+      "shores": [
+        "shore_mu_port_louis"
+      ]
+    },
+    {
+      "id": "484",
+      "name": "Mexico",
+      "shores": [
+        "shore_mx_veracruz",
+        "shore_mx_acapulco",
+        "shore_mx_cancun",
+        "shore_mx_mazatlan",
+        "shore_mx_ensenada",
+        "shore_mx_manzanillo"
+      ]
+    },
+    {
+      "id": "583",
+      "name": "Micronesia",
+      "shores": [
+        "shore_fm_kolonia"
+      ]
+    },
+    {
+      "id": "492",
+      "name": "Monaco",
+      "shores": [
+        "shore_mc_monaco"
+      ]
+    },
+    {
+      "id": "499",
+      "name": "Montenegro",
+      "shores": [
+        "shore_me_bar"
+      ]
+    },
+    {
+      "id": "500",
+      "name": "Montserrat",
+      "shores": [
+        "shore_ms_little_bay"
+      ]
+    },
+    {
+      "id": "504",
+      "name": "Morocco",
+      "shores": [
+        "shore_ma_casablanca",
+        "shore_ma_tangier",
+        "shore_ma_agadir",
+        "shore_ma_dakhla"
+      ]
+    },
+    {
+      "id": "508",
+      "name": "Mozambique",
+      "shores": [
+        "shore_mz_maputo",
+        "shore_mz_beira",
+        "shore_mz_nacala"
+      ]
+    },
+    {
+      "id": "104",
+      "name": "Myanmar",
+      "shores": [
+        "shore_mm_sittwe",
+        "shore_mm_mawlamyine"
+      ]
+    },
+    {
+      "id": "580",
+      "name": "N. Mariana Is.",
+      "shores": [
+        "shore_mp_saipan"
+      ]
+    },
+    {
+      "id": "516",
+      "name": "Namibia",
+      "shores": [
+        "shore_na_walvis_bay"
+      ]
+    },
+    {
+      "id": "520",
+      "name": "Nauru",
+      "shores": [
+        "shore_nr_yaren"
+      ]
+    },
+    {
+      "id": "528",
+      "name": "Netherlands",
+      "shores": [
+        "shore_nl_rotterdam",
+        "shore_nl_ijmuiden"
+      ]
+    },
+    {
+      "id": "540",
+      "name": "New Caledonia",
+      "shores": [
+        "shore_nc_noumea"
+      ]
+    },
+    {
+      "id": "554",
+      "name": "New Zealand",
+      "shores": [
+        "shore_nz_auckland",
+        "shore_nz_wellington",
+        "shore_nz_lyttelton",
+        "shore_nz_dunedin"
+      ]
+    },
+    {
+      "id": "558",
+      "name": "Nicaragua",
+      "shores": [
+        "shore_ni_corinto",
+        "shore_ni_bluefields"
+      ]
+    },
+    {
+      "id": "566",
+      "name": "Nigeria",
+      "shores": [
+        "shore_ng_lagos",
+        "shore_ng_bonny"
+      ]
+    },
+    {
+      "id": "570",
+      "name": "Niue",
+      "shores": [
+        "shore_nu_alofi"
+      ]
+    },
+    {
+      "id": "574",
+      "name": "Norfolk Island",
+      "shores": [
+        "shore_nf_kingston"
+      ]
+    },
+    {
+      "id": "408",
+      "name": "North Korea",
+      "shores": [
+        "shore_kp_wonsan",
+        "shore_kp_nampo"
+      ]
+    },
+    {
+      "id": "578",
+      "name": "Norway",
+      "shores": [
+        "shore_no_bergen",
+        "shore_no_oslo",
+        "shore_no_tromso",
+        "shore_no_trondheim"
+      ]
+    },
+    {
+      "id": "512",
+      "name": "Oman",
+      "shores": [
+        "shore_om_muscat",
+        "shore_om_salalah"
+      ]
+    },
+    {
+      "id": "586",
+      "name": "Pakistan",
+      "shores": [
+        "shore_pk_karachi",
+        "shore_pk_gwadar"
+      ]
+    },
+    {
+      "id": "585",
+      "name": "Palau",
+      "shores": [
+        "shore_pw_koror"
+      ]
+    },
+    {
+      "id": "275",
+      "name": "Palestine",
+      "shores": [
+        "shore_ps_gaza"
+      ]
+    },
+    {
+      "id": "591",
+      "name": "Panama",
+      "shores": [
+        "shore_pa_colon",
+        "shore_pa_panama_city"
+      ]
+    },
+    {
+      "id": "598",
+      "name": "Papua New Guinea",
+      "shores": [
+        "shore_pg_port_moresby",
+        "shore_pg_lae"
+      ]
+    },
+    {
+      "id": "604",
+      "name": "Peru",
+      "shores": [
+        "shore_pe_callao",
+        "shore_pe_paita"
+      ]
+    },
+    {
+      "id": "608",
+      "name": "Philippines",
+      "shores": [
+        "shore_ph_manila",
+        "shore_ph_cebu",
+        "shore_ph_davao",
+        "shore_ph_iloilo",
+        "shore_ph_zamboanga"
+      ]
+    },
+    {
+      "id": "616",
+      "name": "Poland",
+      "shores": [
+        "shore_pl_gdansk",
+        "shore_pl_gdynia"
+      ]
+    },
+    {
+      "id": "620",
+      "name": "Portugal",
+      "shores": [
+        "shore_pt_lisbon",
+        "shore_pt_leixoes",
+        "shore_pt_funchal",
+        "shore_pt_ponta_delgada"
+      ]
+    },
+    {
+      "id": "630",
+      "name": "Puerto Rico",
+      "shores": [
+        "shore_pr_san_juan"
+      ]
+    },
+    {
+      "id": "634",
+      "name": "Qatar",
+      "shores": [
+        "shore_qa_doha"
+      ]
+    },
+    {
+      "id": "642",
+      "name": "Romania",
+      "shores": [
+        "shore_ro_constanta"
+      ]
+    },
+    {
+      "id": "643",
+      "name": "Russia",
+      "shores": [
+        "shore_ru_st_petersburg",
+        "shore_ru_baltiysk",
+        "shore_ru_novorossiysk",
+        "shore_ru_sochi",
+        "shore_ru_murmansk",
+        "shore_ru_arkhangelsk",
+        "shore_ru_vladivostok",
+        "shore_ru_petropavlovsk",
+        "shore_ru_magadan"
+      ]
+    },
+    {
+      "id": "654",
+      "name": "Saint Helena",
+      "shores": [
+        "shore_sh_jamestown"
+      ]
+    },
+    {
+      "id": "662",
+      "name": "Saint Lucia",
+      "shores": [
+        "shore_lc_castries"
+      ]
+    },
+    {
+      "id": "882",
+      "name": "Samoa",
+      "shores": [
+        "shore_ws_apia"
+      ]
+    },
+    {
+      "id": "678",
+      "name": "São Tomé and Principe",
+      "shores": [
+        "shore_st_sao_tome"
+      ]
+    },
+    {
+      "id": "682",
+      "name": "Saudi Arabia",
+      "shores": [
+        "shore_sa_jeddah",
+        "shore_sa_dammam",
+        "shore_sa_yanbu"
+      ]
+    },
+    {
+      "id": "686",
+      "name": "Senegal",
+      "shores": [
+        "shore_sn_dakar"
+      ]
+    },
+    {
+      "id": "690",
+      "name": "Seychelles",
+      "shores": [
+        "shore_sc_victoria"
+      ]
+    },
+    {
+      "id": "694",
+      "name": "Sierra Leone",
+      "shores": [
+        "shore_sl_freetown"
+      ]
+    },
+    {
+      "id": "702",
+      "name": "Singapore",
+      "shores": [
+        "shore_sg_singapore"
+      ]
+    },
+    {
+      "id": "534",
+      "name": "Sint Maarten",
+      "shores": [
+        "shore_sx_philipsburg"
+      ]
+    },
+    {
+      "id": "705",
+      "name": "Slovenia",
+      "shores": [
+        "shore_si_koper"
+      ]
+    },
+    {
+      "id": "090",
+      "name": "Solomon Is.",
+      "shores": [
+        "shore_sb_honiara"
+      ]
+    },
+    {
+      "id": "706",
+      "name": "Somalia",
+      "shores": [
+        "shore_so_mogadishu"
+      ]
+    },
+    {
+      "id": null,
+      "name": "Somaliland",
+      "shores": [
+        "shore_so_berbera"
+      ]
+    },
+    {
+      "id": "710",
+      "name": "South Africa",
+      "shores": [
+        "shore_za_cape_town",
+        "shore_za_durban",
+        "shore_za_gqeberha"
+      ]
+    },
+    {
+      "id": "410",
+      "name": "South Korea",
+      "shores": [
+        "shore_kr_busan",
+        "shore_kr_incheon",
+        "shore_kr_jeju"
+      ]
+    },
+    {
+      "id": "724",
+      "name": "Spain",
+      "shores": [
+        "shore_es_barcelona",
+        "shore_es_valencia",
+        "shore_es_malaga",
+        "shore_es_a_coruna",
+        "shore_es_bilbao",
+        "shore_es_palma",
+        "shore_es_las_palmas"
+      ]
+    },
+    {
+      "id": "144",
+      "name": "Sri Lanka",
+      "shores": [
+        "shore_lk_colombo",
+        "shore_lk_trincomalee"
+      ]
+    },
+    {
+      "id": "652",
+      "name": "St-Barthélemy",
+      "shores": [
+        "shore_bl_gustavia"
+      ]
+    },
+    {
+      "id": "663",
+      "name": "St-Martin",
+      "shores": [
+        "shore_mf_marigot"
+      ]
+    },
+    {
+      "id": "659",
+      "name": "St. Kitts and Nevis",
+      "shores": [
+        "shore_kn_basseterre"
+      ]
+    },
+    {
+      "id": "666",
+      "name": "St. Pierre and Miquelon",
+      "shores": [
+        "shore_pm_saint_pierre"
+      ]
+    },
+    {
+      "id": "670",
+      "name": "St. Vin. and Gren.",
+      "shores": [
+        "shore_vc_kingstown"
+      ]
+    },
+    {
+      "id": "729",
+      "name": "Sudan",
+      "shores": [
+        "shore_sd_port_sudan"
+      ]
+    },
+    {
+      "id": "740",
+      "name": "Suriname",
+      "shores": [
+        "shore_sr_paramaribo"
+      ]
+    },
+    {
+      "id": "752",
+      "name": "Sweden",
+      "shores": [
+        "shore_se_gothenburg",
+        "shore_se_stockholm",
+        "shore_se_malmo"
+      ]
+    },
+    {
+      "id": "760",
+      "name": "Syria",
+      "shores": [
+        "shore_sy_latakia"
+      ]
+    },
+    {
+      "id": "158",
+      "name": "Taiwan",
+      "shores": [
+        "shore_tw_kaohsiung",
+        "shore_tw_keelung"
+      ]
+    },
+    {
+      "id": "834",
+      "name": "Tanzania",
+      "shores": [
+        "shore_tz_dar_es_salaam",
+        "shore_tz_zanzibar"
+      ]
+    },
+    {
+      "id": "764",
+      "name": "Thailand",
+      "shores": [
+        "shore_th_laem_chabang",
+        "shore_th_phuket",
+        "shore_th_songkhla"
+      ]
+    },
+    {
+      "id": "626",
+      "name": "Timor-Leste",
+      "shores": [
+        "shore_tl_dili"
+      ]
+    },
+    {
+      "id": "768",
+      "name": "Togo",
+      "shores": [
+        "shore_tg_lome"
+      ]
+    },
+    {
+      "id": "776",
+      "name": "Tonga",
+      "shores": [
+        "shore_to_nukualofa"
+      ]
+    },
+    {
+      "id": "780",
+      "name": "Trinidad and Tobago",
+      "shores": [
+        "shore_tt_port_of_spain"
+      ]
+    },
+    {
+      "id": "788",
+      "name": "Tunisia",
+      "shores": [
+        "shore_tn_la_goulette",
+        "shore_tn_sfax"
+      ]
+    },
+    {
+      "id": "792",
+      "name": "Turkey",
+      "shores": [
+        "shore_tr_istanbul",
+        "shore_tr_izmir",
+        "shore_tr_antalya",
+        "shore_tr_trabzon",
+        "shore_tr_mersin"
+      ]
+    },
+    {
+      "id": "796",
+      "name": "Turks and Caicos Is.",
+      "shores": [
+        "shore_tc_providenciales"
+      ]
+    },
+    {
+      "id": "850",
+      "name": "U.S. Virgin Is.",
+      "shores": [
+        "shore_vi_charlotte_amalie"
+      ]
+    },
+    {
+      "id": "804",
+      "name": "Ukraine",
+      "shores": [
+        "shore_ua_odesa"
+      ]
+    },
+    {
+      "id": "784",
+      "name": "United Arab Emirates",
+      "shores": [
+        "shore_ae_dubai",
+        "shore_ae_abu_dhabi",
+        "shore_ae_fujairah"
+      ]
+    },
+    {
+      "id": "826",
+      "name": "United Kingdom",
+      "shores": [
+        "shore_gb_southampton",
+        "shore_gb_liverpool",
+        "shore_gb_dover",
+        "shore_gb_aberdeen",
+        "shore_gb_belfast",
+        "shore_gb_cardiff"
+      ]
+    },
+    {
+      "id": "840",
+      "name": "United States of America",
+      "shores": [
+        "shore_us_new_york",
+        "shore_us_boston",
+        "shore_us_miami",
+        "shore_us_galveston",
+        "shore_us_tampa",
+        "shore_us_charleston",
+        "shore_us_norfolk",
+        "shore_us_portland_me",
+        "shore_us_san_pedro",
+        "shore_us_san_diego",
+        "shore_us_san_francisco",
+        "shore_us_seattle",
+        "shore_us_anchorage",
+        "shore_us_juneau",
+        "shore_us_honolulu"
+      ]
+    },
+    {
+      "id": "858",
+      "name": "Uruguay",
+      "shores": [
+        "shore_uy_montevideo"
+      ]
+    },
+    {
+      "id": "548",
+      "name": "Vanuatu",
+      "shores": [
+        "shore_vu_port_vila"
+      ]
+    },
+    {
+      "id": "862",
+      "name": "Venezuela",
+      "shores": [
+        "shore_ve_la_guaira",
+        "shore_ve_puerto_cabello",
+        "shore_ve_cumana"
+      ]
+    },
+    {
+      "id": "704",
+      "name": "Vietnam",
+      "shores": [
+        "shore_vn_vung_tau",
+        "shore_vn_da_nang",
+        "shore_vn_hai_phong",
+        "shore_vn_nha_trang"
+      ]
+    },
+    {
+      "id": "876",
+      "name": "Wallis and Futuna Is.",
+      "shores": [
+        "shore_wf_mata_utu"
+      ]
+    },
+    {
+      "id": "887",
+      "name": "Yemen",
+      "shores": [
+        "shore_ye_aden",
+        "shore_ye_al_hudaydah"
+      ]
+    }
+  ],
+  "notInDataset": [
+    {
+      "name": "Somaliland",
+      "shores": [
+        "shore_so_berbera"
+      ]
+    },
+    {
+      "name": "Tuvalu",
+      "shores": [
+        "shore_tv_funafuti"
+      ]
+    }
+  ],
+  "excluded": [
+    {
+      "id": "010",
+      "name": "Antarctica",
+      "reason": "No permanent population or civilian harbour; research stations only."
+    },
+    {
+      "id": "036",
+      "name": "Ashmore and Cartier Is.",
+      "reason": "Uninhabited reef territory without a harbour."
+    },
+    {
+      "id": "031",
+      "name": "Azerbaijan",
+      "reason": "Caspian coast only; the Caspian Sea is not connected to the world ocean. Nearest ocean harbour: Batumi."
+    },
+    {
+      "id": "086",
+      "name": "Br. Indian Ocean Ter.",
+      "reason": "No civilian settlement or public harbour."
+    },
+    {
+      "id": "260",
+      "name": "Fr. S. Antarctic Lands",
+      "reason": "Uninhabited sub-Antarctic islands; no harbour."
+    },
+    {
+      "id": "334",
+      "name": "Heard I. and McDonald Is.",
+      "reason": "Uninhabited; no harbour."
+    },
+    {
+      "id": null,
+      "name": "Indian Ocean Ter.",
+      "reason": "Small Australian external territories; served by the Australian shores."
+    },
+    {
+      "id": "398",
+      "name": "Kazakhstan",
+      "reason": "Caspian coast only; the Caspian Sea is not connected to the world ocean. Nearest ocean harbour: Bandar Abbas."
+    },
+    {
+      "id": null,
+      "name": "N. Cyprus",
+      "reason": "Drawn by the dataset as a separate geometry; the island is served by the Cyprus shore."
+    },
+    {
+      "id": "612",
+      "name": "Pitcairn Is.",
+      "reason": "No harbour; landing by longboat only."
+    },
+    {
+      "id": "239",
+      "name": "S. Geo. and the Is.",
+      "reason": "No permanent population; no public harbour."
+    },
+    {
+      "id": "795",
+      "name": "Turkmenistan",
+      "reason": "Caspian coast only; the Caspian Sea is not connected to the world ocean. Nearest ocean harbour: Bandar Abbas."
+    },
+    {
+      "id": "732",
+      "name": "W. Sahara",
+      "reason": "The 1:50m dataset draws this Atlantic coast under Morocco (de facto boundaries); Dakhla is catalogued there."
+    }
+  ],
+  "landlocked": [
+    {
+      "id": "004",
+      "name": "Afghanistan",
+      "nearestShoreId": "shore_pk_karachi",
+      "nearestShoreName": "Karachi"
+    },
+    {
+      "id": "020",
+      "name": "Andorra",
+      "nearestShoreId": "shore_es_barcelona",
+      "nearestShoreName": "Barcelona"
+    },
+    {
+      "id": "051",
+      "name": "Armenia",
+      "nearestShoreId": "shore_ge_batumi",
+      "nearestShoreName": "Batumi"
+    },
+    {
+      "id": "040",
+      "name": "Austria",
+      "nearestShoreId": "shore_si_koper",
+      "nearestShoreName": "Koper"
+    },
+    {
+      "id": "112",
+      "name": "Belarus",
+      "nearestShoreId": "shore_lv_riga",
+      "nearestShoreName": "Riga"
+    },
+    {
+      "id": "064",
+      "name": "Bhutan",
+      "nearestShoreId": "shore_bd_chittagong",
+      "nearestShoreName": "Chittagong"
+    },
+    {
+      "id": "068",
+      "name": "Bolivia",
+      "nearestShoreId": "shore_cl_antofagasta",
+      "nearestShoreName": "Antofagasta"
+    },
+    {
+      "id": "072",
+      "name": "Botswana",
+      "nearestShoreId": "shore_mz_maputo",
+      "nearestShoreName": "Maputo"
+    },
+    {
+      "id": "854",
+      "name": "Burkina Faso",
+      "nearestShoreId": "shore_tg_lome",
+      "nearestShoreName": "Lomé"
+    },
+    {
+      "id": "108",
+      "name": "Burundi",
+      "nearestShoreId": "shore_tz_zanzibar",
+      "nearestShoreName": "Zanzibar"
+    },
+    {
+      "id": "140",
+      "name": "Central African Rep.",
+      "nearestShoreId": "shore_cm_douala",
+      "nearestShoreName": "Douala"
+    },
+    {
+      "id": "148",
+      "name": "Chad",
+      "nearestShoreId": "shore_cm_douala",
+      "nearestShoreName": "Douala"
+    },
+    {
+      "id": "203",
+      "name": "Czechia",
+      "nearestShoreId": "shore_si_koper",
+      "nearestShoreName": "Koper"
+    },
+    {
+      "id": "748",
+      "name": "eSwatini",
+      "nearestShoreId": "shore_mz_maputo",
+      "nearestShoreName": "Maputo"
+    },
+    {
+      "id": "231",
+      "name": "Ethiopia",
+      "nearestShoreId": "shore_dj_djibouti",
+      "nearestShoreName": "Djibouti"
+    },
+    {
+      "id": "348",
+      "name": "Hungary",
+      "nearestShoreId": "shore_hr_rijeka",
+      "nearestShoreName": "Rijeka"
+    },
+    {
+      "id": null,
+      "name": "Kosovo",
+      "nearestShoreId": "shore_me_bar",
+      "nearestShoreName": "Bar"
+    },
+    {
+      "id": "417",
+      "name": "Kyrgyzstan",
+      "nearestShoreId": "shore_pk_karachi",
+      "nearestShoreName": "Karachi"
+    },
+    {
+      "id": "418",
+      "name": "Laos",
+      "nearestShoreId": "shore_vn_hai_phong",
+      "nearestShoreName": "Hai Phong"
+    },
+    {
+      "id": "426",
+      "name": "Lesotho",
+      "nearestShoreId": "shore_za_durban",
+      "nearestShoreName": "Durban"
+    },
+    {
+      "id": "438",
+      "name": "Liechtenstein",
+      "nearestShoreId": "shore_it_venice",
+      "nearestShoreName": "Venice"
+    },
+    {
+      "id": "442",
+      "name": "Luxembourg",
+      "nearestShoreId": "shore_nl_rotterdam",
+      "nearestShoreName": "Rotterdam"
+    },
+    {
+      "id": "807",
+      "name": "Macedonia",
+      "nearestShoreId": "shore_gr_thessaloniki",
+      "nearestShoreName": "Thessaloniki"
+    },
+    {
+      "id": "454",
+      "name": "Malawi",
+      "nearestShoreId": "shore_mz_nacala",
+      "nearestShoreName": "Nacala"
+    },
+    {
+      "id": "466",
+      "name": "Mali",
+      "nearestShoreId": "shore_ci_abidjan",
+      "nearestShoreName": "Abidjan"
+    },
+    {
+      "id": "498",
+      "name": "Moldova",
+      "nearestShoreId": "shore_ua_odesa",
+      "nearestShoreName": "Odesa"
+    },
+    {
+      "id": "496",
+      "name": "Mongolia",
+      "nearestShoreId": "shore_cn_tianjin",
+      "nearestShoreName": "Tianjin"
+    },
+    {
+      "id": "524",
+      "name": "Nepal",
+      "nearestShoreId": "shore_in_paradip",
+      "nearestShoreName": "Paradip"
+    },
+    {
+      "id": "562",
+      "name": "Niger",
+      "nearestShoreId": "shore_ng_lagos",
+      "nearestShoreName": "Lagos"
+    },
+    {
+      "id": "600",
+      "name": "Paraguay",
+      "nearestShoreId": "shore_br_rio_grande",
+      "nearestShoreName": "Rio Grande"
+    },
+    {
+      "id": "646",
+      "name": "Rwanda",
+      "nearestShoreId": "shore_ke_mombasa",
+      "nearestShoreName": "Mombasa"
+    },
+    {
+      "id": "728",
+      "name": "S. Sudan",
+      "nearestShoreId": "shore_er_massawa",
+      "nearestShoreName": "Massawa"
+    },
+    {
+      "id": "674",
+      "name": "San Marino",
+      "nearestShoreId": "shore_it_venice",
+      "nearestShoreName": "Venice"
+    },
+    {
+      "id": "688",
+      "name": "Serbia",
+      "nearestShoreId": "shore_me_bar",
+      "nearestShoreName": "Bar"
+    },
+    {
+      "id": null,
+      "name": "Siachen Glacier",
+      "nearestShoreId": "shore_pk_karachi",
+      "nearestShoreName": "Karachi"
+    },
+    {
+      "id": "703",
+      "name": "Slovakia",
+      "nearestShoreId": "shore_hr_rijeka",
+      "nearestShoreName": "Rijeka"
+    },
+    {
+      "id": "756",
+      "name": "Switzerland",
+      "nearestShoreId": "shore_it_genoa",
+      "nearestShoreName": "Genoa"
+    },
+    {
+      "id": "762",
+      "name": "Tajikistan",
+      "nearestShoreId": "shore_pk_karachi",
+      "nearestShoreName": "Karachi"
+    },
+    {
+      "id": "800",
+      "name": "Uganda",
+      "nearestShoreId": "shore_ke_mombasa",
+      "nearestShoreName": "Mombasa"
+    },
+    {
+      "id": "860",
+      "name": "Uzbekistan",
+      "nearestShoreId": "shore_ir_bandar_abbas",
+      "nearestShoreName": "Bandar Abbas"
+    },
+    {
+      "id": "336",
+      "name": "Vatican",
+      "nearestShoreId": "shore_it_naples",
+      "nearestShoreName": "Naples"
+    },
+    {
+      "id": "894",
+      "name": "Zambia",
+      "nearestShoreId": "shore_mz_beira",
+      "nearestShoreName": "Beira"
+    },
+    {
+      "id": "716",
+      "name": "Zimbabwe",
+      "nearestShoreId": "shore_mz_beira",
+      "nearestShoreName": "Beira"
+    }
+  ],
+  "approximateConnectors": []
+}

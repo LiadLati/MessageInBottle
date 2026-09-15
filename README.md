@@ -103,14 +103,35 @@ All variables are optional and documented in `.env.example`. The important ones:
 ### Map provider
 
 No map credentials are required. By default the world map renders land geometry from a bundled,
-public-domain Natural Earth 50m land file (`apps/web/public/map/land-50m.geojson`) on a MapLibre
-GL style that contains only a sea background, a land fill and a coastline — no labels, borders,
-flags, roads or user location, and it works offline. To use a licensed vector-tile source instead,
-set in `apps/web/.env` (see `.env.example`):
+public-domain Natural Earth 50m land file (`apps/web/public/map/land-50m.geojson`) and thin
+country border lines from `apps/web/public/map/borders-50m.geojson` on a MapLibre GL style that
+contains only a sea background, a land fill, a coastline and those border lines — no name
+labels, flags, roads or user location, and it works offline. To use a licensed vector-tile
+source for the land layer instead, set in `apps/web/.env` (see `.env.example`):
 
 - `VITE_MIB_MAP_TILES_URL` — a TileJSON URL for a vector source
 - `VITE_MIB_MAP_SOURCE_LAYER` — the name of that source's land/coastline layer
 - `VITE_MIB_MAP_ATTRIBUTION` — the provider's attribution text (shown per their terms)
+
+### Geographic datasets and the sea-route graph
+
+All geography is bundled and generated offline; nothing is fetched at runtime.
+
+| Data | Source | Version | Licence |
+| --- | --- | --- | --- |
+| Land polygons, coastline, borders, country attribution | [Natural Earth](https://www.naturalearthdata.com/) Admin 0 / Land, 1:50m, via the [`world-atlas`](https://github.com/topojson/world-atlas) npm package | Natural Earth 4.1.0 · world-atlas 2.0.2 | Natural Earth: public domain · world-atlas: ISC |
+| Shore catalogue | Hand-written `apps/api/src/db/geo/shores.ts` (~390 real harbours), verified against the dataset | — | project code |
+| Sea-route graph v2 | Generated `apps/api/src/db/geo/data/sea-graph.v2.json` | — | project data |
+
+`pnpm --filter @mib/api exec tsx src/tools/geo/build-world.ts` regenerates the border lines, the
+sea graph, `apps/api/src/db/geo/data/coverage.json` and the human-readable
+[shore coverage report](docs/SHORE_COVERAGE.md), and fails if any shore is inland, attributed to
+the wrong geometry, or if a coastal geometry has neither a shore nor a documented exclusion.
+
+Chart seeding is additive: the API adds the catalogue and graph version 2 beside the original
+chart at boot and never modifies existing shores, graph versions or released bottles' route
+snapshots (`pnpm --filter @mib/api db:seed` does the same on demand; `db:reset` is destructive
+and only for throw-away development databases).
 
 Only that one layer is ever drawn; `assertNeutralStyle` refuses any style containing symbol
 (label) layers or administrative/boundary/place source layers before the map is created.

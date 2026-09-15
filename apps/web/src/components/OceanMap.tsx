@@ -15,15 +15,19 @@ import {
   type StyleSpecification,
 } from 'maplibre-gl';
 import maplibreWorkerUrl from 'maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url';
+// The SDK's stylesheet travels with this lazy chunk, so sign-in never fetches map assets.
+import 'maplibre-gl/dist/maplibre-gl.css';
 import type { Feature } from 'geojson';
 import type { GeoPoint } from '@mib/shared';
 import { prefersReducedMotion } from '../lib/format.js';
 import {
-  assertNeutralStyle,
+  assertMapStylePolicy,
   boundsOf,
+  clusterPins,
   geoAlong,
   interpolatedProgress,
   lineFeature,
+  unwrapAntimeridian,
   type MapRoute,
 } from '../lib/mapGeometry.js';
 
@@ -40,6 +44,8 @@ export interface MapAnchor {
   role: 'origin' | 'destination' | 'shore';
 }
 
+type MapDebugHost = HTMLDivElement & { __mibMap?: MapLibreMap };
+
 export interface OceanMapHandle {
   zoomIn(): void;
   zoomOut(): void;
@@ -54,6 +60,8 @@ interface Props {
   selectedAnchorId?: string | null;
   // Shore pins as tappable DOM markers, clustered when they crowd and labelled from LABEL_ZOOM.
   showAnchorLabels?: boolean;
+  // Glide the camera to this anchor (e.g. a search result) whenever it changes.
+  focusAnchorId?: string | null;
   fitKey?: string;
   bottomPadding?: number;
   onSelectRoute?: (id: string) => void;
@@ -64,15 +72,21 @@ interface Props {
 const MIN_ZOOM = 1.6;
 const MAX_ZOOM = 7;
 // Shore pins: neighbours closer than this (screen px) fold into one cluster; names appear from
-// this zoom. Both keep a much larger shore catalogue readable on a phone.
+// this zoom (the selected pin is always named). With ~400 harbours worldwide, names only make
+// sense once a region fills the screen.
 const CLUSTER_PX = 44;
-const LABEL_ZOOM = 3.2;
+const LABEL_ZOOM = 4.5;
+const FOCUS_ZOOM = 5;
 const EMPTY_SELECTION: string[] = [];
 const LAND_URL = '/map/land-50m.geojson';
+// Interior country boundaries (Natural Earth admin-0, 1:50m, public domain via world-atlas).
+// Drawn as thin lines only: no fills, no names (spec §6.2).
+const BORDERS_URL = '/map/borders-50m.geojson';
 
-// Map style policy (MAP_DESIGN.md): land geometry and nothing else. The default source is the
-// bundled Natural Earth land polygons (public domain, offline, no credentials). A licensed vector
-// source can be supplied with VITE_MIB_MAP_TILES_URL — only its land layer is ever drawn.
+// Map style policy (MAP_DESIGN.md): land geometry, thin border lines and nothing else. The
+// default source is the bundled Natural Earth land polygons (public domain, offline, no
+// credentials). A licensed vector source can be supplied with VITE_MIB_MAP_TILES_URL — only its
+// land layer is ever drawn; borders always come from the bundled file.
 function buildStyle(): StyleSpecification {
   const tiles = import.meta.env.VITE_MIB_MAP_TILES_URL;
   const sourceLayer = import.meta.env.VITE_MIB_MAP_SOURCE_LAYER;
@@ -85,7 +99,7 @@ function buildStyle(): StyleSpecification {
     : { source: 'world' };
   return {
     version: 8,
-    sources: { world: source },
+    sources: { world: source, borders: { type: 'geojson', data: BORDERS_URL } },
     layers: [
       { id: 'sea', type: 'background', paint: { 'background-color': '#092331' } },
       {
@@ -99,6 +113,17 @@ function buildStyle(): StyleSpecification {
         type: 'line',
         ...landRef,
         paint: { 'line-color': '#6f8f92', 'line-width': 0.8, 'line-opacity': 0.45 },
+      },
+      {
+        id: 'borders',
+        type: 'line',
+        source: 'borders',
+        layout: { 'line-join': 'round' },
+        paint: {
+          'line-color': '#8ea3ab',
+          'line-width': ['interpolate', ['linear'], ['zoom'], 2, 0.45, 5, 0.9],
+          'line-opacity': ['interpolate', ['linear'], ['zoom'], 1.6, 0.22, 4, 0.38],
+        },
       },
     ],
   };
@@ -119,6 +144,7 @@ export function OceanMap({
   selectedRouteIds = EMPTY_SELECTION,
   selectedAnchorId = null,
   showAnchorLabels = false,
+  focusAnchorId = null,
   fitKey = '',
   bottomPadding = 280,
   onSelectRoute,
@@ -159,7 +185,8 @@ export function OceanMap({
     const { routes: rs, anchors: as, selectedRouteIds: sel } = latest.current;
     const chosen = rs.filter((r) => sel.includes(r.id));
     const shown = chosen.length > 0 ? chosen : rs;
-    const points = shown.length > 0 ? shown.flatMap((r) => r.points) : as.map((a) => a.geo);
+    const points =
+      shown.length > 0 ? shown.flatMap((r) => unwrapAntimeridian(r.points)) : as.map((a) => a.geo);
     const b = boundsOf(points);
     if (!b) return;
     const wide = map.getContainer().clientWidth >= 900;
@@ -197,68 +224,79 @@ export function OceanMap({
     const keep = new Set<string>();
     if (pins) {
       const zoom = map.getZoom();
-      const projected = as.map((a) => ({ a, p: map.project([a.geo.lng, a.geo.lat]) }));
-      const clusters: Array<{ members: MapAnchor[]; x: number; y: number }> = [];
-      for (const { a, p } of projected) {
-        const near = clusters.find((c) => Math.hypot(c.x - p.x, c.y - p.y) < CLUSTER_PX);
-        if (near) {
-          near.members.push(a);
-          near.x = (near.x * (near.members.length - 1) + p.x) / near.members.length;
-          near.y = (near.y * (near.members.length - 1) + p.y) / near.members.length;
-        } else clusters.push({ members: [a], x: p.x, y: p.y });
-      }
+      const projected = as.map((a) => {
+        const p = map.project([a.geo.lng, a.geo.lat]);
+        return { item: a, x: p.x, y: p.y };
+      });
+      const clusters = clusterPins(projected, zoom, MAX_ZOOM, CLUSTER_PX);
       for (const c of clusters) {
-        const single = c.members.length === 1 ? c.members[0]! : null;
-        const key = single
-          ? single.id
-          : `cluster:${c.members
-              .map((m) => m.id)
-              .sort()
-              .join('|')}`;
-        keep.add(key);
-        let m = anchorMarkersRef.current.get(key);
-        if (!m) {
-          const el = document.createElement('button');
-          el.type = 'button';
-          if (single) {
-            el.className = 'map-shore-pin';
-            el.innerHTML = `<span class="dot"></span><span class="label"></span>`;
-            el.addEventListener('click', (ev) => {
-              ev.stopPropagation();
-              latest.current.onSelectAnchor?.(single.id);
-            });
-          } else {
+        if (c.members.length > 1 && c.offsets.length === 0) {
+          // A real cluster: zooming in will separate it.
+          const key = `cluster:${c.members
+            .map((m) => m.id)
+            .sort()
+            .join('|')}`;
+          keep.add(key);
+          let m = anchorMarkersRef.current.get(key);
+          if (!m) {
+            const el = document.createElement('button');
+            el.type = 'button';
             el.className = 'map-shore-cluster';
             el.textContent = String(c.members.length);
-            el.setAttribute('aria-label', `${c.members.length} shores, tap to zoom in`);
-            const center = map.unproject([c.x, c.y]);
+            el.setAttribute('aria-label', `${c.members.length} shores, activate to zoom in`);
             el.addEventListener('click', (ev) => {
               ev.stopPropagation();
               map.easeTo({
-                center,
+                center: m!.getLngLat(),
                 zoom: Math.min(MAX_ZOOM, map.getZoom() + 1.6),
                 duration: reduced ? 0 : 500,
               });
             });
+            m = new Marker({ element: el, anchor: 'center' })
+              .setLngLat(map.unproject([c.x, c.y]))
+              .addTo(map);
+            anchorMarkersRef.current.set(key, m);
+          } else m.setLngLat(map.unproject([c.x, c.y]));
+          continue;
+        }
+        // Single pins, or a spread ring of pins that zooming could not separate. Each pin keeps
+        // its real coordinate; only the marker's screen offset moves.
+        c.members.forEach((member, i) => {
+          const offset = c.offsets[i] ?? [0, 0];
+          keep.add(member.id);
+          let m = anchorMarkersRef.current.get(member.id);
+          if (!m) {
+            const el = document.createElement('button');
+            el.type = 'button';
+            el.className = 'map-shore-pin';
+            el.innerHTML = `<span class="leg"></span><span class="dot"></span><span class="label"></span>`;
+            el.addEventListener('click', (ev) => {
+              ev.stopPropagation();
+              latest.current.onSelectAnchor?.(member.id);
+            });
+            m = new Marker({ element: el, anchor: 'top' })
+              .setLngLat([member.geo.lng, member.geo.lat])
+              .addTo(map);
+            anchorMarkersRef.current.set(member.id, m);
           }
-          const lngLat = single
-            ? [single.geo.lng, single.geo.lat]
-            : map.unproject([c.x, c.y]).toArray();
-          m = new Marker({ element: el, anchor: single ? 'top' : 'center' })
-            .setLngLat(lngLat as [number, number])
-            .addTo(map);
-          anchorMarkersRef.current.set(key, m);
-        } else if (!single) {
-          m.setLngLat(map.unproject([c.x, c.y]));
-        }
-        if (single) {
+          m.setOffset(offset);
           const el = m.getElement();
-          el.querySelector('.label')!.textContent = single.name;
-          el.setAttribute('aria-label', `Shore: ${single.name}`);
-          el.setAttribute('aria-pressed', String(single.id === sel));
-          el.classList.toggle('selected', single.id === sel);
-          el.classList.toggle('compact', zoom < LABEL_ZOOM && single.id !== sel);
-        }
+          const spread = c.offsets.length > 0;
+          el.classList.toggle('spread', spread);
+          // Leg from the dot back to the real position, so the offset reads as a pointer.
+          const leg = el.querySelector<HTMLElement>('.leg')!;
+          if (spread) {
+            const dx = -offset[0];
+            const dy = -offset[1] - 6;
+            leg.style.height = `${Math.round(Math.hypot(dx, dy))}px`;
+            leg.style.transform = `rotate(${Math.atan2(-dx, dy) * (180 / Math.PI)}deg)`;
+          }
+          el.querySelector('.label')!.textContent = member.name;
+          el.setAttribute('aria-label', `Shore: ${member.name}`);
+          el.setAttribute('aria-pressed', String(member.id === sel));
+          el.classList.toggle('selected', member.id === sel);
+          el.classList.toggle('compact', zoom < LABEL_ZOOM && member.id !== sel && !spread);
+        });
       }
     }
     for (const [id, m] of anchorMarkersRef.current) {
@@ -273,7 +311,7 @@ export function OceanMap({
   useEffect(() => {
     if (!containerRef.current || unsupported) return;
     const style = buildStyle();
-    assertNeutralStyle(style);
+    assertMapStylePolicy(style);
     const map = new MapLibreMap({
       container: containerRef.current,
       style,
@@ -290,6 +328,8 @@ export function OceanMap({
     map.touchZoomRotate.disableRotation();
     map.keyboard.enable();
     mapRef.current = map;
+    // Development-only handle so browser checks can inspect layers; absent from production.
+    if (import.meta.env.DEV) (containerRef.current as MapDebugHost).__mibMap = map;
     map.on('load', () => {
       map.addSource('planned', {
         type: 'geojson',
@@ -386,11 +426,12 @@ export function OceanMap({
       if (r.points.length < 2) continue;
       const selected = selectedRouteIds.includes(r.id);
       const progress = interpolatedProgress(r, now);
-      const { point, index } = geoAlong(r.points, progress);
-      planned.push({ ...lineFeature(r.id, r.points), properties: { id: r.id, selected } });
+      const pts = unwrapAntimeridian(r.points);
+      const { point, index } = geoAlong(pts, progress);
+      planned.push({ ...lineFeature(r.id, pts), properties: { id: r.id, selected } });
       if (progress > 0) {
         trail.push({
-          ...lineFeature(r.id, [...r.points.slice(0, index + 1), point]),
+          ...lineFeature(r.id, [...pts.slice(0, index + 1), point]),
           properties: { id: r.id, selected },
         });
       }
@@ -470,11 +511,12 @@ export function OceanMap({
       for (const r of routes) {
         if (r.points.length < 2) continue;
         const progress = interpolatedProgress(r, now);
-        const { point, index } = geoAlong(r.points, progress);
+        const pts = unwrapAntimeridian(r.points);
+        const { point, index } = geoAlong(pts, progress);
         markersRef.current.get(r.id)?.setLngLat([point.lng, point.lat]);
         if (progress > 0) {
           trail.push({
-            ...lineFeature(r.id, [...r.points.slice(0, index + 1), point]),
+            ...lineFeature(r.id, [...pts.slice(0, index + 1), point]),
             properties: { id: r.id, selected: selectedRouteIds.includes(r.id) },
           });
         }
@@ -484,6 +526,19 @@ export function OceanMap({
     }, 1000);
     return () => clearInterval(id);
   }, [routes, selectedRouteIds, loaded, reduced]);
+
+  // Camera: glide to a focused anchor (search result) close enough for its name to show.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !loaded || !focusAnchorId) return;
+    const a = latest.current.anchors.find((x) => x.id === focusAnchorId);
+    if (!a) return;
+    map.easeTo({
+      center: [a.geo.lng, a.geo.lat],
+      zoom: Math.max(map.getZoom(), FOCUS_ZOOM),
+      duration: reduced ? 0 : 600,
+    });
+  }, [focusAnchorId, loaded, reduced]);
 
   // Camera: fit to the selection whenever the caller asks (fitKey) or on first data.
   const firstFit = useRef(false);
