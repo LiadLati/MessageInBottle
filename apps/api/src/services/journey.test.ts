@@ -4,6 +4,7 @@ import * as t from '../db/schema.js';
 import { AppError } from '../lib/errors.js';
 import {
   getMyShore,
+  listReceivedLetters,
   getSentBottle,
   listSentBottles,
   openBottle,
@@ -96,8 +97,21 @@ describe('journey: visibility, deterministic arrival, opening', () => {
     runJourneyTick(w.ctx);
     w.clock.advance(60_000);
 
+    // Before opening: on the shore, not yet in the received archive.
+    expect(getMyShore(w.ctx, bo()).bottles.map((b) => b.id)).toEqual([bottleId]);
+    expect(listReceivedLetters(w.ctx, bo())).toEqual([]);
     const opened = openBottle(w.ctx, bo(), bottleId);
     expect(opened.bottle.state).toBe('opened');
+    // After opening the bottle leaves the active shore and is kept as received history; the
+    // sender still sees it in the sent list with its final state and full passport.
+    expect(getMyShore(w.ctx, bo()).bottles).toEqual([]);
+    const received = listReceivedLetters(w.ctx, bo());
+    expect(received.map((b) => [b.id, b.state])).toEqual([[bottleId, 'opened']]);
+    expect(received[0]!.openedAt).toBe(new Date(w.clock.now()).toISOString());
+    expect(readOpenedLetter(w.ctx, bo(), bottleId).letter.text).toBe(opened.letter.text);
+    expect(listSentBottles(w.ctx, ada()).map((b) => [b.id, b.state])).toEqual([
+      [bottleId, 'opened'],
+    ]);
     expect(opened.letter.text).toBe(SAMPLE_TEXT);
     expect(opened.letter.font).toBe('handwriting');
     expect(opened.aging.yellowing).toBeGreaterThan(0);

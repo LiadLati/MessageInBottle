@@ -52,7 +52,12 @@ export function OceanScreen({ focusId = null, onOpenPassport, onWrite, onOpenPro
   const [fitKey, setFitKey] = useState(focusId ?? 'initial');
   const mapHandle = useRef<OceanMapHandle>(null);
 
-  const list = useMemo(() => bottles.data?.bottles ?? [], [bottles.data]);
+  // The active map: a journey stays until the recipient opens the letter, then it belongs to
+  // history (Letters → Sent / Received, the passport) and leaves the map.
+  const list = useMemo(
+    () => (bottles.data?.bottles ?? []).filter((b) => b.state !== 'opened'),
+    [bottles.data],
+  );
   const groups = useMemo(() => {
     const map = new Map<string, SentBottleSummaryDto[]>();
     for (const b of list) {

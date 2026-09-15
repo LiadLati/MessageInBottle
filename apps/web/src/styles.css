@@ -1391,22 +1391,6 @@ button.avatar {
   padding: calc(var(--header-pad-top) + 72px) 24px calc(env(safe-area-inset-bottom, 0px) + 96px);
   box-shadow: none;
 }
-.opened-letter {
-  min-height: 100dvh;
-}
-.opened-letter-foot {
-  position: fixed;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  z-index: 5;
-  padding: 18px 24px max(12px, env(safe-area-inset-bottom, 0px));
-  text-align: center;
-  font-size: 11.5px;
-  color: var(--paper-ink-muted);
-  background: linear-gradient(rgba(245, 235, 216, 0), rgba(245, 235, 216, 0.92) 40%);
-  pointer-events: none;
-}
 .parchment .grain {
   position: absolute;
   inset: 0;
@@ -1591,40 +1575,6 @@ button.avatar {
     transform: none;
   }
 }
-.opened-letter-top {
-  position: fixed;
-  left: 0;
-  right: 0;
-  top: 0;
-  z-index: 5;
-  padding: calc(var(--header-pad-top) + 4px) var(--gutter-screen) 10px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  background: linear-gradient(
-    rgba(245, 235, 216, 1),
-    rgba(245, 235, 216, 0.85) 70%,
-    rgba(245, 235, 216, 0)
-  );
-  color: var(--paper-ink-muted);
-  font-size: 12px;
-}
-.opened-letter-top .provenance {
-  min-width: 0;
-  text-align: center;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.opened-letter-top .btn-ghost {
-  border-color: rgba(90, 76, 51, 0.35);
-  color: var(--paper-ink);
-  white-space: nowrap;
-}
-.opened-letter-top .btn-ghost[aria-pressed='true'] {
-  background: rgba(43, 33, 22, 0.08);
-}
 
 /* ---------- login ---------- */
 .login-screen {
@@ -1741,8 +1691,7 @@ button.avatar {
   .app-viewport.immersive {
     padding-left: 0;
   }
-  .app-viewport.immersive .world-screen,
-  .app-viewport.immersive .opened-letter-top {
+  .app-viewport.immersive .world-screen {
     left: 0;
   }
   .transport {
@@ -1777,9 +1726,6 @@ button.avatar {
     margin: 0 auto;
     box-shadow: 0 0 80px rgba(0, 0, 0, 0.5);
   }
-  .opened-letter-top {
-    left: var(--rail-width);
-  }
 }
 
 /* ---------- reduced motion ---------- */
@@ -1795,5 +1741,171 @@ button.avatar {
   }
   .progress-rail > span {
     transition: none;
+  }
+}
+
+/* ---------- letters: Sent / Received tabs ---------- */
+.seg-tabs {
+  display: inline-grid;
+  grid-auto-flow: column;
+  gap: 4px;
+  padding: 4px;
+  border-radius: 999px;
+  background: rgba(9, 26, 39, 0.55);
+  border: 1px solid rgba(215, 231, 228, 0.14);
+}
+.seg-tabs button {
+  min-height: 36px;
+  padding: 0 18px;
+  border-radius: 999px;
+  color: var(--text-faint);
+  font-size: 13.5px;
+  font-weight: 600;
+}
+.seg-tabs button.active {
+  background: rgba(143, 211, 204, 0.16);
+  color: var(--foam-white);
+}
+
+/* ---------- opened letter: modal over the shore ---------- */
+/* The shore stays visible around the parchment; the app shell underneath (bottom navigation
+   included) is `inert` while the dialog is up, so it is drawn but cannot be used. */
+.letter-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 30; /* above the sheet and nav, below the dev strip */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: max(20px, env(safe-area-inset-top, 0px)) 16px
+    calc(var(--nav-height) + var(--nav-safe-bottom) - 6px);
+}
+.letter-modal-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(3, 12, 20, 0.5);
+  backdrop-filter: blur(3px);
+  -webkit-backdrop-filter: blur(3px);
+  animation: modal-fade-in 260ms var(--ease-standard) both;
+}
+.letter-modal-dialog {
+  position: relative;
+  width: min(100%, 680px);
+  max-height: 100%;
+  display: flex;
+  flex-direction: column;
+  border-radius: 20px;
+  overflow: hidden;
+  background: var(--paper-parchment);
+  color: var(--paper-ink);
+  box-shadow:
+    0 40px 90px -30px rgba(0, 0, 0, 0.85),
+    0 0 0 1px rgba(90, 76, 51, 0.25);
+  outline: 0;
+  animation: modal-rise 320ms var(--ease-standard) both;
+}
+.letter-modal.closing .letter-modal-backdrop {
+  animation: modal-fade-out 240ms var(--ease-standard) both;
+}
+.letter-modal.closing .letter-modal-dialog {
+  animation: modal-sink 240ms var(--ease-standard) both;
+}
+.letter-modal-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 12px 14px;
+  color: var(--paper-ink-muted);
+  font-size: 12px;
+  border-bottom: 1px solid rgba(90, 76, 51, 0.15);
+}
+.letter-modal-top .provenance {
+  min-width: 0;
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.letter-modal-top .btn-ghost {
+  border-color: rgba(90, 76, 51, 0.35);
+  color: var(--paper-ink);
+  white-space: nowrap;
+}
+.letter-modal-top .btn-ghost[aria-pressed='true'] {
+  background: rgba(43, 33, 22, 0.08);
+}
+/* Long letters scroll here, inside the dialog, never the page behind. */
+.letter-modal-scroll {
+  min-height: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+}
+.letter-modal-scroll .parchment {
+  border-radius: 0;
+  box-shadow: none;
+  min-height: 240px;
+}
+.letter-modal-foot {
+  margin: 0;
+  padding: 10px 16px max(12px, env(safe-area-inset-bottom, 0px));
+  text-align: center;
+  font-size: 11.5px;
+  color: var(--paper-ink-muted);
+  border-top: 1px solid rgba(90, 76, 51, 0.12);
+}
+@keyframes modal-fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+@keyframes modal-fade-out {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+@keyframes modal-rise {
+  from {
+    opacity: 0;
+    transform: translateY(28px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes modal-sink {
+  from {
+    opacity: 1;
+    transform: none;
+  }
+  to {
+    opacity: 0;
+    transform: translateY(18px) scale(0.985);
+  }
+}
+@media (min-width: 900px) {
+  .letter-modal {
+    padding: 32px 32px 32px calc(var(--rail-width) + 32px);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .letter-modal-backdrop,
+  .letter-modal-dialog,
+  .letter-modal.closing .letter-modal-backdrop,
+  .letter-modal.closing .letter-modal-dialog {
+    animation-duration: 120ms !important;
+    animation-name: modal-fade-in;
+  }
+  .letter-modal.closing .letter-modal-backdrop,
+  .letter-modal.closing .letter-modal-dialog {
+    animation-name: modal-fade-out;
   }
 }

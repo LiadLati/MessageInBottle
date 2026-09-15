@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, inArray } from 'drizzle-orm';
+import { and, asc, desc, eq } from 'drizzle-orm';
 import {
   AgingProfileSchema,
   type JourneyEventDto,
@@ -141,8 +141,9 @@ function shoreBottle(bottle: BottleRow): ShoreBottleDto {
   };
 }
 
-// The recipient's shore lists only bottles whose arrival the server has committed. Bottles that
-// are still at sea are filtered by the query itself, not by a client-side flag (spec §7).
+// The recipient's shore lists only bottles whose arrival the server has committed and that are
+// still sealed: opening moves a bottle to the received archive (listReceivedLetters). Bottles
+// still at sea are filtered by the query itself, not by a client-side flag (spec §7).
 export function getMyShore(ctx: AppContext, user: AuthUser): ShoreResponse {
   const shore = user.shoreId
     ? ctx.db.select().from(t.shores).where(eq(t.shores.id, user.shoreId)).get()
@@ -153,13 +154,31 @@ export function getMyShore(ctx: AppContext, user: AuthUser): ShoreResponse {
     .where(
       and(
         eq(t.bottles.recipientId, user.id),
-        inArray(t.bottles.state, ['delivered', 'opened']),
+        eq(t.bottles.state, 'delivered'),
         eq(t.bottles.moderationStatus, 'clear'),
       ),
     )
     .orderBy(desc(t.bottles.deliveredAt))
     .all();
   return { shore: shore ? toShoreDto(shore) : null, bottles: rows.map(shoreBottle) };
+}
+
+// Everything the user has opened, newest first. The rows are the same bottles: nothing is
+// deleted or rewritten when a bottle leaves the shore.
+export function listReceivedLetters(ctx: AppContext, user: AuthUser): ShoreBottleDto[] {
+  return ctx.db
+    .select()
+    .from(t.bottles)
+    .where(
+      and(
+        eq(t.bottles.recipientId, user.id),
+        eq(t.bottles.state, 'opened'),
+        eq(t.bottles.moderationStatus, 'clear'),
+      ),
+    )
+    .orderBy(desc(t.bottles.openedAt))
+    .all()
+    .map(shoreBottle);
 }
 
 function deliveredBottleForRecipient(ctx: AppContext, user: AuthUser, bottleId: string): BottleRow {
