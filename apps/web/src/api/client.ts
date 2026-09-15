@@ -10,6 +10,7 @@ import type {
   SentBottleDto,
   SentBottleSummaryDto,
   SessionResponse,
+  ReceivedLettersResponse,
   ShoreResponse,
 } from '@mib/shared';
 
@@ -120,6 +121,7 @@ export const api = {
       disclosureAcknowledged: true,
     }),
   myShore: () => request<ShoreResponse>('GET', '/shore'),
+  receivedLetters: () => request<ReceivedLettersResponse>('GET', '/shore/received'),
   openBottle: (id: string) => request<OpenedLetterDto>('POST', `/shore/bottles/${id}/open`),
   readLetter: (id: string) => request<OpenedLetterDto>('GET', `/shore/bottles/${id}/letter`),
   notifications: () => request<{ notifications: NotificationDto[] }>('GET', '/notifications'),

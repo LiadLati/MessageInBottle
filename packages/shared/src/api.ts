@@ -218,11 +218,17 @@ export const ShoreBottleSchema = z.object({
 });
 export type ShoreBottleDto = z.infer<typeof ShoreBottleSchema>;
 
+// The active shore: only bottles that have landed and are still sealed. Opening moves a bottle
+// out of the shore into the received archive below; nothing is deleted.
 export const ShoreResponseSchema = z.object({
   shore: ShoreSchema.nullable(),
   bottles: z.array(ShoreBottleSchema),
 });
 export type ShoreResponse = z.infer<typeof ShoreResponseSchema>;
+
+// Letters the user has opened, newest first (Letters → Received).
+export const ReceivedLettersResponseSchema = z.object({ letters: z.array(ShoreBottleSchema) });
+export type ReceivedLettersResponse = z.infer<typeof ReceivedLettersResponseSchema>;
 
 export const OpenedLetterSchema = z.object({
   bottle: ShoreBottleSchema,

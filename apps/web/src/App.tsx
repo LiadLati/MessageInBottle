@@ -45,8 +45,8 @@ function Shell() {
   const [epoch, setEpoch] = useState(0);
   const [profileOpen, setProfileOpen] = useState(false);
   const [choosingShore, setChoosingShore] = useState(false);
-  // Immersive screens (preview & release, the release sequence, an opened letter) take the whole
-  // viewport: no navigation, no system strips.
+  // Immersive screens (preview & release, the release sequence) take the whole viewport: no
+  // navigation, no system strips. An opened letter is a modal over the shore instead.
   const [immersive, setImmersive] = useState(false);
   const chart = useAsync(() => (user ? api.chart() : Promise.resolve(null)), [user?.id]);
   const notifications = useAsync(
@@ -136,11 +136,7 @@ function Shell() {
           />
         ) : null}
         {tab === 'shore' ? (
-          <MyShoreScreen
-            onOpenProfile={openProfile}
-            onChooseShore={chooseShore}
-            onImmersive={setImmersive}
-          />
+          <MyShoreScreen onOpenProfile={openProfile} onChooseShore={chooseShore} />
         ) : null}
         {tab === 'letters' ? (
           <LettersScreen

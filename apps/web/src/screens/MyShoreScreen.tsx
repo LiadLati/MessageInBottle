@@ -1,49 +1,48 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import type { OpenedLetterDto, ShoreBottleDto } from '@mib/shared';
 import { api } from '../api/client.js';
 import { ShoreScene } from '../components/lazy.js';
+import { LetterModal } from '../components/LetterModal.js';
 import { Avatar, ErrorNote, Skeleton } from '../components/ui.js';
 import { Icon } from '../design/Icon.js';
 import { formatDayTime, formatDuration } from '../lib/format.js';
+import { featuredBottle, sealedOnly, waitingBottles } from '../lib/shoreQueue.js';
 import { useAsync } from '../lib/useAsync.js';
 import { useSession } from '../state/session.js';
-import { OpenedLetterScreen } from './OpenedLetterScreen.js';
 
 const POLL_MS = 15_000;
 
 interface Props {
   onOpenProfile: () => void;
   onChooseShore: () => void;
-  onImmersive: (immersive: boolean) => void;
 }
 
-// S2 · My Shore — real-time 3D coast. Only bottles the server has landed are ever shown.
-export function MyShoreScreen({ onOpenProfile, onChooseShore, onImmersive }: Props) {
+// S2 · My Shore — real-time 3D coast. Only bottles the server has landed and that are still
+// sealed are shown; opening one moves it to Letters → Received and features the next sealed
+// bottle. Tapping a waiting bottle only swaps it into the featured card; the letter is opened
+// solely by "Pick it up".
+export function MyShoreScreen({ onOpenProfile, onChooseShore }: Props) {
   const { user } = useSession();
   const shore = useAsync(() => api.myShore(), [], POLL_MS);
-  const [opened, setOpened] = useState<{ letter: OpenedLetterDto; fresh: boolean } | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [opened, setOpened] = useState<OpenedLetterDto | null>(null);
   const [error, setError] = useState<Error | null>(null);
   const [busy, setBusy] = useState(false);
   // Further arrivals stay folded so the sheet never grows over the featured bottle (C2 framing).
   const [showMore, setShowMore] = useState(false);
-  // The opened letter is a full-screen reader: no navigation while it is up.
-  useEffect(() => {
-    onImmersive(opened !== null);
-    return () => onImmersive(false);
-  }, [opened, onImmersive]);
 
-  const list = shore.data?.bottles ?? [];
-  const sealed = list.filter((b) => b.state === 'delivered');
-  const read = list.filter((b) => b.state === 'opened');
-  const featured: ShoreBottleDto | undefined = sealed[0] ?? read[0];
+  const sealed = sealedOnly(shore.data?.bottles ?? []);
+  const featured = featuredBottle(sealed, selectedId);
+  const waiting = waitingBottles(sealed, featured);
 
-  const open = async (b: ShoreBottleDto) => {
+  const pickUp = async (b: ShoreBottleDto) => {
     setError(null);
     setBusy(true);
     try {
-      const fresh = b.state === 'delivered';
-      const letter = fresh ? await api.openBottle(b.id) : await api.readLetter(b.id);
-      setOpened({ letter, fresh });
+      const letter = await api.openBottle(b.id);
+      setOpened(letter);
+      // The bottle has left the shore; the next sealed one (if any) becomes featured.
+      setSelectedId(null);
       await shore.reload();
     } catch (err) {
       setError(err instanceof Error ? err : new Error(String(err)));
@@ -51,16 +50,6 @@ export function MyShoreScreen({ onOpenProfile, onChooseShore, onImmersive }: Pro
       setBusy(false);
     }
   };
-
-  if (opened) {
-    return (
-      <OpenedLetterScreen
-        letter={opened.letter}
-        justOpened={opened.fresh}
-        onBack={() => setOpened(null)}
-      />
-    );
-  }
 
   if (!user?.shoreId) {
     return (
@@ -116,17 +105,16 @@ export function MyShoreScreen({ onOpenProfile, onChooseShore, onImmersive }: Pro
             <h2 className="t-display-sm">The tide has brought nothing yet</h2>
             <p className="t-meta" style={{ fontSize: 12.5 }}>
               Bottles appear here only once they have truly landed. Nothing on the way is ever
-              shown.
+              shown. Letters you have opened wait under Letters → Received.
             </p>
           </div>
         ) : (
           <div>
-            <div className="row">
+            <div className="row" data-testid="featured-bottle" data-bottle-id={featured.id}>
               <Avatar name={featured.sender.displayName} size="md" />
               <div className="grow">
                 <div className="t-card-title" style={{ color: 'var(--foam-white-3d)' }}>
-                  {featured.state === 'delivered' ? 'A bottle from' : 'A letter from'}{' '}
-                  {featured.sender.displayName}
+                  A bottle from {featured.sender.displayName}
                 </div>
                 <div className="t-meta" style={{ color: 'rgba(247,250,249,.7)' }}>
                   Landed {formatDayTime(featured.deliveredAt)} · sealed{' '}
@@ -139,20 +127,18 @@ export function MyShoreScreen({ onOpenProfile, onChooseShore, onImmersive }: Pro
               className="btn-primary on-3d"
               style={{ marginTop: 14 }}
               disabled={busy}
-              onClick={() => void open(featured)}
+              onClick={() => void pickUp(featured)}
             >
               <Icon name="bottle" size={18} />
-              {featured.state === 'delivered' ? 'Pick it up' : 'Read it again'}
+              Pick it up
             </button>
             <p
               className="t-meta"
               style={{ textAlign: 'center', marginTop: 10, color: 'rgba(247,250,249,.62)' }}
             >
-              {featured.state === 'delivered'
-                ? 'Opening ends its journey'
-                : 'Its journey is complete'}
+              Opening ends its journey
             </p>
-            {list.length > 1 ? (
+            {waiting.length > 0 ? (
               <button
                 type="button"
                 className="btn-text"
@@ -160,40 +146,39 @@ export function MyShoreScreen({ onOpenProfile, onChooseShore, onImmersive }: Pro
                 aria-expanded={showMore}
                 onClick={() => setShowMore((v) => !v)}
               >
-                {list.length - 1} more on your shore
+                {waiting.length} more on your shore
                 <Icon name="back" size={14} className={showMore ? 'rotate-up' : 'rotate-down'} />
               </button>
             ) : null}
-            {list.length > 1 && showMore ? (
+            {waiting.length > 0 && showMore ? (
               <ul className="list" style={{ marginTop: 10 }} aria-label="More on your shore">
-                {list
-                  .filter((b) => b.id !== featured.id)
-                  .map((b) => (
-                    <li key={b.id}>
-                      <button
-                        type="button"
-                        className="row-item selectable"
-                        disabled={busy}
-                        onClick={() => void open(b)}
-                      >
-                        <Avatar name={b.sender.displayName} />
-                        <span className="grow">
-                          <span className="t-label" style={{ display: 'block' }}>
-                            {b.state === 'delivered' ? 'Sealed bottle' : 'Opened letter'} from{' '}
-                            {b.sender.displayName}
-                          </span>
-                          <span className="t-meta">Landed {formatDayTime(b.deliveredAt)}</span>
+                {waiting.map((b) => (
+                  <li key={b.id}>
+                    <button
+                      type="button"
+                      className="row-item selectable"
+                      disabled={busy}
+                      aria-label={`Feature the bottle from ${b.sender.displayName}`}
+                      onClick={() => setSelectedId(b.id)}
+                    >
+                      <Avatar name={b.sender.displayName} />
+                      <span className="grow">
+                        <span className="t-label" style={{ display: 'block' }}>
+                          Sealed bottle from {b.sender.displayName}
                         </span>
-                        <span className="t-meta">{b.state === 'delivered' ? 'Open' : 'Read'}</span>
-                      </button>
-                    </li>
-                  ))}
+                        <span className="t-meta">Landed {formatDayTime(b.deliveredAt)}</span>
+                      </span>
+                      <span className="t-meta">Feature</span>
+                    </button>
+                  </li>
+                ))}
               </ul>
             ) : null}
           </div>
         )}
         <ErrorNote error={error ?? shore.error} />
       </section>
+      {opened ? <LetterModal letter={opened} justOpened onClose={() => setOpened(null)} /> : null}
     </div>
   );
 }

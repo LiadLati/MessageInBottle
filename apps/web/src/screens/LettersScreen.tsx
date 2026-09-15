@@ -1,4 +1,7 @@
+import { useState, type ReactNode } from 'react';
+import type { OpenedLetterDto } from '@mib/shared';
 import { api } from '../api/client.js';
+import { LetterModal } from '../components/LetterModal.js';
 import { LetterPaper } from '../components/LetterPaper.js';
 import {
   Avatar,
@@ -17,45 +20,148 @@ interface Props {
   onBack: () => void;
 }
 
+type Folder = 'sent' | 'received';
+
 export function LettersScreen({ passportId, onSelect, onBack }: Props) {
+  const [folder, setFolder] = useState<Folder>('sent');
   if (passportId) return <PassportView key={passportId} id={passportId} onBack={onBack} />;
-  return <SentHistory onSelect={onSelect} />;
+  const tabs = (
+    <div className="seg-tabs" role="tablist" aria-label="Letters">
+      {(['sent', 'received'] as const).map((f) => (
+        <button
+          key={f}
+          type="button"
+          role="tab"
+          id={`letters-tab-${f}`}
+          aria-selected={folder === f}
+          aria-controls={`letters-panel-${f}`}
+          className={folder === f ? 'active' : ''}
+          onClick={() => setFolder(f)}
+        >
+          {f === 'sent' ? 'Sent' : 'Received'}
+        </button>
+      ))}
+    </div>
+  );
+  return folder === 'sent' ? (
+    <SentHistory onSelect={onSelect} tabs={tabs} />
+  ) : (
+    <ReceivedHistory tabs={tabs} />
+  );
 }
 
-function SentHistory({ onSelect }: { onSelect: (id: string) => void }) {
+function SentHistory({ onSelect, tabs }: { onSelect: (id: string) => void; tabs: ReactNode }) {
   const sent = useAsync(() => api.sentBottles(), []);
   const list = sent.data?.bottles ?? [];
   return (
     <DeckScreen title="Letters" subtitle="Everything you have sent, with its fate">
-      {sent.loading && !sent.data ? (
-        <Skeleton />
-      ) : list.length === 0 ? (
-        <div className="glass-panel stack">
-          <h2 className="t-display-sm">Nothing sent yet</h2>
-          <p className="secondary">Your sent bottles and their passports will gather here.</p>
-        </div>
-      ) : (
-        <ul className="list">
-          {list.map((b) => (
-            <li key={b.id}>
-              <button type="button" className="row-item selectable" onClick={() => onSelect(b.id)}>
-                <Avatar name={b.recipient.displayName} tone="foam" />
-                <span className="grow">
-                  <span className="t-card-title" style={{ display: 'block' }}>
-                    To {b.recipient.displayName}
+      {tabs}
+      <div
+        id="letters-panel-sent"
+        role="tabpanel"
+        aria-labelledby="letters-tab-sent"
+        className="stack"
+      >
+        {sent.loading && !sent.data ? (
+          <Skeleton />
+        ) : list.length === 0 ? (
+          <div className="glass-panel stack">
+            <h2 className="t-display-sm">Nothing sent yet</h2>
+            <p className="secondary">Your sent bottles and their passports will gather here.</p>
+          </div>
+        ) : (
+          <ul className="list">
+            {list.map((b) => (
+              <li key={b.id}>
+                <button
+                  type="button"
+                  className="row-item selectable"
+                  onClick={() => onSelect(b.id)}
+                >
+                  <Avatar name={b.recipient.displayName} tone="foam" />
+                  <span className="grow">
+                    <span className="t-card-title" style={{ display: 'block' }}>
+                      To {b.recipient.displayName}
+                    </span>
+                    <span className="t-meta">
+                      Released {formatDate(b.releasedAt)} · {formatDuration(b.elapsedMs)}
+                    </span>
                   </span>
-                  <span className="t-meta">
-                    Released {formatDate(b.releasedAt)} · {formatDuration(b.elapsedMs)}
+                  <StatusChip state={b.state} />
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+        <ErrorNote error={sent.error} />
+      </div>
+    </DeckScreen>
+  );
+}
+
+// Letters → Received: every letter the user has opened. Reading again is a plain read of the
+// stored letter in the same modal the shore uses; nothing here changes state.
+function ReceivedHistory({ tabs }: { tabs: ReactNode }) {
+  const received = useAsync(() => api.receivedLetters(), []);
+  const [reading, setReading] = useState<OpenedLetterDto | null>(null);
+  const [error, setError] = useState<Error | null>(null);
+  const list = received.data?.letters ?? [];
+  const read = async (id: string) => {
+    setError(null);
+    try {
+      setReading(await api.readLetter(id));
+    } catch (err) {
+      setError(err instanceof Error ? err : new Error(String(err)));
+    }
+  };
+  return (
+    <DeckScreen title="Letters" subtitle="Letters that reached you and were opened">
+      {tabs}
+      <div
+        id="letters-panel-received"
+        role="tabpanel"
+        aria-labelledby="letters-tab-received"
+        className="stack"
+      >
+        {received.loading && !received.data ? (
+          <Skeleton />
+        ) : list.length === 0 ? (
+          <div className="glass-panel stack">
+            <h2 className="t-display-sm">Nothing opened yet</h2>
+            <p className="secondary">
+              Letters you pick up on your shore are kept here once opened.
+            </p>
+          </div>
+        ) : (
+          <ul className="list">
+            {list.map((b) => (
+              <li key={b.id}>
+                <button
+                  type="button"
+                  className="row-item selectable"
+                  onClick={() => void read(b.id)}
+                >
+                  <Avatar name={b.sender.displayName} />
+                  <span className="grow">
+                    <span className="t-card-title" style={{ display: 'block' }}>
+                      From {b.sender.displayName}
+                    </span>
+                    <span className="t-meta">
+                      Opened {b.openedAt ? formatDate(b.openedAt) : '—'} · from {b.originShore.name}{' '}
+                      · {formatDuration(b.journeyDurationMs)} at sea
+                    </span>
                   </span>
-                </span>
-                <StatusChip state={b.state} />
-              </button>
-            </li>
-          ))}
-        </ul>
-      )}
-      <p className="t-meta">A private received archive is a proposed later stage.</p>
-      <ErrorNote error={sent.error} />
+                  <span className="t-meta">Read</span>
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+        <ErrorNote error={error ?? received.error} />
+      </div>
+      {reading ? (
+        <LetterModal letter={reading} justOpened={false} onClose={() => setReading(null)} />
+      ) : null}
     </DeckScreen>
   );
 }
