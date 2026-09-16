@@ -1909,3 +1909,139 @@ button.avatar {
     animation-name: modal-fade-out;
   }
 }
+
+/* ---------- daylight Ocean ---------- */
+/* The daylight palette is a token override scoped to the shell while the Ocean is the visible
+   surface (weather handoff v1.1 · DESIGN_TOKENS.json → color.uiDay). Nothing global is
+   replaced: every other screen keeps the night chrome it was designed with. */
+.app-viewport[data-daylight='day'] {
+  --glass-control-bg: rgba(9, 40, 56, 0.42);
+  --glass-panel-bg: rgba(6, 32, 46, 0.55);
+  --nav-bg: linear-gradient(rgba(4, 24, 34, 0), rgba(4, 24, 34, 0.86) 46%);
+  --scrim-map-vignette: radial-gradient(
+    120% 80% at 50% 40%,
+    rgba(255, 255, 255, 0.1),
+    rgba(9, 44, 62, 0.42) 80%
+  );
+  --scrim-map-header: linear-gradient(rgba(4, 24, 34, 0.62), rgba(4, 24, 34, 0));
+}
+/* Day and night swap over 600ms on the map's own clock; the chrome follows on the same feel. */
+.app-viewport .scrim-map,
+.app-viewport .scrim-map-header,
+.app-viewport .nav {
+  transition:
+    background 600ms var(--ease-standard),
+    border-color 600ms var(--ease-standard);
+}
+
+/* ---------- weather advisory ---------- */
+/* Amber-bordered glass card; the weather is always stated in words, never by colour alone. */
+.weather-advisory {
+  position: absolute;
+  left: var(--gutter-overlay);
+  right: var(--gutter-overlay);
+  z-index: 6;
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px 14px;
+  border-radius: 18px;
+  background: rgba(6, 20, 30, 0.62);
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
+  border: 1px solid rgba(199, 162, 74, 0.5);
+  color: var(--advisory-text, #f0e2c0);
+  animation: advisory-in 320ms var(--ease-standard) 200ms both;
+}
+.weather-advisory.map {
+  bottom: calc(var(--nav-height) + var(--nav-safe-bottom) + 132px);
+}
+.weather-advisory.shore {
+  top: calc(var(--header-pad-top) + 74px);
+  padding: 11px 14px;
+  border-radius: 16px;
+  background: rgba(6, 16, 22, 0.58);
+  border-color: rgba(199, 162, 74, 0.45);
+  align-items: center;
+}
+.weather-advisory .icon-tile {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  flex: none;
+  border-radius: 9px;
+  background: rgba(199, 162, 74, 0.16);
+  color: #e7cfa1;
+}
+.weather-advisory .pulse {
+  width: 8px;
+  height: 8px;
+  flex: none;
+  border-radius: 50%;
+  background: #e7cfa1;
+  animation: advisory-breathe 6s ease-in-out infinite;
+}
+.weather-advisory .eyebrow {
+  display: block;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  color: #e7cfa1;
+}
+.weather-advisory .body {
+  display: block;
+  margin-top: 2px;
+  font-size: 12.5px;
+  line-height: 1.4;
+}
+@keyframes advisory-in {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes advisory-breathe {
+  0%,
+  100% {
+    opacity: 0.55;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+.chip.storm-chip {
+  min-height: 26px;
+  padding: 3px 10px;
+  font-size: 11.5px;
+  background: rgba(199, 162, 74, 0.18);
+  border-color: rgba(199, 162, 74, 0.6);
+  color: #f0ddae;
+}
+@media (min-width: 900px) {
+  .world-screen.two-pane .weather-advisory.map {
+    right: calc(var(--pane-width) + var(--gutter-overlay));
+    bottom: calc(var(--gutter-overlay) + 16px);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .weather-advisory {
+    animation-duration: 180ms;
+    animation-delay: 0ms;
+  }
+  .weather-advisory .pulse {
+    animation: none;
+    opacity: 1;
+  }
+  .app-viewport .scrim-map,
+  .app-viewport .scrim-map-header,
+  .app-viewport .nav {
+    transition-duration: 180ms;
+  }
+}

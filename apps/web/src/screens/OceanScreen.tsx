@@ -7,7 +7,9 @@ import { Avatar, ErrorNote, Skeleton, StatusChip } from '../components/ui.js';
 import { Icon } from '../design/Icon.js';
 import { formatDuration, formatTime } from '../lib/format.js';
 import { useAsync } from '../lib/useAsync.js';
+import { activeOceanStorms } from '../lib/oceanWeather.js';
 import { useSession } from '../state/session.js';
+import { useWeather } from '../state/weather.js';
 
 const POLL_MS = 15_000;
 
@@ -38,12 +40,15 @@ function toRoute(b: SentBottleSummaryDto): MapRoute | null {
   };
 }
 
+const overrideToForce = (v: 'auto' | 'on' | 'off') => (v === 'auto' ? null : v);
+
 // Bottles share a route when they follow the same sequence of passages.
 const routeKeyOf = (b: SentBottleSummaryDto) => b.route.nodeIds.join('>');
 
 // S1 · Ocean — private journeys over the real world map.
 export function OceanScreen({ focusId = null, onOpenPassport, onWrite, onOpenProfile }: Props) {
   const { user } = useSession();
+  const { phase, nowMs, oceanStormOverride } = useWeather();
   const bottles = useAsync(() => api.sentBottles(), [], POLL_MS);
   const chart = useAsync(() => api.chart(), []);
   const [view, setView] = useState<View>(() =>
@@ -83,6 +88,13 @@ export function OceanScreen({ focusId = null, onOpenPassport, onWrite, onOpenPro
   );
 
   const routes = useMemo(() => list.map(toRoute).filter((r): r is MapRoute => r !== null), [list]);
+  // Simulated storms: night only, and only along this sender's own at-sea routes. The list is
+  // already only their own bottles, so no other person's journey or weather can appear here.
+  const storms = useMemo(
+    () => activeOceanStorms(list, nowMs, { phase, force: overrideToForce(oceanStormOverride) }),
+    [list, nowMs, phase, oceanStormOverride],
+  );
+  const stormBottleIds = useMemo(() => new Set(storms.map((s) => s.bottleId)), [storms]);
   const focusBottle = current ?? routeBottles[0] ?? null;
   const anchors = useMemo<MapAnchor[]>(() => {
     if (!focusBottle || !chart.data) return [];
@@ -129,6 +141,8 @@ export function OceanScreen({ focusId = null, onOpenPassport, onWrite, onOpenPro
           anchors={anchors}
           selectedRouteIds={selectedRouteIds}
           onSelectRoute={selectFromMap}
+          phase={phase}
+          storms={storms}
           fitKey={fitKey}
         />
       </div>
@@ -196,6 +210,23 @@ export function OceanScreen({ focusId = null, onOpenPassport, onWrite, onOpenPro
         </button>
       </div>
 
+      {storms.length > 0 ? (
+        <aside className="weather-advisory map" aria-label="Weather">
+          <span className="icon-tile" aria-hidden>
+            <Icon name="storm" size={16} />
+          </span>
+          <span className="grow">
+            <span className="eyebrow">Weather · simulated</span>
+            {/* Honest copy: this weather is scenery. It is deliberately NOT the prototype's
+                "anything at sea will take longer to arrive", which would be false. */}
+            <span className="body">
+              Rough water over {storms.length === 1 ? 'a passage' : 'passages'} on your{' '}
+              {storms.length === 1 ? 'route' : 'routes'} tonight. Weather is simulated scenery — it
+              never changes a route or an arrival time.
+            </span>
+          </span>
+        </aside>
+      ) : null}
       {bottles.loading && !bottles.data ? (
         <section className="sheet" aria-label="Journey">
           <Skeleton />
@@ -244,6 +275,7 @@ export function OceanScreen({ focusId = null, onOpenPassport, onWrite, onOpenPro
                       {formatDuration(b.elapsedMs)}
                     </span>
                   </span>
+                  {stormBottleIds.has(b.id) ? <StormChip /> : null}
                   <StatusChip state={b.state} />
                 </button>
               </li>
@@ -255,6 +287,7 @@ export function OceanScreen({ focusId = null, onOpenPassport, onWrite, onOpenPro
         <section className="sheet" aria-label="Journey">
           <JourneyCard
             bottle={current}
+            storm={stormBottleIds.has(current.id)}
             onBack={
               view.fromRoute ? () => setView({ kind: 'route', routeKey: view.fromRoute! }) : null
             }
@@ -272,13 +305,25 @@ export function OceanScreen({ focusId = null, onOpenPassport, onWrite, onOpenPro
   );
 }
 
+// "Storm near" states the weather in words, so nothing depends on colour or motion alone.
+function StormChip() {
+  return (
+    <span className="chip storm-chip" title="Simulated weather — it does not affect the journey">
+      <Icon name="storm" size={12} />
+      Storm near
+    </span>
+  );
+}
+
 function JourneyCard({
   bottle,
+  storm,
   onBack,
   onClose,
   onPassport,
 }: {
   bottle: SentBottleSummaryDto;
+  storm: boolean;
   onBack: (() => void) | null;
   onClose: () => void;
   onPassport: () => void;
@@ -313,6 +358,7 @@ function JourneyCard({
         </button>
       </div>
       <div className="row" style={{ marginTop: 16 }}>
+        {storm ? <StormChip /> : null}
         <StatusChip state={bottle.state} />
         <div
           className="progress-rail"

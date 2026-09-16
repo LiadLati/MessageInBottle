@@ -7,8 +7,10 @@ import { Avatar, ErrorNote, Skeleton } from '../components/ui.js';
 import { Icon } from '../design/Icon.js';
 import { formatDayTime, formatDuration } from '../lib/format.js';
 import { featuredBottle, sealedOnly, waitingBottles } from '../lib/shoreQueue.js';
+import { shoreWeatherAt } from '../lib/shoreWeather.js';
 import { useAsync } from '../lib/useAsync.js';
 import { useSession } from '../state/session.js';
+import { useWeather } from '../state/weather.js';
 
 const POLL_MS = 15_000;
 
@@ -23,6 +25,7 @@ interface Props {
 // solely by "Pick it up".
 export function MyShoreScreen({ onOpenProfile, onChooseShore }: Props) {
   const { user } = useSession();
+  const { nowMs, shoreStormOverride } = useWeather();
   const shore = useAsync(() => api.myShore(), [], POLL_MS);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [opened, setOpened] = useState<OpenedLetterDto | null>(null);
@@ -31,6 +34,11 @@ export function MyShoreScreen({ onOpenProfile, onChooseShore }: Props) {
   // Further arrivals stay folded so the sheet never grows over the featured bottle (C2 framing).
   const [showMore, setShowMore] = useState(false);
 
+  // My Shore keeps its own weather, on its own schedule, keyed on the user — so it never
+  // mirrors an ocean storm. It is cosmetic: it changes sky, light, rain, waves, foam and
+  // wetness, and nothing else. It never blocks a release, adds delay, alters a route or
+  // increases any risk.
+  const weather = shoreWeatherAt(user?.id ?? null, nowMs, shoreStormOverride);
   const sealed = sealedOnly(shore.data?.bottles ?? []);
   const featured = featuredBottle(sealed, selectedId);
   const waiting = waitingBottles(sealed, featured);
@@ -55,7 +63,7 @@ export function MyShoreScreen({ onOpenProfile, onChooseShore }: Props) {
     return (
       <div className="world-screen">
         <div className="world-layer">
-          <ShoreScene mode="shore" showBottle={false} />
+          <ShoreScene mode="shore" showBottle={false} weather={weather} />
         </div>
         <div className="scrim scrim-3d" />
         <header className="world-header on-3d">
@@ -77,14 +85,14 @@ export function MyShoreScreen({ onOpenProfile, onChooseShore }: Props) {
   return (
     <div className="world-screen two-pane">
       <div className="world-layer">
-        <ShoreScene mode="shore" showBottle={Boolean(featured)} />
+        <ShoreScene mode="shore" showBottle={Boolean(featured)} weather={weather} />
       </div>
       <div className="scrim scrim-3d" />
       <header className="world-header on-3d">
         <div>
           <h1 className="t-title">My Shore</h1>
           <p className="t-meta">
-            {shore.data?.shore?.name ?? '…'} · dusk
+            {shore.data?.shore?.name ?? '…'} · {weather === 'storm' ? 'storm · high water' : 'dusk'}
             {sealed.length > 0 ? ` · ${sealed.length} sealed` : ''}
           </p>
         </div>
@@ -97,6 +105,17 @@ export function MyShoreScreen({ onOpenProfile, onChooseShore }: Props) {
           {user.displayName.charAt(0).toUpperCase()}
         </button>
       </header>
+      {weather === 'storm' ? (
+        <aside className="weather-advisory shore" aria-label="Weather">
+          <span className="pulse" aria-hidden />
+          {/* Cosmetic weather, stated honestly. The prototype's "anything at sea will take
+              longer to arrive" is deliberately not used: it would be untrue. */}
+          <span className="body">
+            Rough water on your shore. The weather here is scenery — it never delays a bottle or
+            changes where one is going.
+          </span>
+        </aside>
+      ) : null}
       <section className="sheet on-3d" aria-label="Arrivals">
         {shore.loading && !shore.data ? (
           <Skeleton />

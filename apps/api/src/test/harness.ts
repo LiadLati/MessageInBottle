@@ -51,6 +51,7 @@ export interface TestWorld {
   ctx: AppContext;
   db: Db;
   clock: ManualClock;
+  realClock: ManualClock;
   outbox: OutboxMailer;
   user(username: string): AuthUser;
 }
@@ -63,11 +64,15 @@ export function createTestWorld(overrides: Partial<AppConfig> = {}): TestWorld {
   seedUsers(db, T0);
   const clock = new ManualClock(T0);
   const outbox = new OutboxMailer(() => clock.now());
-  const ctx: AppContext = { db, clock, config, mailer: outbox };
+  // Tests get a separate real clock so advancing `clock` (journeys, weather) never touches
+  // session lifetimes — exactly the production split.
+  const realClock = new ManualClock(T0);
+  const ctx: AppContext = { db, clock, realClock, config, mailer: outbox };
   return {
     ctx,
     db,
     clock,
+    realClock,
     outbox,
     user(username) {
       const row = db.select().from(t.users).where(eq(t.users.username, username)).get();

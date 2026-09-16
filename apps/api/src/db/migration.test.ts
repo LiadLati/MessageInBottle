@@ -126,7 +126,7 @@ describe('migrating a populated database', () => {
     // 5. The upgraded database serves the current API and the journey completes on schedule.
     const clock = new ManualClock(source.clock.now());
     const config = testConfig();
-    const ctx = { db, clock, config, mailer: new OutboxMailer() };
+    const ctx = { db, clock, realClock: clock, config, mailer: new OutboxMailer() };
     const app = createApp(ctx);
     const mid = getSentBottle(ctx, ada, bottleId);
     expect(mid.position.progress).toBeCloseTo(0.5, 3);

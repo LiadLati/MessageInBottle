@@ -75,7 +75,7 @@ describe('additive chart upgrade', () => {
     seedLegacyChart(db, 5, T0);
     seedUsers(db, T0);
     const clock = new ManualClock(T0);
-    const ctx = { db, clock, config: testConfig(), mailer: new OutboxMailer() };
+    const ctx = { db, clock, realClock: clock, config: testConfig(), mailer: new OutboxMailer() };
     const user = (username: string) => {
       const row = db.select().from(t.users).where(eq(t.users.username, username)).get()!;
       return {

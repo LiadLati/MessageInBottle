@@ -123,7 +123,9 @@ describe('password recovery', () => {
     const token = tokenFrom(w.outbox.messages[0]!.text);
     expect((await reset(app, token, 'short')).status).toBe(400);
     expect((await reset(app, 'f'.repeat(64), 'long enough password')).status).toBe(400);
-    w.clock.advance(RESET_TOKEN_TTL_MS + 1);
+    // Reset tokens are an authentication lifetime, so they expire on real time, not on the
+    // journey clock (see the development-clock suite in auth.test.ts).
+    w.realClock.advance(RESET_TOKEN_TTL_MS + 1);
     const late = await reset(app, token, 'long enough password');
     expect(late.status).toBe(400);
     expect(((await late.json()) as { error: { code: string } }).error.code).toBe('reset_invalid');
