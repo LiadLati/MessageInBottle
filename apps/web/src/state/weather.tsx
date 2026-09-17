@@ -1,6 +1,7 @@
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { DAYLIGHT_DEFAULTS, phaseAt, type DayPhase } from '@mib/shared';
 import { api } from '../api/client.js';
+import { useSession } from './session.js';
 
 // One clock and one timezone policy for all simulated weather — scheduling and display alike
 // (docs/WEATHER_INTEGRATION_PLAN.md · "Clock and timezone policy"):
@@ -52,8 +53,12 @@ export function WeatherProvider({ children }: { children: ReactNode }) {
   const [oceanStormOverride, setOceanStormOverride] = useState<WeatherOverride>('auto');
   const [shoreStormOverride, setShoreStormOverride] = useState<WeatherOverride>('auto');
 
+  // The status endpoint needs a session, so the offset is re-read whenever the signed-in user
+  // changes: a fresh sign-in must not spend its first tick on the real clock.
+  const { user } = useSession();
+  const userId = user?.id ?? null;
   useEffect(() => {
-    if (!import.meta.env.DEV) return;
+    if (!import.meta.env.DEV || !userId) return;
     let alive = true;
     const read = () =>
       void api
@@ -68,7 +73,7 @@ export function WeatherProvider({ children }: { children: ReactNode }) {
       alive = false;
       clearInterval(id);
     };
-  }, []);
+  }, [userId]);
 
   // Keep the instant fresh while the page is open, and re-read it immediately when a
   // backgrounded tab comes back — a tab restored after midnight must not stay on yesterday.

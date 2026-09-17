@@ -115,9 +115,13 @@ source for the land layer instead, set in `apps/web/.env` (see `.env.example`):
 
 ### Time of day and simulated weather
 
-The Ocean map switches between the approved daylight and night palettes automatically, and can
-show simulated storms; My Shore has its own independent weather. **All of it is cosmetic** — it
-never changes a route, a duration, an arrival or any risk (product spec §9.1).
+The Ocean map switches between the approved daylight and night palettes automatically. Simulated
+weather belongs to **each bottle**: at night an at-sea bottle may be in a storm on its own (two
+bottles on one route can differ), shown as a small cloud glyph above its marker and an `In a storm`
+chip on its card. The card's **View at sea** button opens a real-time view of that bottle on open
+water — calm or stormy, day or night — and **Back to map** returns to exactly the same map view.
+My Shore has its own independent weather. **All of it is cosmetic** — it never changes a route, a
+duration, an arrival or any risk (product spec §9.1), and watching a bottle changes nothing.
 
 | Setting | Default | Where |
 | --- | --- | --- |
@@ -135,7 +139,8 @@ weather with nothing stored and no migration. In development the dev-clock offse
 along with journeys; sessions are unaffected because authentication runs on real time.
 
 In a development build the dev bar carries **Sky**, **Ocean storm** and **Shore storm** preview
-switches. They change only what is drawn — no request is made and no bottle is touched.
+switches. They change only what is drawn — no request is made and no bottle is touched. The sea
+view follows the same switches, so calm/storm and day/night can be previewed there too.
 
 ### Geographic datasets and the sea-route graph
 

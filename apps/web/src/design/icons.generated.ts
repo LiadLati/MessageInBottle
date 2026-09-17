@@ -29,6 +29,8 @@ export const ICONS = {
     '<path d="M2 17c4-2.5 7-2.5 11 0 3.4 2 6.6.6 9-1.5"></path><circle cx="17" cy="7" r="3.2"></circle>',
   storm:
     '<path d="M4 9a4 4 0 0 1 7.4-2.1A3.5 3.5 0 1 1 16 13H6.5A3.5 3.5 0 0 1 4 9Z"></path><path d="M12 15l-2 4h3l-1.6 3.4"></path>',
+  viewAtSea:
+    '<path d="M2 15c2.6-2.4 4.4-2.4 7 0s4.4 2.4 7 0 4.4-2.4 6 0"></path><rect x="8" y="6" width="9" height="5" rx="2.5" stroke-width="1.5"></rect>',
   write: '<path d="M4 20h4l12-12-4-4L4 16v4Z"></path>',
 } as const;
 export type IconName = keyof typeof ICONS;

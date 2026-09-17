@@ -1,52 +1,42 @@
 import type { SentBottleSummaryDto } from '@mib/shared';
 import { OCEAN_SCHEDULE, activeStormAt, type DayPhase } from '@mib/shared';
-import { stormGeometry, type StormGeometry } from './stormGeometry.js';
 
-// Which simulated storms the Ocean map should be showing right now.
+// Which of the signed-in sender's bottles are in a storm right now (handoff v2.0).
 //
-// Three rules, all enforced here rather than in the view:
-//   1. Storms exist only at night.
-//   2. Storms exist only along the signed-in sender's own bottles that are still at sea — the
-//      list this function receives is already only the caller's own sent bottles, so no other
-//      user's journey or weather can ever appear.
-//   3. A storm is anchored to the route of the bottle it belongs to, so the region always
-//      intersects that maritime path and never covers an unrelated region.
+// A storm belongs to a bottle, not to the map: two bottles on the same route may differ. Three
+// rules, all enforced here rather than in the view:
+//   1. Storms exist only at night — the map's storm styling is night-only by policy.
+//   2. Storms exist only for bottles that are still at sea. The list this function receives is
+//      already only the caller's own sent bottles, so no other person's weather can appear.
+//   3. The answer is a deterministic, versioned schedule keyed on the bottle id, so a refresh,
+//      a selection change, opening the sea viewer or a server restart never rerolls it.
 //
-// Weather is cosmetic: nothing here reads or writes progress, arrival or state.
+// Weather is cosmetic: nothing here reads or writes progress, arrival, route or state.
+
+export type BottleWeather = 'calm' | 'storm';
 
 export interface OceanWeatherOptions {
   phase: DayPhase;
-  /** Development preview only: force storms on or off without touching any bottle. */
+  /** Development preview only: force every at-sea bottle stormy or calm. Touches no bottle. */
   force?: 'on' | 'off' | null;
 }
 
-export function activeOceanStorms(
-  bottles: SentBottleSummaryDto[],
+export function bottleWeatherAt(
+  bottle: Pick<SentBottleSummaryDto, 'id' | 'state'>,
   atMs: number,
   { phase, force = null }: OceanWeatherOptions,
-): StormGeometry[] {
-  if (phase !== 'night' || force === 'off') return [];
-  const out: StormGeometry[] = [];
-  for (const bottle of bottles) {
-    if (bottle.state !== 'at_sea') continue;
-    const points = bottle.route.geoPoints;
-    if (!points || points.length < 2) continue;
-    const scheduled = activeStormAt(bottle.id, atMs, OCEAN_SCHEDULE);
-    if (!scheduled && force !== 'on') continue;
-    // The forced preview borrows the bottle's next scheduled seed so the shape is still stable.
-    const seed = scheduled?.seed ?? hashFallback(bottle.id);
-    const id = scheduled?.id ?? `storm_preview_${bottle.id}`;
-    const geometry = stormGeometry(id, bottle.id, points, seed);
-    if (geometry) out.push(geometry);
-  }
-  return out;
+): BottleWeather {
+  if (bottle.state !== 'at_sea' || phase !== 'night' || force === 'off') return 'calm';
+  if (force === 'on') return 'storm';
+  return activeStormAt(bottle.id, atMs, OCEAN_SCHEDULE) ? 'storm' : 'calm';
 }
 
-function hashFallback(bottleId: string): number {
-  let h = 0x811c9dc5;
-  for (let i = 0; i < bottleId.length; i++) {
-    h ^= bottleId.charCodeAt(i);
-    h = Math.imul(h, 0x01000193);
-  }
-  return h >>> 0;
+export function oceanWeatherMap(
+  bottles: Array<Pick<SentBottleSummaryDto, 'id' | 'state'>>,
+  atMs: number,
+  options: OceanWeatherOptions,
+): Record<string, BottleWeather> {
+  const out: Record<string, BottleWeather> = {};
+  for (const b of bottles) out[b.id] = bottleWeatherAt(b, atMs, options);
+  return out;
 }

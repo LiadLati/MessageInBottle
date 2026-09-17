@@ -219,13 +219,15 @@ The weather that ships today is **presentation only**. It is deliberately not th
 
 | | Simulated cosmetic weather (implemented) | Hazard engine (not implemented) |
 | --- | --- | --- |
-| What it does | Changes what the Ocean map and the My Shore scene draw: palette, storm cloud mass, rain, waves, foam, wetness | Would change journey outcomes: stranding, sinking, destruction, drift, rescue |
+| What it does | Changes what the Ocean map, the sea view and the My Shore scene draw: palette, a per-bottle storm glyph and chip, waves, rain, foam, wetness | Would change journey outcomes: stranding, sinking, destruction, drift, rescue |
 | Effect on a journey | **None.** It never alters a route, a duration, an arrival time, a progress value, a capacity or a risk | Would alter state and timing |
 | Where it lives | Client presentation over a deterministic, versioned schedule (`packages/shared/src/weather.ts`) | Server-owned weather records and resolved exposure events |
 | Persistence | None needed: the schedule is reproducible from the bottle or user id, the schedule version and the time window | Persisted events, so fate is never rerolled |
 | Copy rule | Weather is always labelled *simulated* and stated in words; it may never claim to delay or endanger a bottle | Would carry real consequences and must say so |
 
 Until the numerical probabilities in this section are approved, no sinking, drift, public-claim or other destructive transition may be driven by weather. The presentation layer is built so the schedule can move behind a server endpoint without changing any displayed value.
+
+**Weather is per bottle.** On the Ocean map a storm belongs to one bottle, not to a region: two bottles on the same route may be in different weather, the map draws no storm areas, fog patches or map-wide rain, and a storm-affected bottle is marked only by a small glyph above its own marker and an `In a storm` chip on its card. The card's `View at sea` action — never a marker tap — opens a dedicated real-time view of that bottle on open water, which shows the same weather state and can neither change it nor anything about the journey. The view never exposes letter content and is offered only while the bottle is at sea.
 
 **Time of day.** The Ocean map renders a daylight palette between 07:00 and 19:00 and the approved night palette otherwise, using the local hour in the browser's own IANA timezone — never GPS and never coordinates. Both ends of the window are configurable and a window that wraps midnight is supported. The same clock and zone drive weather scheduling and weather display. Authentication is explicitly excluded: sessions, session expiry, password-reset tokens and rate limiting run on real wall-clock time, so a development clock that advances journeys can never sign a user out.
 
@@ -354,7 +356,7 @@ Proposed visual direction: warm illustrated ocean, translucent glass, tactile pa
 | Throw | Arc with restrained rotation | 0.7–1.2 seconds |
 | Splash | Impact, ripples, floating pose | 0.5–1 second |
 | Map transition | Pull back to route | 0.8–1.5 seconds |
-| Storm | Regional weather indicator; today cosmetic only (§9.1) | Avoid continuous intense effects; no lightning or flashes, nothing above 0.2 Hz |
+| Storm | Per-bottle weather indicator; today cosmetic only (§9.1) | Avoid continuous intense effects; no flashes or strobing, nothing above 0.2 Hz; distant lightning in the sea view is a slow glow, off under reduced motion |
 | Stranding | Bottle reaches island, status changes | Brief transition |
 | Rescue | Bottle returns from island to sea | Brief confirmed transition |
 | Loss/discard | Distinct failure outcome | Skippable; persistent text marker |

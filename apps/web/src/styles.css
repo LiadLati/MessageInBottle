@@ -1044,27 +1044,76 @@ button.avatar {
   transition: opacity 240ms var(--ease-standard);
 }
 .map-marker {
+  /* 40 × 58 stack: storm glyph slot above the bottle, selection ring around it (v2.0). */
   width: 44px;
-  height: 44px;
+  height: 58px;
   display: flex;
+  flex-direction: column;
   align-items: center;
-  justify-content: center;
+  justify-content: flex-end;
+  gap: 1px;
   filter: var(--shadow-marker);
   cursor: pointer;
-  border-radius: 50%;
 }
-.map-marker img {
+.map-marker .glyph {
+  width: 24px;
+  height: 17px;
+  display: block;
+  opacity: 0;
+  transform: translateY(4px);
+  transition:
+    opacity 320ms var(--ease-standard),
+    transform 320ms var(--ease-standard);
+  pointer-events: none;
+}
+.map-marker.storm .glyph {
+  opacity: 0.92;
+  transform: none;
+  animation: glyph-drift 5s ease-in-out infinite;
+}
+.map-marker .bottle {
+  position: relative;
   width: 34px;
   height: 34px;
   display: block;
+  transition:
+    width 160ms var(--ease-standard),
+    height 160ms var(--ease-standard);
+}
+.map-marker .art {
+  width: 100%;
+  height: 100%;
+  display: block;
   animation: marker-bob var(--loop-marker-bob) ease-in-out infinite;
 }
-.map-marker.static img {
+.map-marker .ring {
+  position: absolute;
+  inset: -3px;
+  border-radius: 50%;
+  border: 1.5px solid #bfe6de;
+  opacity: 0;
+  transition: opacity 160ms var(--ease-standard);
+  pointer-events: none;
+}
+.map-marker.selected .bottle {
+  width: 40px;
+  height: 40px;
+}
+.map-marker.selected .ring {
+  opacity: 0.75;
+}
+.map-marker.static .art {
   animation: none;
   opacity: 0.85;
 }
-.map-marker.selected img {
-  transform: scale(1.18);
+@keyframes glyph-drift {
+  0%,
+  100% {
+    transform: translateY(-3px);
+  }
+  50% {
+    transform: translateY(3px);
+  }
 }
 @keyframes marker-bob {
   0%,
@@ -1730,7 +1779,8 @@ button.avatar {
 
 /* ---------- reduced motion ---------- */
 @media (prefers-reduced-motion: reduce) {
-  .map-marker img,
+  .map-marker .art,
+  .map-marker .glyph,
   .pulse-dot {
     animation: none !important;
   }
@@ -1953,9 +2003,6 @@ button.avatar {
   color: var(--advisory-text, #f0e2c0);
   animation: advisory-in 320ms var(--ease-standard) 200ms both;
 }
-.weather-advisory.map {
-  bottom: calc(var(--nav-height) + var(--nav-safe-bottom) + 132px);
-}
 .weather-advisory.shore {
   top: calc(var(--header-pad-top) + 74px);
   padding: 11px 14px;
@@ -2024,12 +2071,6 @@ button.avatar {
   border-color: rgba(199, 162, 74, 0.6);
   color: #f0ddae;
 }
-@media (min-width: 900px) {
-  .world-screen.two-pane .weather-advisory.map {
-    right: calc(var(--pane-width) + var(--gutter-overlay));
-    bottom: calc(var(--gutter-overlay) + 16px);
-  }
-}
 @media (prefers-reduced-motion: reduce) {
   .weather-advisory {
     animation-duration: 180ms;
@@ -2043,5 +2084,225 @@ button.avatar {
   .app-viewport .scrim-map-header,
   .app-viewport .nav {
     transition-duration: 180ms;
+  }
+}
+
+/* ---------- Ocean v2.0: hint pill, card actions, storm chip ---------- */
+.hint-pill {
+  position: absolute;
+  left: 50%;
+  bottom: calc(var(--nav-height) + var(--nav-safe-bottom) + 12px);
+  transform: translateX(-50%);
+  margin: 0;
+  padding: 9px 16px;
+  border-radius: 999px;
+  background: rgba(6, 20, 30, 0.58);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(215, 231, 228, 0.18);
+  color: rgba(234, 241, 240, 0.82);
+  font-size: 12.5px;
+  font-weight: 500;
+  white-space: nowrap;
+  pointer-events: none;
+  animation: hint-in 220ms var(--ease-standard) both;
+}
+@keyframes hint-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+@media (min-width: 900px) {
+  .world-screen.two-pane .hint-pill {
+    left: calc((100% - var(--pane-width)) / 2);
+    bottom: 28px;
+  }
+}
+.status-chip.storm-chip {
+  background: rgba(199, 162, 74, 0.18);
+  border: 1px solid rgba(199, 162, 74, 0.6);
+  color: #f0ddae;
+}
+.card-note {
+  margin: 12px 0 0;
+  font-size: 12px;
+  line-height: 1.45;
+  color: rgba(240, 226, 192, 0.85);
+}
+.action-row {
+  display: flex;
+  gap: 10px;
+  align-items: stretch;
+}
+.action-row .btn-primary {
+  flex: 1;
+  min-height: 52px;
+  border-radius: 16px;
+}
+.action-row .btn-ghost {
+  min-height: 52px;
+  padding: 0 18px;
+  border-radius: 16px;
+}
+@media (max-width: 359px) {
+  .action-row {
+    flex-direction: column;
+  }
+}
+
+/* ---------- Bottle at Sea viewer ---------- */
+/* Full-bleed on phones (no navigation — Back to map is the only exit); on desktop it covers the
+   map pane only, so the rail and the list stay mounted. The map underneath is never removed. */
+.sea-viewer {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  animation: sea-in 340ms var(--ease-standard) both;
+}
+.sea-viewer.closing {
+  animation: sea-out 260ms var(--ease-standard) both;
+}
+.sea-viewer-dialog {
+  position: absolute;
+  inset: 0;
+  outline: 0;
+  background: #0b2030;
+}
+.sea-world {
+  position: absolute;
+  inset: 0;
+}
+.sea-world .shore-scene {
+  position: absolute;
+  inset: 0;
+}
+.sea-scrim {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background:
+    linear-gradient(rgba(4, 14, 22, 0.78), rgba(4, 14, 22, 0.5) 130px, rgba(4, 14, 22, 0) 220px),
+    linear-gradient(rgba(0, 0, 0, 0) 62%, rgba(4, 14, 22, 0.62));
+}
+.sea-viewer.storm .sea-scrim {
+  background:
+    linear-gradient(rgba(4, 12, 16, 0.8), rgba(4, 12, 16, 0.54) 130px, rgba(4, 12, 16, 0) 220px),
+    linear-gradient(rgba(0, 0, 0, 0) 60%, rgba(4, 12, 16, 0.66));
+}
+.sea-back {
+  position: absolute;
+  top: calc(var(--header-pad-top) + 14px);
+  left: var(--gutter-screen);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 44px;
+  padding: 0 18px 0 12px;
+  border-radius: 999px;
+  background: rgba(6, 20, 30, 0.62);
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
+  border: 1px solid rgba(247, 250, 249, 0.3);
+  color: #f7faf9;
+  font-size: 14px;
+  font-weight: 600;
+  animation: sea-chrome-in 220ms var(--ease-standard) 120ms both;
+}
+.sea-viewer.storm .sea-back {
+  background: rgba(6, 16, 22, 0.66);
+}
+.sea-card {
+  position: absolute;
+  left: var(--gutter-overlay);
+  right: var(--gutter-overlay);
+  bottom: max(26px, env(safe-area-inset-bottom, 0px));
+  padding: 15px 18px;
+  border-radius: 22px;
+  background: rgba(6, 20, 30, 0.58);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid rgba(247, 250, 249, 0.24);
+  animation: sea-card-in 220ms var(--ease-standard) 180ms both;
+}
+.sea-viewer.storm .sea-card {
+  background: rgba(6, 16, 22, 0.62);
+}
+.sea-card .t-card-title {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.sea-meta {
+  margin: 6px 0 0;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: rgba(247, 250, 249, 0.74);
+}
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+@keyframes sea-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+@keyframes sea-out {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+@keyframes sea-chrome-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+@keyframes sea-card-in {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@media (min-width: 900px) {
+  .sea-viewer {
+    left: var(--rail-width);
+    right: var(--pane-width);
+    top: var(--top-stack);
+  }
+  .sea-card {
+    max-width: 430px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .sea-viewer,
+  .sea-viewer.closing,
+  .sea-back,
+  .sea-card,
+  .hint-pill {
+    animation-duration: 120ms !important;
+    animation-delay: 0ms !important;
+  }
+  .sea-card {
+    animation-name: sea-chrome-in;
   }
 }

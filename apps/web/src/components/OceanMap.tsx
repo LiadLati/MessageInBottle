@@ -20,11 +20,7 @@ import 'maplibre-gl/dist/maplibre-gl.css';
 import type { Feature } from 'geojson';
 import type { GeoPoint } from '@mib/shared';
 import { prefersReducedMotion } from '../lib/format.js';
-import {
-  stormCellFeatures,
-  stormRegionFeatures,
-  type StormGeometry,
-} from '../lib/stormGeometry.js';
+import type { BottleWeather } from '../lib/oceanWeather.js';
 import {
   assertMapStylePolicy,
   boundsOf,
@@ -70,8 +66,12 @@ interface Props {
   // Time of day for the map palette. Changing it tweens paint properties in place: the camera,
   // sources, routes, markers and any open selection are untouched.
   phase?: MapPhase;
-  // Simulated storm regions, already filtered to the signed-in sender's own at-sea routes.
-  storms?: StormGeometry[];
+  // Per-bottle weather (handoff v2.0): a storm belongs to a bottle, never to the map. The
+  // glyph shows above a marker only while its bottle is in a storm and the map is in night mode.
+  weather?: Record<string, BottleWeather>;
+  // While the sea viewer covers the map, the position ticker and pin layout stop; the map keeps
+  // its instance, camera and selection so returning restores them exactly.
+  paused?: boolean;
   fitKey?: string;
   bottomPadding?: number;
   onSelectRoute?: (id: string) => void;
@@ -88,7 +88,7 @@ const CLUSTER_PX = 44;
 const LABEL_ZOOM = 4.5;
 const FOCUS_ZOOM = 5;
 const EMPTY_SELECTION: string[] = [];
-const EMPTY_STORMS: StormGeometry[] = [];
+const EMPTY_WEATHER: Record<string, BottleWeather> = {};
 const LAND_URL = '/map/land-50m.geojson';
 // Interior country boundaries (Natural Earth admin-0, 1:50m, public domain via world-atlas).
 // Drawn as thin lines only: no fills, no names (spec §6.2).
@@ -126,20 +126,8 @@ const SHELF_INNER_COLOR = '#59aec2';
 
 export type MapPhase = keyof typeof MAP_PALETTE;
 
-// Storm paint values (DESIGN_TOKENS.json → map.storm, map/storm-layers.json).
-const STORM = {
-  night: { dark: '#08141b', darkOpacity: 0.46, cell: '#16242c', cellOpacity: 0.72, top: '#38505c' },
-  day: { dark: '#31414d', darkOpacity: 0.3, cell: '#5b6b7a', cellOpacity: 0.55, top: '#8b99a6' },
-  topOpacity: 0.34,
-  edge: '#c7a24a',
-  edgeOpacity: 0.55,
-} as const;
-
 const DAY_NIGHT_MS = 600;
-const STORM_FADE_MS = 900;
 const REDUCED_MS = 180;
-// Reduced motion holds the cells at a mid opacity instead of breathing them.
-const REDUCED_CELL_OPACITY = 0.14;
 
 // Map style policy (MAP_DESIGN.md): land geometry, thin border lines and nothing else. The
 // default source is the bundled Natural Earth land polygons (public domain, offline, no
@@ -288,7 +276,8 @@ export function OceanMap({
   showAnchorLabels = false,
   focusAnchorId = null,
   phase = 'night',
-  storms = EMPTY_STORMS,
+  weather = EMPTY_WEATHER,
+  paused = false,
   fitKey = '',
   bottomPadding = 280,
   onSelectRoute,
@@ -305,8 +294,6 @@ export function OceanMap({
   // map is never rebuilt.
   const phaseRef = useRef<MapPhase>(phase);
   const stopPhaseTween = useRef<() => void>(() => {});
-  const stopStormTween = useRef<() => void>(() => {});
-  const stormVisible = useRef(0);
   const latest = useRef({
     routes,
     anchors,
@@ -481,73 +468,6 @@ export function OceanMap({
     // Development-only handle so browser checks can inspect layers; absent from production.
     if (import.meta.env.DEV) (containerRef.current as MapDebugHost).__mibMap = map;
     map.on('load', () => {
-      // Weather first: every storm layer is added before the route layers, so routes, anchors
-      // and the bottle marker always draw above the weather (MAP_DESIGN.md — not negotiable).
-      const p = STORM[phaseRef.current];
-      map.addSource('storm-area', {
-        type: 'geojson',
-        data: { type: 'FeatureCollection', features: [] },
-      });
-      map.addSource('storm-cells', {
-        type: 'geojson',
-        data: { type: 'FeatureCollection', features: [] },
-      });
-      map.addLayer({
-        id: 'storm-dark',
-        type: 'fill',
-        source: 'storm-area',
-        paint: { 'fill-color': p.dark, 'fill-opacity': 0 },
-      });
-      map.addLayer({
-        id: 'storm-cells',
-        type: 'circle',
-        source: 'storm-cells',
-        paint: {
-          'circle-color': p.cell,
-          'circle-radius': [
-            'interpolate',
-            ['linear'],
-            ['zoom'],
-            1.6,
-            ['*', ['get', 's'], 40],
-            4,
-            ['*', ['get', 's'], 160],
-          ],
-          'circle-blur': 1,
-          'circle-opacity': 0,
-        },
-      });
-      map.addLayer({
-        id: 'storm-cells-top',
-        type: 'circle',
-        source: 'storm-cells',
-        paint: {
-          'circle-color': p.top,
-          'circle-radius': [
-            'interpolate',
-            ['linear'],
-            ['zoom'],
-            1.6,
-            ['*', ['get', 's'], 24],
-            4,
-            ['*', ['get', 's'], 96],
-          ],
-          'circle-translate': [6, -8],
-          'circle-blur': 1,
-          'circle-opacity': 0,
-        },
-      });
-      map.addLayer({
-        id: 'storm-edge',
-        type: 'line',
-        source: 'storm-area',
-        paint: {
-          'line-color': STORM.edge,
-          'line-width': 1.2,
-          'line-opacity': 0,
-          'line-dasharray': [2, 2.4],
-        },
-      });
       map.addSource('planned', {
         type: 'geojson',
         data: { type: 'FeatureCollection', features: [] },
@@ -654,6 +574,7 @@ export function OceanMap({
     const now = Date.now();
     const planned: Feature[] = [];
     const trail: Feature[] = [];
+    const halo: Feature[] = [];
     const seen = new Set<string>();
     for (const r of routes) {
       if (r.points.length < 2) continue;
@@ -671,19 +592,23 @@ export function OceanMap({
       seen.add(r.id);
       let marker = markersRef.current.get(r.id);
       if (!marker) {
+        // The 40 × 58 marker stack (handoff v2.0): a storm glyph slot above the bottle, a
+        // selection ring around it. Tapping opens the bottle's information only — the sea viewer
+        // is reached solely from the card's own "View at sea" action.
         const el = document.createElement('button');
         el.type = 'button';
         el.className = 'map-marker';
-        el.setAttribute('aria-label', 'Bottle at sea');
-        const img = document.createElement('img');
-        img.alt = '';
-        img.src = terminal(r.state) ? '/markers/marker-lost.svg' : '/markers/marker-bottle.svg';
-        el.appendChild(img);
+        el.innerHTML =
+          '<img class="glyph" alt="" src="/markers/storm-cloud-glyph.svg">' +
+          '<span class="bottle"><span class="ring" aria-hidden></span><img class="art" alt=""></span>';
+        el.querySelector<HTMLImageElement>('.art')!.src = terminal(r.state)
+          ? '/markers/marker-lost.svg'
+          : '/markers/marker-bottle.svg';
         el.addEventListener('click', (ev) => {
           ev.stopPropagation();
           latest.current.onSelectRoute?.(r.id);
         });
-        marker = new Marker({ element: el, anchor: 'center' })
+        marker = new Marker({ element: el, anchor: 'bottom', offset: [0, 20] })
           .setLngLat([point.lng, point.lat])
           .addTo(map);
         markersRef.current.set(r.id, marker);
@@ -691,9 +616,21 @@ export function OceanMap({
         marker.setLngLat([point.lng, point.lat]);
       }
       const el = marker.getElement();
+      // Storm styling is night-only by policy; in daylight every bottle reads calm on the map.
+      const stormy = weather[r.id] === 'storm' && phase === 'night' && r.live;
       el.classList.toggle('selected', selected);
       el.classList.toggle('static', !r.live || reduced);
+      el.classList.toggle('storm', stormy);
       el.setAttribute('aria-pressed', String(selected));
+      el.setAttribute(
+        'aria-label',
+        `Bottle${r.label ? ` to ${r.label}` : ''}, ${stormy ? 'in a storm' : statusWord(r.state)}`,
+      );
+      halo.push({
+        type: 'Feature',
+        properties: { id: r.id },
+        geometry: { type: 'Point', coordinates: [point.lng, point.lat] },
+      });
     }
     for (const [id, m] of markersRef.current) {
       if (!seen.has(id)) {
@@ -708,6 +645,10 @@ export function OceanMap({
     void map.getSource<GeoJSONSource>('trail')?.setData({
       type: 'FeatureCollection',
       features: trail,
+    });
+    void map.getSource<GeoJSONSource>('bottle-halo')?.setData({
+      type: 'FeatureCollection',
+      features: halo,
     });
     void map.getSource<GeoJSONSource>('anchors')?.setData({
       type: 'FeatureCollection',
@@ -730,23 +671,31 @@ export function OceanMap({
     loaded,
     reduced,
     layoutPins,
+    weather,
+    phase,
   ]);
 
   // Ticker: glide the marker along the polyline between server syncs (position stays server-owned).
   useEffect(() => {
     const map = mapRef.current;
-    if (!map || !loaded || reduced) return;
+    if (!map || !loaded || reduced || paused) return;
     if (!routes.some((r) => r.live)) return;
     const id = setInterval(() => {
       if (document.hidden) return;
       const now = Date.now();
       const trail: Feature[] = [];
+      const halo: Feature[] = [];
       for (const r of routes) {
         if (r.points.length < 2) continue;
         const progress = interpolatedProgress(r, now);
         const pts = unwrapAntimeridian(r.points);
         const { point, index } = geoAlong(pts, progress);
         markersRef.current.get(r.id)?.setLngLat([point.lng, point.lat]);
+        halo.push({
+          type: 'Feature',
+          properties: { id: r.id },
+          geometry: { type: 'Point', coordinates: [point.lng, point.lat] },
+        });
         if (progress > 0) {
           trail.push({
             ...lineFeature(r.id, [...pts.slice(0, index + 1), point]),
@@ -756,9 +705,12 @@ export function OceanMap({
       }
       const trailSource = map.getSource<GeoJSONSource>('trail');
       if (trailSource) void trailSource.setData({ type: 'FeatureCollection', features: trail });
+      void map
+        .getSource<GeoJSONSource>('bottle-halo')
+        ?.setData({ type: 'FeatureCollection', features: halo });
     }, 1000);
     return () => clearInterval(id);
-  }, [routes, selectedRouteIds, loaded, reduced]);
+  }, [routes, selectedRouteIds, loaded, reduced, paused]);
 
   // Day ↔ night: a 600ms per-layer paint tween on the live map. Never setStyle — that reloads
   // sources, drops the DOM markers and blinks the camera. Route colours are excluded by design.
@@ -767,8 +719,6 @@ export function OceanMap({
     if (!map || !loaded || phaseRef.current === phase) return;
     const from = MAP_PALETTE[phaseRef.current];
     const to = MAP_PALETTE[phase];
-    const fromStorm = STORM[phaseRef.current];
-    const toStorm = STORM[phase];
     phaseRef.current = phase;
     stopPhaseTween.current();
     stopPhaseTween.current = tween(reduced ? REDUCED_MS : DAY_NIGHT_MS, (k) => {
@@ -809,97 +759,8 @@ export function OceanMap({
         'line-opacity',
         lerp(from.shelfInnerOpacity, to.shelfInnerOpacity),
       );
-      // Storm colours follow the palette so a storm that is already up changes with the light.
-      map.setPaintProperty('storm-dark', 'fill-color', mixHex(fromStorm.dark, toStorm.dark, k));
-      map.setPaintProperty('storm-cells', 'circle-color', mixHex(fromStorm.cell, toStorm.cell, k));
-      map.setPaintProperty(
-        'storm-cells-top',
-        'circle-color',
-        mixHex(fromStorm.top, toStorm.top, k),
-      );
     });
   }, [phase, loaded, reduced]);
-
-  // Storm geometry and the 900ms calm ↔ storm group fade. The data is replaced only when the
-  // set of storms actually changes, so a running storm never jumps while it is on screen.
-  const stormKey = storms.map((s) => s.id).join('|');
-  useEffect(() => {
-    const map = mapRef.current;
-    if (!map || !loaded) return;
-    const present = storms.length > 0;
-    if (present) {
-      void map.getSource<GeoJSONSource>('storm-area')?.setData(stormRegionFeatures(storms));
-      void map.getSource<GeoJSONSource>('storm-cells')?.setData(stormCellFeatures(storms));
-    }
-    const target = present ? 1 : 0;
-    const start = stormVisible.current;
-    if (start === target) return;
-    const p = STORM[phaseRef.current];
-    stopStormTween.current();
-    stopStormTween.current = tween(reduced ? REDUCED_MS : STORM_FADE_MS, (k) => {
-      if (!mapRef.current) return;
-      const v = start + (target - start) * k;
-      stormVisible.current = v;
-      map.setPaintProperty('storm-dark', 'fill-opacity', p.darkOpacity * v);
-      map.setPaintProperty(
-        'storm-cells',
-        'circle-opacity',
-        (reduced ? REDUCED_CELL_OPACITY : p.cellOpacity) * v,
-      );
-      map.setPaintProperty('storm-cells-top', 'circle-opacity', STORM.topOpacity * v);
-      map.setPaintProperty('storm-edge', 'line-opacity', STORM.edgeOpacity * v);
-      // Cells settle from 0.6 to full size as the group arrives.
-      const scale = 0.6 + 0.4 * v;
-      map.setPaintProperty('storm-cells', 'circle-radius', [
-        'interpolate',
-        ['linear'],
-        ['zoom'],
-        1.6,
-        ['*', ['get', 's'], 40 * scale],
-        4,
-        ['*', ['get', 's'], 160 * scale],
-      ]);
-      if (v === 0) {
-        void map
-          .getSource<GeoJSONSource>('storm-area')
-          ?.setData({ type: 'FeatureCollection', features: [] });
-        void map
-          .getSource<GeoJSONSource>('storm-cells')
-          ?.setData({ type: 'FeatureCollection', features: [] });
-      }
-    });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [stormKey, loaded, reduced]);
-
-  // Drift and breathe while a storm is present. Skipped entirely under reduced motion, where the
-  // cells simply hold at a mid opacity; paused with the tab, like every other loop.
-  useEffect(() => {
-    const map = mapRef.current;
-    if (!map || !loaded || reduced || storms.length === 0) return;
-    const bearing = (storms[0]!.bearingDeg * Math.PI) / 180;
-    const t0 = performance.now();
-    const id = setInterval(() => {
-      if (document.hidden || !mapRef.current) return;
-      const t = (performance.now() - t0) / 1000;
-      const drift = ((t * 4.5) % 60) - 30; // 3–6 px/s along the storm's own bearing
-      map.setPaintProperty('storm-cells', 'circle-translate', [
-        Math.cos(bearing) * drift,
-        Math.sin(bearing) * drift,
-      ]);
-      map.setPaintProperty('storm-cells-top', 'circle-translate', [
-        6 + Math.cos(bearing) * drift,
-        -8 + Math.sin(bearing) * drift,
-      ]);
-      const breathe = 0.14 + Math.sin((t * 2 * Math.PI) / 6) * 0.04;
-      map.setPaintProperty(
-        'storm-dark',
-        'fill-opacity',
-        STORM[phaseRef.current].darkOpacity * stormVisible.current * (0.85 + breathe),
-      );
-    }, 200);
-    return () => clearInterval(id);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [stormKey, loaded, reduced]);
 
   // Camera: glide to a focused anchor (search result) close enough for its name to show.
   useEffect(() => {
@@ -934,6 +795,12 @@ export function OceanMap({
       ) : null}
     </div>
   );
+}
+
+function statusWord(state: string): string {
+  if (state === 'at_sea') return 'at sea';
+  if (state === 'delivered') return 'arrived';
+  return terminal(state) ? 'journey ended' : state.replace(/_/g, ' ');
 }
 
 function terminal(state: string): boolean {

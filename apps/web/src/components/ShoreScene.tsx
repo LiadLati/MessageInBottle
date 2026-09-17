@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { prefersReducedMotion } from '../lib/format.js';
 
-export type SceneMode = 'shore' | 'throw';
+export type SceneMode = 'shore' | 'throw' | 'sea';
 
 export interface ThrowController {
   // Seconds into the one-shot release timeline; the parent drives it so UI beats stay in sync.
@@ -18,6 +18,8 @@ interface Props {
   // camera are identical in both states — storm changes materials, lights, fog and the
   // rain/spray/cloud groups and nothing else (weather handoff v1.1 · IMPLEMENTATION.md).
   weather?: SceneWeather;
+  // Sea mode only: daytime or night-time lighting over the same water and sky.
+  phase?: 'day' | 'night';
   onReady?: () => void;
   onController?: (c: ThrowController | null) => void;
 }
@@ -84,6 +86,7 @@ const WEATHER = {
 } as const;
 
 // 4s cross-weather blend (ANIMATION_STORYBOARD.md §C); reduced motion cuts to a single frame.
+const NIGHT_HAZE = new THREE.Color(0x152b35);
 const WEATHER_BLEND_S = 4;
 // Reduced motion keeps the rain legible as a static field at 22%.
 const REDUCED_RAIN_OPACITY = 0.22;
@@ -189,11 +192,11 @@ export function ShoreScene({
   mode,
   showBottle = true,
   weather = 'calm',
+  phase = 'night',
   onReady,
   onController,
 }: Props) {
   const hostRef = useRef<HTMLDivElement>(null);
-  const canvasRef = useRef<HTMLCanvasElement>(null);
   const [ready, setReady] = useState(false);
   const [failed, setFailed] = useState(false);
   const showBottleRef = useRef(showBottle);
@@ -203,15 +206,20 @@ export function ShoreScene({
   // The scene reads the target through a ref, so a weather change never re-creates the canvas.
   const weatherRef = useRef<SceneWeather>(weather);
   const repaintRef = useRef<() => void>(() => {});
+  const phaseRef = useRef(phase);
   useEffect(() => {
     weatherRef.current = weather;
+    phaseRef.current = phase;
     repaintRef.current();
-  }, [weather]);
+  }, [weather, phase]);
 
   useEffect(() => {
     const host = hostRef.current;
-    const canvas = canvasRef.current;
-    if (!host || !canvas) return;
+    if (!host) return;
+    // The canvas belongs to this effect run, not to React: the cleanup below deliberately loses
+    // its GL context, and a re-run (StrictMode, a mode change) must start from a fresh canvas.
+    const canvas = document.createElement('canvas');
+    host.insertBefore(canvas, host.querySelector('.scene-fallback'));
     let renderer: THREE.WebGLRenderer;
     try {
       renderer = new THREE.WebGLRenderer({
@@ -221,6 +229,7 @@ export function ShoreScene({
         powerPreference: 'high-performance',
       });
     } catch {
+      canvas.remove();
       queueMicrotask(() => setFailed(true));
       return;
     }
@@ -237,12 +246,25 @@ export function ShoreScene({
 
     const scene = new THREE.Scene();
     const isThrow = mode === 'throw';
+    // Sea mode (handoff v2.0 · SEA_SCENE.md): the same engine, water, sky, bottle and weather
+    // rigs, with the whole beach block hidden and a tighter fog so the water plane's far edge
+    // dissolves into the sky instead of showing as a hard band.
+    const isSea = mode === 'sea';
     scene.fog = new THREE.Fog(
       isThrow ? 0x8d6f52 : 0x466a76,
-      isThrow ? 220 : 200,
-      isThrow ? 700 : 680,
+      isThrow ? 220 : isSea ? 40 : 200,
+      isThrow ? 700 : isSea ? 240 : 680,
     );
-    const cam = new THREE.PerspectiveCamera(isThrow ? 46 : w >= 900 ? 34 : 40, w / h, 0.1, 900);
+    const cam = new THREE.PerspectiveCamera(
+      isThrow ? 46 : isSea ? 34 : w >= 900 ? 34 : 40,
+      w / h,
+      0.1,
+      900,
+    );
+    // Everything that only exists on a shore lives in this group; at sea it is simply not drawn.
+    const beach = new THREE.Group();
+    beach.visible = !isSea;
+    scene.add(beach);
 
     const sun = new THREE.DirectionalLight(0xffe0b8, 3.1);
     sun.position.set(isThrow ? 40 : -46, 16, -70);
@@ -263,20 +285,25 @@ export function ShoreScene({
       new Promise<THREE.Texture>((resolve, reject) => loader.load(url, resolve, undefined, reject));
 
     // Water
-    const wGeo = new THREE.PlaneGeometry(700, 700, 96, 96);
+    // At sea the camera sits a metre above the surface, so the water needs short wavelengths and
+    // a dense mesh near the bottle; the shore's broad far-off swell would read as a tilting slab.
+    // The mesh density is the mobile quality limit (SEA_SCENE.md · Performance).
+    const wGeo = isSea
+      ? new THREE.PlaneGeometry(320, 320, w >= 900 ? 150 : 110, w >= 900 ? 150 : 110)
+      : new THREE.PlaneGeometry(700, 700, 96, 96);
     wGeo.rotateX(-Math.PI / 2);
     const water = new THREE.Mesh(
       wGeo,
       new THREE.MeshPhysicalMaterial({
-        color: isThrow ? 0x0a2e3f : 0x08293a,
-        roughness: 0.14,
+        color: isThrow ? 0x0a2e3f : isSea ? 0x0e3547 : 0x08293a,
+        roughness: isSea ? 0.16 : 0.14,
         metalness: 0,
-        envMapIntensity: 0.85,
+        envMapIntensity: isSea ? 0.62 : 0.85,
         clearcoat: 0.45,
         clearcoatRoughness: 0.12,
       }),
     );
-    water.position.z = -200;
+    water.position.z = isSea ? -100 : -200;
     scene.add(water);
     const wPos = wGeo.attributes.position as THREE.BufferAttribute;
     const wBase = Float32Array.from(wPos.array);
@@ -308,7 +335,7 @@ export function ShoreScene({
     const sand = new THREE.Mesh(sGeo, sandMat);
     sand.position.z = 132;
     sand.receiveShadow = true;
-    scene.add(sand);
+    beach.add(sand);
     const wetMat = new THREE.MeshStandardMaterial({
       color: 0x8a7350,
       roughness: 0.35,
@@ -319,7 +346,7 @@ export function ShoreScene({
     const wet = new THREE.Mesh(new THREE.PlaneGeometry(700, 44), wetMat);
     wet.rotation.x = -Math.PI / 2;
     wet.position.set(0, 0.02, 24);
-    scene.add(wet);
+    beach.add(wet);
 
     // Foam
     const foamMat = new THREE.MeshBasicMaterial({
@@ -331,14 +358,14 @@ export function ShoreScene({
     const foam = new THREE.Mesh(new THREE.PlaneGeometry(700, 30), foamMat);
     foam.rotation.x = -Math.PI / 2;
     foam.position.set(0, 0.06, 18);
-    scene.add(foam);
+    beach.add(foam);
     const foam2Mat = foamMat.clone();
     foam2Mat.opacity = 0.5;
     const foam2 = new THREE.Mesh(foam.geometry, foam2Mat);
     foam2.rotation.x = -Math.PI / 2;
     foam2.scale.set(1, 1, 0.7);
     foam2.position.set(0, 0.05, 4);
-    scene.add(foam2);
+    beach.add(foam2);
 
     // Rocks, shells, grass
     for (const [s, x, y, z] of [
@@ -348,7 +375,7 @@ export function ShoreScene({
     ]) {
       const r = rock(s!);
       r.position.set(x!, y!, z);
-      scene.add(r);
+      beach.add(r);
     }
     const shellMat = new THREE.MeshStandardMaterial({ color: 0xf0e3ce, roughness: 0.5 });
     for (let s = 0; s < 7; s++) {
@@ -364,7 +391,7 @@ export function ShoreScene({
       sh.rotation.set(Math.random(), Math.random() * 6, Math.random() * 0.4);
       sh.scale.set(1, 0.6, 1);
       sh.castShadow = true;
-      scene.add(sh);
+      beach.add(sh);
     }
     const grassMat = new THREE.MeshStandardMaterial({ color: 0x6f7a4e, roughness: 0.9 });
     for (let g = 0; g < 26; g++) {
@@ -376,7 +403,7 @@ export function ShoreScene({
       );
       bl.rotation.z = (Math.random() - 0.5) * 0.5;
       bl.castShadow = true;
-      scene.add(bl);
+      beach.add(bl);
     }
 
     // Clouds & birds
@@ -413,7 +440,7 @@ export function ShoreScene({
       bd.position.set(-60 + b * 22, 24 + Math.random() * 12, -110 - Math.random() * 60);
       bd.scale.setScalar(1 + Math.random() * 0.6);
       birds.push(bd);
-      scene.add(bd);
+      beach.add(bd);
     }
 
     // The storm sky is a back-facing dome that cross-fades over scene.background, so day and
@@ -497,7 +524,7 @@ export function ShoreScene({
 
     // Bottle + splash
     const bottle = makeBottle(null);
-    bottle.group.scale.setScalar(isThrow ? 5 : 4.2);
+    bottle.group.scale.setScalar(isThrow ? 5 : isSea ? 2.4 : 4.2);
     scene.add(bottle.group);
     const ripples: THREE.Mesh[] = [];
     const drops: Array<{ mesh: THREE.Mesh; a: number; sp: number; up: number }> = [];
@@ -543,25 +570,97 @@ export function ShoreScene({
     let disposed = false;
     let running = true;
     let throwT = 0;
+    // ---- open-sea rig (mode="sea") — SEA_SCENE.md. Allocated once; weather drives opacity. ----
+    const caps: Array<{ sprite: THREE.Sprite; ph: number; bx: number; calm: boolean }> = [];
+    const washMat = new THREE.SpriteMaterial({ transparent: true, depthWrite: false, opacity: 0 });
+    const wash = new THREE.Sprite(washMat);
+    const lightningMat = new THREE.SpriteMaterial({
+      transparent: true,
+      depthWrite: false,
+      opacity: 0,
+    });
+    const lightning = new THREE.Sprite(lightningMat);
+    const lightningLamp = new THREE.DirectionalLight(0xd8e6f0, 0);
+    const key = new THREE.DirectionalLight(0xe6f3f6, 1.3);
+    const rim = new THREE.PointLight(0xcfe6ea, 2.4, 9, 2);
+    if (isSea) {
+      // 14 whitecaps: the first 5 are the calm set, the other 9 fade in with the storm.
+      for (let ci = 0; ci < 14; ci++) {
+        const cap = new THREE.Sprite(
+          new THREE.SpriteMaterial({ transparent: true, depthWrite: false, opacity: 0 }),
+        );
+        const calm = ci < 5;
+        const cs = calm ? 2.4 + Math.random() * 3 : 4 + Math.random() * 5;
+        cap.scale.set(cs, cs * 0.3, 1);
+        cap.position.set((Math.random() - 0.5) * 90, 0.2, -14 - Math.random() * 90);
+        caps.push({ sprite: cap, ph: Math.random() * 6.283, bx: cap.position.x, calm });
+        scene.add(cap);
+      }
+      // Subject key and rim: fully transmissive glass over dark water has nothing to refract
+      // and renders as the water behind it without these (SEA_SCENE.md · Lighting).
+      key.position.set(3.4, 3.2, 9.5);
+      key.target.position.set(0.35, 0, 4.6);
+      scene.add(key);
+      scene.add(key.target);
+      rim.position.set(-1.6, 1.1, 6.2);
+      scene.add(rim);
+      // Contact wash under the bottle, so it never reads as hovering over a gradient.
+      wash.scale.set(1.15, 0.5, 1);
+      scene.add(wash);
+      // Distant lightning: one soft horizon glow and one lamp, on a 9s sin² envelope — no
+      // flash, no strobe, never above 0.2 Hz, and disabled under reduced motion.
+      lightning.scale.set(150, 40, 1);
+      lightning.position.set(-40, 9, -150);
+      scene.add(lightning);
+      lightningLamp.position.set(-40, 20, -150);
+      scene.add(lightningLamp);
+    }
+    let swellY = 0;
+
     const timer = new THREE.Timer();
-    const t0 = isThrow ? 0 : 3;
+    const t0 = isThrow ? 0 : isSea ? (weatherRef.current === 'storm' ? 6.2 : 2) : 3;
 
     // Wave amplitude and speed ramp with the weather blend; the mesh itself never changes.
+    // Open water rolls harder than the shore break even when calm (1.7 vs 1.0) and only a
+    // little more in a storm (1.9): the camera rides the same swell, so the sea reads as
+    // heavy rather than tall.
+    const waveAmp = (k: number) =>
+      isSea
+        ? 0.3 + 0.22 * k
+        : WEATHER.calm.waveAmplitude +
+          (WEATHER.storm.waveAmplitude - WEATHER.calm.waveAmplitude) * k;
+    const waveSpeed = (k: number) =>
+      isSea
+        ? 1.15 + 0.35 * k
+        : WEATHER.calm.waveSpeed + (WEATHER.storm.waveSpeed - WEATHER.calm.waveSpeed) * k;
+
+    // The one surface function: the water mesh and the bottle at sea both sample it, so the
+    // bottle sits *on* the wave it is drawn over rather than on an average height.
+    function surfaceHeight(x: number, z: number, t: number, weatherK: number) {
+      const amp = waveAmp(weatherK);
+      const speed = waveSpeed(weatherK);
+      if (isSea) {
+        // Open-water swell: three crossing trains a few metres long plus a short ripple.
+        return (
+          amp *
+          (Math.sin(x * 0.32 + t * speed * 1.1) * 0.34 +
+            Math.sin(z * 0.41 - t * speed * 0.85) * 0.28 +
+            Math.sin((x + z) * 0.19 + t * speed * 1.6) * 0.18 +
+            Math.sin(x * 1.3 + z * 0.9 + t * speed * 2.2) * 0.08)
+        );
+      }
+      return (
+        amp *
+        (Math.sin(x * 0.07 + t * speed * 1.1) * 0.34 +
+          Math.sin(z * 0.09 - t * speed * 0.85) * 0.28 +
+          Math.sin((x + z) * 0.045 + t * speed * 1.6) * 0.18)
+      );
+    }
+
     function updateWater(t: number, weatherK = 0) {
-      const amp =
-        WEATHER.calm.waveAmplitude +
-        (WEATHER.storm.waveAmplitude - WEATHER.calm.waveAmplitude) * weatherK;
-      const speed =
-        WEATHER.calm.waveSpeed + (WEATHER.storm.waveSpeed - WEATHER.calm.waveSpeed) * weatherK;
       const arr = wPos.array as Float32Array;
       for (let i = 0; i < wPos.count; i++) {
-        const x = wBase[i * 3]!;
-        const z = wBase[i * 3 + 2]!;
-        arr[i * 3 + 1] =
-          amp *
-          (Math.sin(x * 0.07 + t * speed * 1.1) * 0.34 +
-            Math.sin(z * 0.09 - t * speed * 0.85) * 0.28 +
-            Math.sin((x + z) * 0.045 + t * speed * 1.6) * 0.18);
+        arr[i * 3 + 1] = surfaceHeight(wBase[i * 3]!, wBase[i * 3 + 2]!, t, weatherK);
       }
       wPos.needsUpdate = true;
       wGeo.computeVertexNormals();
@@ -658,11 +757,14 @@ export function ShoreScene({
       hemi.intensity = lerp(calm.hemi.intensity, storm.hemi.intensity, k);
       if (scene.fog instanceof THREE.Fog) {
         scene.fog.color.setHex(mix(calm.fog.color, storm.fog.color, k));
-        scene.fog.near = lerp(calm.fog.near, storm.fog.near, k);
-        scene.fog.far = lerp(calm.fog.far, storm.fog.far, k);
+        // At night the open sea's haze must sit against a dark sky, or the horizon reads as a band.
+        if (isSea && phaseRef.current === 'night') scene.fog.color.lerp(NIGHT_HAZE, 0.62);
+        // Open water has no beach to hide the plane's far edge, so its fog sits much closer.
+        scene.fog.near = isSea ? lerp(40, 30, k) : lerp(calm.fog.near, storm.fog.near, k);
+        scene.fog.far = isSea ? lerp(240, 190, k) : lerp(calm.fog.far, storm.fog.far, k);
       }
       const wm = water.material;
-      if (!isThrow) wm.color.setHex(mix(calm.water.color, storm.water.color, k));
+      if (!isThrow) wm.color.setHex(mix(isSea ? 0x0e3547 : calm.water.color, storm.water.color, k));
       wm.roughness = lerp(calm.water.roughness, storm.water.roughness, k);
       wm.clearcoat = lerp(calm.water.clearcoat, storm.water.clearcoat, k);
       wm.clearcoatRoughness = lerp(
@@ -681,6 +783,18 @@ export function ShoreScene({
       const rainTarget = reduced ? REDUCED_RAIN_OPACITY : storm.rainOpacity;
       rainMat.opacity = lerp(calm.rainOpacity, rainTarget, k);
       sprayMat.opacity = lerp(calm.sprayOpacity, storm.sprayOpacity, k) * 0.7;
+      if (isSea) {
+        key.intensity = lerp(1.3, 2.6, k);
+        rim.intensity = lerp(2.4, 5, k);
+        // Night: the same dusk sky, dimmed sun and exposure — no second sky is needed to read
+        // as after dark, and the key/rim keep the glass legible.
+        const night = phaseRef.current === 'night' ? 1 : 0;
+        sun.intensity *= lerp(1, 0.3, night);
+        hemi.intensity *= lerp(1, 0.55, night);
+        renderer.toneMappingExposure *= lerp(1, 0.72, night);
+        scene.backgroundIntensity = lerp(1, 0.32, night);
+        for (const c of caps) c.sprite.material.opacity = c.calm ? lerp(0.12, 0.3, k) : 0.3 * k;
+      }
       return k;
     }
 
@@ -735,6 +849,39 @@ export function ShoreScene({
       });
       if (isThrow) {
         poseThrow(throwT);
+      } else if (isSea) {
+        // The bottle rides the real surface and the camera rides the same swell, as a nearby
+        // boat would, so the bottle holds its place in frame at any sea state.
+        const bx = 0.35;
+        const bz = 4.6;
+        // The surface function takes the water mesh's local coordinates.
+        const wy = surfaceHeight(bx - water.position.x, bz - water.position.z, t, wk);
+        const by = wy - 0.035;
+        swellY += (wy - swellY) * (reduced ? 1 : 0.12);
+        bottle.group.visible = true;
+        bottle.group.position.set(bx, by, bz);
+        bottle.group.rotation.set(
+          -1.44 + Math.sin(t * lerp(0.7, 1.5, wk)) * lerp(0.06, 0.13, wk),
+          0.7 + Math.sin(t * 0.23) * 0.06,
+          0.16 + Math.sin(t * lerp(0.52, 0.95, wk)) * lerp(0.07, 0.13, wk),
+        );
+        cam.position.set(Math.sin(t * 0.09) * 0.4, 1.22 + swellY + Math.sin(t * 0.19) * 0.07, 11.2);
+        cam.lookAt(0.35, 0.42 + swellY, 4.6);
+        for (const c of caps) {
+          c.sprite.position.x = c.bx + Math.sin(t * 0.25 + c.ph) * 3;
+          c.sprite.position.y =
+            0.18 + Math.sin(t * lerp(0.6, 1.1, wk) + c.ph) * lerp(0.18, 0.5, wk);
+          c.sprite.material.opacity +=
+            Math.sin(t * 0.9 + c.ph) * lerp(0.05, 0.12, wk) * (c.calm ? 1 : wk);
+        }
+        wash.position.set(bx, by + 0.06, bz + 0.02);
+        washMat.opacity = lerp(0.34, 0.5, wk) + Math.sin(t * 1.3) * 0.1;
+        wash.scale.set(1.6 + Math.sin(t * 0.9) * 0.14, 0.7, 1);
+        const cyc = t % 9;
+        const envelope = cyc < 1.4 ? Math.pow(Math.sin((cyc / 1.4) * Math.PI), 2) : 0;
+        const amt = reduced ? 0 : envelope * wk;
+        lightningMat.opacity = amt * 0.3;
+        lightningLamp.intensity = amt * 0.5;
       } else {
         // Framing per reference C2: the bottle rests a little left of centre in the lower half of
         // the frame, whole and unclipped, with the horizon in the upper third.
@@ -819,6 +966,10 @@ export function ShoreScene({
         foam2Mat.needsUpdate = true;
         cloudMat.map = cloudTex;
         cloudMat.needsUpdate = true;
+        for (const m of [washMat, lightningMat, ...caps.map((c) => c.sprite.material)]) {
+          m.map = cloudTex;
+          m.needsUpdate = true;
+        }
       } catch {
         // Textures are decorative: the procedural scene still renders without them.
       }
@@ -835,7 +986,7 @@ export function ShoreScene({
       if (!W || !H) return;
       renderer.setSize(W, H, false);
       cam.aspect = W / H;
-      if (!isThrow) cam.fov = W >= 900 ? 34 : 40;
+      if (!isThrow && !isSea) cam.fov = W >= 900 ? 34 : 40;
       cam.updateProjectionMatrix();
       if (reduced) frame(true);
     });
@@ -877,6 +1028,10 @@ export function ShoreScene({
         }
       });
       renderer.dispose();
+      // Release the GL context explicitly: without this the browser silently evicts the oldest
+      // contexts and an earlier canvas (the map) can go black.
+      renderer.forceContextLoss();
+      canvas.remove();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mode]);
@@ -887,9 +1042,12 @@ export function ShoreScene({
         className="poster"
         style={{ backgroundImage: `url(${mode === 'throw' ? TEX.skyThrow : TEX.skyShore})` }}
       />
-      <canvas ref={canvasRef} />
       {failed ? (
-        <p className="scene-fallback">The shore needs WebGL, which this browser cannot provide.</p>
+        <p className="scene-fallback">
+          {mode === 'sea'
+            ? 'Real-time view unavailable on this device.'
+            : 'The shore needs WebGL, which this browser cannot provide.'}
+        </p>
       ) : null}
     </div>
   );
