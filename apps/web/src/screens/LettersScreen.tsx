@@ -1,5 +1,5 @@
 import { useState, type ReactNode } from 'react';
-import type { OpenedLetterDto } from '@mib/shared';
+import type { OpenedLetterDto, SentBottleSummaryDto } from '@mib/shared';
 import { api } from '../api/client.js';
 import { LetterModal } from '../components/LetterModal.js';
 import { LetterPaper } from '../components/LetterPaper.js';
@@ -8,9 +8,11 @@ import {
   BackButton,
   DeckScreen,
   ErrorNote,
+  OutcomeChip,
   Skeleton,
   StatusChip,
 } from '../components/ui.js';
+import { Icon } from '../design/Icon.js';
 import { formatDate, formatDuration } from '../lib/format.js';
 import { useAsync } from '../lib/useAsync.js';
 
@@ -18,16 +20,19 @@ interface Props {
   passportId: string | null;
   onSelect: (id: string) => void;
   onBack: () => void;
+  // Letters → Lost → "Show on public map": switch the Ocean to public mode on this bottle.
+  onShowPublic: (id: string) => void;
 }
 
-type Folder = 'sent' | 'received';
+type Folder = 'sent' | 'received' | 'lost';
+const FOLDER_LABELS: Record<Folder, string> = { sent: 'Sent', received: 'Received', lost: 'Lost' };
 
-export function LettersScreen({ passportId, onSelect, onBack }: Props) {
+export function LettersScreen({ passportId, onSelect, onBack, onShowPublic }: Props) {
   const [folder, setFolder] = useState<Folder>('sent');
   if (passportId) return <PassportView key={passportId} id={passportId} onBack={onBack} />;
   const tabs = (
     <div className="seg-tabs" role="tablist" aria-label="Letters">
-      {(['sent', 'received'] as const).map((f) => (
+      {(['sent', 'received', 'lost'] as const).map((f) => (
         <button
           key={f}
           type="button"
@@ -38,13 +43,15 @@ export function LettersScreen({ passportId, onSelect, onBack }: Props) {
           className={folder === f ? 'active' : ''}
           onClick={() => setFolder(f)}
         >
-          {f === 'sent' ? 'Sent' : 'Received'}
+          {FOLDER_LABELS[f]}
         </button>
       ))}
     </div>
   );
   return folder === 'sent' ? (
     <SentHistory onSelect={onSelect} tabs={tabs} />
+  ) : folder === 'lost' ? (
+    <LostHistory onSelect={onSelect} onShowPublic={onShowPublic} tabs={tabs} />
   ) : (
     <ReceivedHistory tabs={tabs} />
   );
@@ -52,7 +59,8 @@ export function LettersScreen({ passportId, onSelect, onBack }: Props) {
 
 function SentHistory({ onSelect, tabs }: { onSelect: (id: string) => void; tabs: ReactNode }) {
   const sent = useAsync(() => api.sentBottles(), []);
-  const list = sent.data?.bottles ?? [];
+  // Letters the sea ended live under Lost; everything else stays here with its fate.
+  const list = (sent.data?.bottles ?? []).filter((b) => b.state !== 'lost');
   return (
     <DeckScreen title="Letters" subtitle="Everything you have sent, with its fate">
       {tabs}
@@ -89,6 +97,85 @@ function SentHistory({ onSelect, tabs }: { onSelect: (id: string) => void; tabs:
                   </span>
                   <StatusChip state={b.state} />
                 </button>
+              </li>
+            ))}
+          </ul>
+        )}
+        <ErrorNote error={sent.error} />
+      </div>
+    </DeckScreen>
+  );
+}
+
+// Letters → Lost: journeys the sea ended, with the outcome stated in words. The sender keeps
+// the letter and the passport; an adrift bottle can be shown on the public map.
+function LostHistory({
+  onSelect,
+  onShowPublic,
+  tabs,
+}: {
+  onSelect: (id: string) => void;
+  onShowPublic: (id: string) => void;
+  tabs: ReactNode;
+}) {
+  const sent = useAsync(() => api.sentBottles(), []);
+  const list = (sent.data?.bottles ?? []).filter(
+    (b): b is SentBottleSummaryDto & { outcome: NonNullable<SentBottleSummaryDto['outcome']> } =>
+      b.state === 'lost' && b.outcome !== null,
+  );
+  return (
+    <DeckScreen title="Letters" subtitle="Journeys the sea ended">
+      {tabs}
+      <div
+        id="letters-panel-lost"
+        role="tabpanel"
+        aria-labelledby="letters-tab-lost"
+        className="stack"
+      >
+        {sent.loading && !sent.data ? (
+          <Skeleton />
+        ) : sent.error && !sent.data ? null : list.length === 0 ? (
+          <div className="glass-panel stack">
+            <h2 className="t-display-sm">Nothing lost</h2>
+            <p className="secondary">
+              Every bottle you have released is still on its way, or has arrived.
+            </p>
+          </div>
+        ) : (
+          <ul className="list">
+            {list.map((b) => (
+              <li key={b.id} className="row-item lost-row">
+                <Avatar name={b.recipient.displayName} tone="foam" />
+                <span className="grow" style={{ minWidth: 0 }}>
+                  <span className="t-card-title" style={{ display: 'block' }}>
+                    To {b.recipient.displayName}
+                  </span>
+                  <span className="t-meta" style={{ display: 'block' }}>
+                    {b.outcome.reason === 'sunk' ? 'Sank' : 'Lost'} {formatDate(b.outcome.at)} ·
+                    released {formatDate(b.releasedAt)}
+                  </span>
+                  <span className="lost-actions">
+                    <OutcomeChip reason={b.outcome.reason} />
+                    <button
+                      type="button"
+                      className="btn-ghost small"
+                      onClick={() => onSelect(b.id)}
+                    >
+                      <Icon name="passport" size={14} />
+                      Passport
+                    </button>
+                    {b.outcome.reason === 'adrift' ? (
+                      <button
+                        type="button"
+                        className="btn-ghost small"
+                        onClick={() => onShowPublic(b.id)}
+                      >
+                        <Icon name="ocean" size={14} />
+                        Show on public map
+                      </button>
+                    ) : null}
+                  </span>
+                </span>
               </li>
             ))}
           </ul>
@@ -186,7 +273,11 @@ function PassportView({ id, onBack }: { id: string; onBack: () => void }) {
                   </div>
                 </div>
               </div>
-              <StatusChip state={b.state} />
+              {b.outcome ? (
+                <OutcomeChip reason={b.outcome.reason} />
+              ) : (
+                <StatusChip state={b.state} />
+              )}
             </div>
             <dl className="passport-grid">
               <dt>Released</dt>
@@ -209,7 +300,20 @@ function PassportView({ id, onBack }: { id: string; onBack: () => void }) {
                   <dd>{formatDate(b.openedAt)}</dd>
                 </>
               ) : null}
+              {b.outcome ? (
+                <>
+                  <dt>{b.outcome.reason === 'sunk' ? 'Sank' : 'Adrift since'}</dt>
+                  <dd>{formatDate(b.outcome.at)}</dd>
+                </>
+              ) : null}
             </dl>
+            {b.outcome ? (
+              <p className="t-meta">
+                {b.outcome.reason === 'sunk'
+                  ? `It went down in a storm on the way to ${b.recipient.displayName}. The letter never arrived; it is kept here.`
+                  : `It was swept off course in a storm on the way to ${b.recipient.displayName} and now drifts in the public ocean. The letter never arrived; it is kept here.`}
+              </p>
+            ) : null}
             {b.state === 'delivered' ? (
               <p className="t-meta">
                 Waiting for {b.recipient.displayName} to open it. Your words stay sealed until then.
@@ -225,7 +329,7 @@ function PassportView({ id, onBack }: { id: string; onBack: () => void }) {
                     <span className="t-meta" style={{ display: 'block' }}>
                       {formatDate(e.occurredAt)}
                     </span>
-                    {eventLabel(e.type)}
+                    {eventLabel(e.type, e.payload)}
                   </span>
                 </li>
               ))}
@@ -240,7 +344,14 @@ function PassportView({ id, onBack }: { id: string; onBack: () => void }) {
   );
 }
 
-function eventLabel(type: string): string {
+function eventLabel(type: string, payload: Record<string, unknown> = {}): string {
+  if (type === 'lost') {
+    return payload.reason === 'sunk'
+      ? 'Went down in a storm — lost at sea'
+      : payload.reason === 'adrift'
+        ? 'Swept off course in a storm — adrift in the public ocean'
+        : 'Lost at sea';
+  }
   const labels: Record<string, string> = {
     released: 'Released into the sea',
     delivered: 'Washed up on the destination shore',

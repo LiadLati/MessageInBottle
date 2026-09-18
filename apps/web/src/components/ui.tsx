@@ -64,6 +64,22 @@ export function StatusChip({ state }: { state: string }) {
   );
 }
 
+// A journey outcome, stated in words (never colour alone): which way the sea ended it.
+export const OUTCOME_LABELS: Record<'adrift' | 'sunk' | 'destroyed', string> = {
+  adrift: 'Adrift in the public ocean',
+  sunk: 'Sunk at sea',
+  destroyed: 'Destroyed',
+};
+
+export function OutcomeChip({ reason }: { reason: 'adrift' | 'sunk' | 'destroyed' }) {
+  return (
+    <span className={`status-chip status-outcome-${reason}`}>
+      <span aria-hidden>{reason === 'adrift' ? '⚑' : '✕'}</span>
+      {OUTCOME_LABELS[reason]}
+    </span>
+  );
+}
+
 export function DeckScreen({
   title,
   subtitle,

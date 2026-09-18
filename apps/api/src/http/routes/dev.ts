@@ -1,12 +1,18 @@
 import { Hono } from 'hono';
 import { eq } from 'drizzle-orm';
-import { DevAdvanceRequestSchema, DevArriveRequestSchema, type DevStatus } from '@mib/shared';
+import {
+  DevAdvanceRequestSchema,
+  DevArriveRequestSchema,
+  DevLoseRequestSchema,
+  type DevStatus,
+} from '@mib/shared';
 import * as t from '../../db/schema.js';
 import { plannedArrivalAt } from '../../domain/routing.js';
 import { DevClock } from '../../lib/clock.js';
 import { OutboxMailer } from '../../lib/mail.js';
 import { badRequest, notFound } from '../../lib/errors.js';
 import { activePlan, runJourneyTick } from '../../services/journey.js';
+import { devLoseBottle } from '../../services/outcomes.js';
 import type { AppEnv } from '../app.js';
 import { requireAuth } from '../middleware/auth.js';
 import { jsonBody } from '../validate.js';
@@ -68,6 +74,15 @@ export function devRoutes() {
     ctx.clock.advanceTo(plannedArrivalAt(plan));
     const tick = runJourneyTick(ctx);
     return c.json({ ...status(ctx), tick });
+  });
+
+  // Ends one of the caller's own journeys now, through the server-owned outcome path. This is
+  // the only thing that can lose a bottle until the risk policy (spec D08) is approved.
+  r.post('/lose', jsonBody(DevLoseRequestSchema), (c) => {
+    const ctx = c.get('ctx');
+    const { bottleId, reason } = c.req.valid('json');
+    const outcome = devLoseBottle(ctx, c.get('user'), bottleId, reason);
+    return c.json({ ...status(ctx), outcome });
   });
 
   r.post('/tick', (c) => c.json(runJourneyTick(c.get('ctx'))));

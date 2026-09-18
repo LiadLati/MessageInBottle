@@ -187,12 +187,39 @@ export const bottles = sqliteTable(
     lossReason: text('loss_reason'),
     agingProfile: text('aging_profile', { mode: 'json' }),
     createdAt: integer('created_at').notNull(),
+    // Where and when the sea ended the journey (state = lost). Persisted once at the outcome so
+    // the marker never moves and no client can re-derive a different spot (spec §9, §11 inv. 7).
+    outcomeAt: integer('outcome_at'),
+    outcomeProgress: real('outcome_progress'),
+    outcomeChartX: integer('outcome_chart_x'),
+    outcomeChartY: integer('outcome_chart_y'),
+    outcomeLng: real('outcome_lng'),
+    outcomeLat: real('outcome_lat'),
   },
   (t) => [
     index('bottles_sender_idx').on(t.senderId),
     index('bottles_recipient_state_idx').on(t.recipientId, t.state),
     index('bottles_state_idx').on(t.state),
   ],
+);
+
+// Per-account visibility of a terminal marker on the private map (a sunk bottle's red X).
+// `seen_at`: the marker was inside this user's visible viewport while the page was active.
+// `acknowledged_at`: the user left the private map after seeing it; the marker is hidden from
+// later visits. Rows are per (user, bottle) so the record survives refreshes and devices.
+export const bottleOutcomeViews = sqliteTable(
+  'bottle_outcome_views',
+  {
+    userId: text('user_id')
+      .notNull()
+      .references(() => users.id),
+    bottleId: text('bottle_id')
+      .notNull()
+      .references(() => bottles.id),
+    seenAt: integer('seen_at'),
+    acknowledgedAt: integer('acknowledged_at'),
+  },
+  (t) => [primaryKey({ columns: [t.userId, t.bottleId] })],
 );
 
 export const routePlans = sqliteTable(

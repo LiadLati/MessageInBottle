@@ -4,6 +4,7 @@ import {
   type JourneyEventDto,
   type LetterFont,
   type OpenedLetterDto,
+  type OutcomeDto,
   type SentBottleDto,
   type SentBottleSummaryDto,
   type ShoreBottleDto,
@@ -22,6 +23,7 @@ import { conflict, notFound } from '../lib/errors.js';
 import { loadGraphVersion, toShoreDto } from './chart.js';
 import type { AppContext, AuthUser } from './context.js';
 import { activePlan, appendEvent, releaseCapacityOnce, transitionBottle } from './journey.js';
+import { outcomeVisibility } from './outcomes.js';
 
 type BottleRow = typeof t.bottles.$inferSelect;
 type PlanRow = typeof t.routePlans.$inferSelect;
@@ -44,7 +46,10 @@ function sentSummary(
   const graph = graphForPlan(ctx, plan);
   const points = pathPoints(graph, plan.nodeIds);
   const geoPoints = pathGeoPoints(graph, plan.nodeIds);
-  const progress = bottle.state === 'at_sea' ? progressAt(plan, now) : 1;
+  // A lost bottle stays exactly where the sea ended its journey (the persisted outcome);
+  // everything else is either still moving or has reached the end of its route.
+  const outcome = outcomeOf(bottle);
+  const progress = bottle.state === 'at_sea' ? progressAt(plan, now) : (outcome?.progress ?? 1);
   // Elapsed time freezes when the journey completes at opening (spec §7, §10.3).
   const completedAt = bottle.completedAt ?? bottle.openedAt;
   const elapsedEnd = completedAt ?? now;
@@ -69,13 +74,41 @@ function sentSummary(
       totalLength: plan.totalLength,
       plannedDurationMs: plan.plannedDurationMs,
     },
-    position: {
-      point: pointAlongPath(points, progress),
-      geo: geoPoints ? geoPointAlongPath(geoPoints, progress) : null,
-      progress,
-      asOf: iso(now),
-    },
+    position: outcome
+      ? { ...outcome.position, progress, asOf: iso(now) }
+      : {
+          point: pointAlongPath(points, progress),
+          geo: geoPoints ? geoPointAlongPath(geoPoints, progress) : null,
+          progress,
+          asOf: iso(now),
+        },
+    outcome,
+    visibility: outcome ? outcomeVisibility(ctx.db, bottle.senderId, bottle.id) : null,
     serverTime: iso(now),
+  };
+}
+
+function outcomeOf(bottle: BottleRow): OutcomeDto | null {
+  if (
+    bottle.state !== 'lost' ||
+    bottle.outcomeAt === null ||
+    bottle.outcomeProgress === null ||
+    bottle.outcomeChartX === null ||
+    bottle.outcomeChartY === null
+  ) {
+    return null;
+  }
+  return {
+    reason: bottle.lossReason as OutcomeDto['reason'],
+    at: iso(bottle.outcomeAt),
+    position: {
+      point: { x: bottle.outcomeChartX, y: bottle.outcomeChartY },
+      geo:
+        bottle.outcomeLng !== null && bottle.outcomeLat !== null
+          ? { lng: bottle.outcomeLng, lat: bottle.outcomeLat }
+          : null,
+    },
+    progress: bottle.outcomeProgress,
   };
 }
 

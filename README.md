@@ -142,6 +142,31 @@ In a development build the dev bar carries **Sky**, **Ocean storm** and **Shore 
 switches. They change only what is drawn — no request is made and no bottle is touched. The sea
 view follows the same switches, so calm/storm and day/night can be previewed there too.
 
+### Lost bottles and the public ocean
+
+The Ocean has a compact **Private / Public** switch. Private is your own journeys; Public shows
+every bottle that is *adrift* — swept off course in a storm — at the position where the sea ended
+its delivery. Your own adrift bottle carries a small golden pennant that only you can see; its
+card says **Your bottle · Adrift in the public ocean**. Nobody is told whose the others are: the
+public API returns only `id`, `reason`, `lostAt`, `position` and `mine` — never the letter, the
+sender, the intended recipient, the destination or the route.
+
+A **sunk** bottle stays on your private map at its sinking position with a red X above it and no
+route. It remains there until you have actually seen it (the marker was inside your viewport
+while the page was active — no tap needed) *and* then left the map for another screen; after
+that it is hidden from later visits, on every device, and a refresh never hides an unseen one.
+Both outcomes stay under **Letters → Lost** with the outcome time, the intended recipient and the
+Passport; an adrift entry offers **Show on public map**.
+
+The map always names your own harbour with an anchor label, and the destination harbour of the
+bottle you have selected.
+
+Outcomes are server-owned and written once: retrying, refreshing, viewing a bottle or opening the
+sea viewer can never move or reroll them, and a journey cannot both arrive and be lost. **Nothing
+loses a bottle on its own yet**: the risk policy (spec D08) is not approved, so in development the
+dev bar offers *Adrift* / *Sink* controls per at-sea bottle (`POST /api/dev/lose`), and
+production has no automatic outcomes.
+
 ### Geographic datasets and the sea-route graph
 
 All geography is bundled and generated offline; nothing is fetched at runtime.
@@ -208,6 +233,10 @@ instead of blaming the request. Check, in order:
    different `MIB_PORT`, and point the web app at it with `MIB_API_URL`).
 
 ## API overview
+
+Outcome-related endpoints (all require a session): `GET /api/ocean/public`,
+`POST /api/bottles/sent/:id/seen`, `POST /api/bottles/sent/:id/acknowledge`, and in development
+`POST /api/dev/lose { bottleId, reason: 'adrift' | 'sunk' }`.
 
 All routes are under `/api`, JSON, bearer-token authenticated except sign-in.
 

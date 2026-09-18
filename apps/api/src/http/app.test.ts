@@ -8,6 +8,69 @@ const auth = (token: string) => ({
 });
 
 describe('HTTP surface', () => {
+  it('public ocean: authenticated, strict projection, dev loss only by the owner', async () => {
+    const w = createTestWorld();
+    const app = createApp(w.ctx);
+    expect((await app.request('/api/ocean/public')).status).toBe(401);
+    const ada = await login(app, 'ada');
+    const bo = await login(app, 'bo');
+    const cy = await login(app, 'cy');
+    const release = await app.request('/api/bottles/release', {
+      method: 'POST',
+      headers: auth(ada.token),
+      body: JSON.stringify(releaseInput(bo.id, 'http-key-0000009')),
+    });
+    const { bottle } = (await release.json()) as { bottle: { id: string } };
+
+    // Only the sender can end their own journey through the development control.
+    for (const token of [bo.token, cy.token]) {
+      const res = await app.request('/api/dev/lose', {
+        method: 'POST',
+        headers: auth(token),
+        body: JSON.stringify({ bottleId: bottle.id, reason: 'adrift' }),
+      });
+      expect(res.status).toBe(404);
+    }
+    const lose = await app.request('/api/dev/lose', {
+      method: 'POST',
+      headers: auth(ada.token),
+      body: JSON.stringify({ bottleId: bottle.id, reason: 'adrift' }),
+    });
+    expect(lose.status).toBe(200);
+    expect(((await lose.json()) as { outcome: { committed: boolean } }).outcome.committed).toBe(
+      true,
+    );
+
+    // Every signed-in user sees exactly the permitted fields; only the sender gets `mine`.
+    for (const [token, mine] of [
+      [ada.token, true],
+      [bo.token, false],
+      [cy.token, false],
+    ] as const) {
+      const res = await app.request('/api/ocean/public', { headers: auth(token) });
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as { bottles: Array<Record<string, unknown>> };
+      expect(body.bottles).toHaveLength(1);
+      expect(Object.keys(body.bottles[0]!).sort()).toEqual([
+        'id',
+        'lostAt',
+        'mine',
+        'position',
+        'reason',
+      ]);
+      expect(body.bottles[0]!.mine).toBe(mine);
+      expect(JSON.stringify(body)).not.toMatch(/Ada|Bo|driftmoor|lantern|nodeIds|tide was gentle/);
+    }
+    // The visibility endpoints are the sender's alone.
+    for (const token of [bo.token, cy.token]) {
+      const res = await app.request(`/api/bottles/sent/${bottle.id}/seen`, {
+        method: 'POST',
+        headers: auth(token),
+      });
+      expect(res.status).toBe(404);
+    }
+  });
+
   it('requires authentication and never leaks bottle existence to non-participants', async () => {
     const w = createTestWorld();
     const app = createApp(w.ctx);

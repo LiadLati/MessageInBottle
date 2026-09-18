@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import { ReleasePreviewRequestSchema, ReleaseRequestSchema } from '@mib/shared';
 import { getSentBottle, listSentBottles } from '../../services/bottles.js';
+import { acknowledgeOutcome, markOutcomeSeen } from '../../services/outcomes.js';
 import { previewRelease, releaseBottle } from '../../services/release.js';
 import type { AppEnv } from '../app.js';
 import { requireAuth } from '../middleware/auth.js';
@@ -12,6 +13,13 @@ export function bottleRoutes() {
   r.get('/sent', (c) => c.json({ bottles: listSentBottles(c.get('ctx'), c.get('user')) }));
   r.get('/sent/:id', (c) =>
     c.json({ bottle: getSentBottle(c.get('ctx'), c.get('user'), c.req.param('id')) }),
+  );
+  // Private-map visibility of a terminal marker (sender only; see services/outcomes.ts).
+  r.post('/sent/:id/seen', (c) =>
+    c.json({ visibility: markOutcomeSeen(c.get('ctx'), c.get('user'), c.req.param('id')) }),
+  );
+  r.post('/sent/:id/acknowledge', (c) =>
+    c.json({ visibility: acknowledgeOutcome(c.get('ctx'), c.get('user'), c.req.param('id')) }),
   );
   r.post('/preview', jsonBody(ReleasePreviewRequestSchema), (c) =>
     c.json(previewRelease(c.get('ctx'), c.get('user'), c.req.valid('json').recipientId)),

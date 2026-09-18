@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { SentBottleDto } from '@mib/shared';
 import { api } from './api/client.js';
 import { Nav, type Tab } from './components/Nav.js';
@@ -46,6 +46,11 @@ function Shell() {
   const [tab, setTab] = useState<Tab>('ocean');
   const [passportId, setPassportId] = useState<string | null>(null);
   const [focusId, setFocusId] = useState<string | null>(null);
+  // Letters → Lost → "Show on public map": open Ocean in public mode on this bottle.
+  const [focusPublicId, setFocusPublicId] = useState<string | null>(null);
+  // Set by the Ocean screen: acknowledges the terminal markers seen on this private-map visit.
+  // Called only on a real navigation to another application screen.
+  const oceanLeave = useRef<(() => void) | null>(null);
   const [epoch, setEpoch] = useState(0);
   const [profileOpen, setProfileOpen] = useState(false);
   const [choosingShore, setChoosingShore] = useState(false);
@@ -104,6 +109,17 @@ function Shell() {
     );
   }
 
+  // Leaving the Ocean screen for another application screen: let the private map acknowledge
+  // what was seen, then switch. Opening a card, the sea viewer or a refresh never comes here.
+  const leaveOceanTo = (t: Tab) => {
+    if (tab === 'ocean') {
+      oceanLeave.current?.();
+      setFocusPublicId(null);
+      setFocusId(null);
+    }
+    setTab(t);
+  };
+
   const onReleased = (bottle: SentBottleDto) => {
     setFocusId(bottle.id);
     setEpoch((e) => e + 1);
@@ -127,11 +143,13 @@ function Shell() {
         {tab === 'ocean' ? (
           <OceanScreen
             focusId={focusId}
-            onWrite={() => setTab('write')}
+            focusPublicId={focusPublicId}
+            leaveRef={oceanLeave}
+            onWrite={() => leaveOceanTo('write')}
             onOpenProfile={openProfile}
             onOpenPassport={(id) => {
               setPassportId(id);
-              setTab('letters');
+              leaveOceanTo('letters');
             }}
           />
         ) : null}
@@ -150,6 +168,11 @@ function Shell() {
             passportId={passportId}
             onSelect={setPassportId}
             onBack={() => setPassportId(null)}
+            onShowPublic={(id) => {
+              setFocusPublicId(id);
+              setFocusId(null);
+              setTab('ocean');
+            }}
           />
         ) : null}
         {tab === 'friends' ? <FriendsScreen onChanged={reloadFriends} /> : null}
@@ -166,7 +189,8 @@ function Shell() {
           pendingFriends={pendingFriends}
           onSelect={(t) => {
             if (t === 'letters') setPassportId(null);
-            setTab(t);
+            if (t !== 'ocean') leaveOceanTo(t);
+            else setTab(t);
           }}
         />
       )}

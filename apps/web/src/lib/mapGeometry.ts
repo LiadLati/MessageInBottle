@@ -11,6 +11,12 @@ export interface MapRoute {
   state: string;
   // Recipient name for the marker's accessible label ("Bottle to Mira, at sea").
   label?: string;
+  // A journey the sea has ended: the marker sits at this persisted position, draws no route and
+  // never moves. `mark` says which outcome glyph to show; `mine` marks the caller's own adrift
+  // bottle on the public ocean (the golden pennant).
+  fixed?: GeoPoint;
+  mark?: 'sunk' | 'adrift';
+  mine?: boolean;
 }
 
 export interface StyleLayerLike {

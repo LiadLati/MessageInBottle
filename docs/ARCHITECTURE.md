@@ -70,7 +70,10 @@ Rules live in `services/` and are tested directly against an in-memory database
 - `letters` — immutable text, character count, original font, disclosure version.
 - `bottles` — sender/recipient/letter refs, **snapshots** of names and shores taken at release,
   `state` (full v0.2 enum), optimistic `version`, `moderation_status`, timestamps, `loss_reason`,
-  frozen `aging_profile`.
+  frozen `aging_profile`, and the persisted outcome (`outcome_at`, `outcome_progress`, chart/geo
+  position) once the sea ends a journey.
+- `bottle_outcome_views` — per (user, bottle): when a terminal marker was first seen inside the
+  sender's viewport and when the sender left the map after seeing it.
 - `route_plans` — one active plan per bottle with `plan_version`, `graph_version`, node list,
   `starts_at`, `start_progress` (rescue continuity) and `planned_duration_ms`. Prior plans are kept.
 - `journey_events` — append-only `(bottle_id, seq)` history.
@@ -105,9 +108,47 @@ event types for them are already declared in `@mib/shared`.
    presentation switch over the same string. Aging parameters are derived once at arrival and stored.
 8. **Capacity**: held through travel and while delivered-unopened; released exactly once.
 
+## Journey outcomes: loss, sinking and the public ocean (stage 4, first slice)
+
+Weather stays cosmetic (§9.1 above); this is the first *real* outcome path, kept deliberately
+narrow.
+
+- **Model.** `bottles.state = lost` with `loss_reason ∈ {adrift, sunk}` (`destroyed` is declared,
+  never produced), plus the persisted outcome: `outcome_at`, `outcome_progress`, chart and geo
+  position. `bottle_outcome_views (user_id, bottle_id, seen_at, acknowledged_at)` records the
+  private-map visibility of a terminal marker per account. Migration `0005_bottle_outcomes` is
+  additive only.
+- **Commit.** `services/outcomes.ts → commitLoss(bottleId, reason, at)` runs in one transaction:
+  the position is computed from the persisted plan at `at` and written to the row, the state
+  moves through the optimistic `transitionBottle` (state + version), the destination slot is
+  released once, a `lost` event is appended with reason/position/progress, and one sender
+  notification is queued under a dedupe key. The route plan row is kept as the journey snapshot.
+  A retry, a later read, a clock jump or the sea viewer can never move or reroll it.
+- **Arrival vs loss.** Both are `at_sea → X` optimistic transitions inside SQLite's single writer,
+  so exactly one commits. `commitLoss` also refuses (`arrival_due`) once the planned arrival has
+  passed, and `commitArrivalIfDue` only acts on `at_sea`, so a lost journey never delivers and
+  never produces an arrival notification. The recipient is never told anything.
+- **Public ocean.** `GET /api/ocean/public` (signed-in users) returns the strict
+  `PublicBottleSchema` — `id, reason, lostAt, position.geo, mine` — for adrift bottles only.
+  Letter, sender, recipient, destination and route never leave the server through it; pairs with
+  a block in either direction are hidden; `mine` is computed per caller. Sunk bottles are private.
+- **Private marker visibility.** `POST /api/bottles/sent/:id/seen` is called by the map the first
+  time a sunk marker is actually inside the visible viewport while the page is visible and the
+  map is not covered; `POST …/acknowledge` when the sender leaves the private map (another
+  application screen, or the Public switch) and only if the marker was seen. Fetching, opening
+  Ocean with the marker off screen, opening/closing a card, the sea viewer and a refresh never
+  count. After acknowledgement the marker is gone from later private-map visits; the letter,
+  passport and history are untouched (Letters → Lost).
+- **What triggers a loss is not decided.** Spec D08 (storm frequency, exposure rules, loss
+  probabilities, the adrift/sunk split, when a storm resolves, and any protection rule) is open,
+  and nothing about it exists in this repository. Until those values are approved the only
+  caller of `commitLoss` is the development control `POST /api/dev/lose` (owner only, dev mode
+  only); no worker loses a bottle on its own, and production has no automatic outcomes.
+
 ## Deliberately not implemented (per task scope)
 
 AI writing/rewriting, random recipients, appended notes, chat, GPS-assisted shore suggestion,
-storms/loss, island publication, rescue/discard/expiry, moderation console, push notifications,
+automatic storm outcomes (the risk policy is unapproved — see above), public claiming/reading of
+adrift bottles, island publication, rescue/discard/expiry, moderation console, push notifications,
 password reset / e-mail verification, request rate limiting outside authentication. Draft persistence is client-side (`sessionStorage`), as the
 specification's Draft state has no live journey.
