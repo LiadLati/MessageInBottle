@@ -4,6 +4,7 @@ import { ErrorNote } from '../components/ui.js';
 import { formatDate } from '../lib/format.js';
 import { useAsync } from '../lib/useAsync.js';
 import { useTopSlot } from '../lib/useTopSlot.js';
+import { useWeather, type WeatherOverride } from '../state/weather.js';
 
 // Development-only time-travel controls. They exist only in development builds
 // (`import.meta.env.DEV`) and only while the API reports dev mode; production bundles never
@@ -85,6 +86,7 @@ function DevPanelInner({ onChanged, refreshKey }: { onChanged: () => void; refre
               ))}
             </div>
           ) : null}
+          <WeatherPreview />
           {outbox.data && outbox.data.provider !== 'smtp' ? (
             <div className="row outbox">
               <span className="t-meta">
@@ -112,5 +114,59 @@ function DevPanelInner({ onChanged, refreshKey }: { onChanged: () => void; refre
         </>
       ) : null}
     </aside>
+  );
+}
+
+// Development-only weather preview. These are pure presentation switches: they change what the
+// map and the shore draw and nothing else — no request is made, no bottle is touched, and no
+// journey outcome, arrival time or route can change from here.
+function WeatherPreview() {
+  const {
+    phase,
+    phaseOverride,
+    oceanStormOverride,
+    shoreStormOverride,
+    setPhaseOverride,
+    setOceanStormOverride,
+    setShoreStormOverride,
+    timeZone,
+  } = useWeather();
+  const cycle = (v: WeatherOverride): WeatherOverride =>
+    v === 'auto' ? 'on' : v === 'on' ? 'off' : 'auto';
+  const label = (v: WeatherOverride) => (v === 'auto' ? 'auto' : v === 'on' ? 'forced on' : 'off');
+  return (
+    <div className="row">
+      <span className="t-meta">
+        Weather preview · {timeZone} · now {phase}
+      </span>
+      <button
+        type="button"
+        className="chip"
+        aria-pressed={phaseOverride !== 'auto'}
+        onClick={() =>
+          setPhaseOverride(
+            phaseOverride === 'auto' ? 'day' : phaseOverride === 'day' ? 'night' : 'auto',
+          )
+        }
+      >
+        Sky: {phaseOverride === 'auto' ? 'auto' : phaseOverride}
+      </button>
+      <button
+        type="button"
+        className="chip"
+        aria-pressed={oceanStormOverride !== 'auto'}
+        onClick={() => setOceanStormOverride(cycle(oceanStormOverride))}
+      >
+        Ocean storm: {label(oceanStormOverride)}
+      </button>
+      <button
+        type="button"
+        className="chip"
+        aria-pressed={shoreStormOverride !== 'auto'}
+        onClick={() => setShoreStormOverride(cycle(shoreStormOverride))}
+      >
+        Shore storm: {label(shoreStormOverride)}
+      </button>
+    </div>
   );
 }

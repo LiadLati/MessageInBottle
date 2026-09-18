@@ -9,6 +9,8 @@ export interface MapRoute {
   plannedDurationMs: number;
   live: boolean;
   state: string;
+  // Recipient name for the marker's accessible label ("Bottle to Mira, at sea").
+  label?: string;
 }
 
 export interface StyleLayerLike {

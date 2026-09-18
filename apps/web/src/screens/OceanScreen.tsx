@@ -1,13 +1,15 @@
 import { useMemo, useRef, useState } from 'react';
 import type { SentBottleSummaryDto } from '@mib/shared';
 import { api } from '../api/client.js';
-import { OceanMap } from '../components/lazy.js';
+import { OceanMap, SeaViewer } from '../components/lazy.js';
 import type { MapAnchor, MapRoute, OceanMapHandle } from '../components/OceanMap.js';
 import { Avatar, ErrorNote, Skeleton, StatusChip } from '../components/ui.js';
 import { Icon } from '../design/Icon.js';
 import { formatDuration, formatTime } from '../lib/format.js';
 import { useAsync } from '../lib/useAsync.js';
+import { oceanWeatherMap, type BottleWeather } from '../lib/oceanWeather.js';
 import { useSession } from '../state/session.js';
+import { useWeather } from '../state/weather.js';
 
 const POLL_MS = 15_000;
 
@@ -35,8 +37,11 @@ function toRoute(b: SentBottleSummaryDto): MapRoute | null {
     plannedDurationMs: b.route.plannedDurationMs,
     live: b.state === 'at_sea',
     state: b.state,
+    label: b.recipient.displayName,
   };
 }
+
+const overrideToForce = (v: 'auto' | 'on' | 'off') => (v === 'auto' ? null : v);
 
 // Bottles share a route when they follow the same sequence of passages.
 const routeKeyOf = (b: SentBottleSummaryDto) => b.route.nodeIds.join('>');
@@ -44,6 +49,7 @@ const routeKeyOf = (b: SentBottleSummaryDto) => b.route.nodeIds.join('>');
 // S1 · Ocean — private journeys over the real world map.
 export function OceanScreen({ focusId = null, onOpenPassport, onWrite, onOpenProfile }: Props) {
   const { user } = useSession();
+  const { phase, nowMs, oceanStormOverride } = useWeather();
   const bottles = useAsync(() => api.sentBottles(), [], POLL_MS);
   const chart = useAsync(() => api.chart(), []);
   const [view, setView] = useState<View>(() =>
@@ -83,6 +89,31 @@ export function OceanScreen({ focusId = null, onOpenPassport, onWrite, onOpenPro
   );
 
   const routes = useMemo(() => list.map(toRoute).filter((r): r is MapRoute => r !== null), [list]);
+  // Per-bottle simulated weather: night only, only for this sender's own at-sea bottles, and a
+  // deterministic schedule per bottle id — so two bottles on one route can differ, and nothing
+  // rerolls on refresh, selection or opening the sea viewer.
+  // Keep the weather map referentially stable while its values are unchanged, so the periodic
+  // clock tick does not make the map re-run its marker effect for nothing: the map is rebuilt
+  // only when its serialised form changes.
+  const weatherKey = Object.entries(
+    oceanWeatherMap(list, nowMs, { phase, force: overrideToForce(oceanStormOverride) }),
+  )
+    .map(([id, w]) => `${id}=${w}`)
+    .join(',');
+  const weather = useMemo<Record<string, BottleWeather>>(
+    () =>
+      Object.fromEntries(
+        weatherKey
+          .split(',')
+          .filter(Boolean)
+          .map((pair) => pair.split('=') as [string, BottleWeather]),
+      ),
+    [weatherKey],
+  );
+  const weatherOf = (id: string) => (phase === 'night' ? (weather[id] ?? 'calm') : 'calm');
+  // The dedicated sea viewer: opened only from the card's "View at sea", never from a marker.
+  const [viewing, setViewing] = useState<string | null>(null);
+  const viewingBottle = viewing ? (list.find((b) => b.id === viewing) ?? null) : null;
   const focusBottle = current ?? routeBottles[0] ?? null;
   const anchors = useMemo<MapAnchor[]>(() => {
     if (!focusBottle || !chart.data) return [];
@@ -129,6 +160,9 @@ export function OceanScreen({ focusId = null, onOpenPassport, onWrite, onOpenPro
           anchors={anchors}
           selectedRouteIds={selectedRouteIds}
           onSelectRoute={selectFromMap}
+          phase={phase}
+          weather={weather}
+          paused={viewing !== null}
           fitKey={fitKey}
         />
       </div>
@@ -196,6 +230,11 @@ export function OceanScreen({ focusId = null, onOpenPassport, onWrite, onOpenPro
         </button>
       </div>
 
+      {view.kind === 'clean' && list.length > 0 && !viewing ? (
+        <p className="hint-pill" aria-hidden>
+          Tap a bottle to follow its journey
+        </p>
+      ) : null}
       {bottles.loading && !bottles.data ? (
         <section className="sheet" aria-label="Journey">
           <Skeleton />
@@ -244,7 +283,7 @@ export function OceanScreen({ focusId = null, onOpenPassport, onWrite, onOpenPro
                       {formatDuration(b.elapsedMs)}
                     </span>
                   </span>
-                  <StatusChip state={b.state} />
+                  {weatherOf(b.id) === 'storm' ? <StormChip /> : <StatusChip state={b.state} />}
                 </button>
               </li>
             ))}
@@ -255,6 +294,8 @@ export function OceanScreen({ focusId = null, onOpenPassport, onWrite, onOpenPro
         <section className="sheet" aria-label="Journey">
           <JourneyCard
             bottle={current}
+            weather={weatherOf(current.id)}
+            onViewAtSea={current.state === 'at_sea' ? () => setViewing(current.id) : null}
             onBack={
               view.fromRoute ? () => setView({ kind: 'route', routeKey: view.fromRoute! }) : null
             }
@@ -268,21 +309,47 @@ export function OceanScreen({ focusId = null, onOpenPassport, onWrite, onOpenPro
           <ErrorNote error={bottles.error ?? chart.error} />
         </section>
       ) : null}
+      {viewing ? (
+        <SeaViewer
+          bottle={viewingBottle}
+          weather={viewingBottle ? weatherOf(viewingBottle.id) : 'calm'}
+          phase={phase}
+          onBack={() => setViewing(null)}
+        />
+      ) : null}
     </div>
+  );
+}
+
+// "In a storm" states the weather in words, so nothing depends on colour or an icon alone.
+function StormChip() {
+  return (
+    <span
+      className="status-chip storm-chip"
+      title="Simulated weather — it does not affect the journey"
+    >
+      <span aria-hidden>▲</span>
+      In a storm
+    </span>
   );
 }
 
 function JourneyCard({
   bottle,
+  weather,
   onBack,
   onClose,
   onPassport,
+  onViewAtSea,
 }: {
   bottle: SentBottleSummaryDto;
+  weather: 'calm' | 'storm';
   onBack: (() => void) | null;
   onClose: () => void;
   onPassport: () => void;
+  onViewAtSea: (() => void) | null;
 }) {
+  const storm = weather === 'storm';
   const passages = Math.max(1, bottle.route.nodeIds.length - 1);
   const pct = Math.round(bottle.position.progress * 100);
   const live = bottle.state === 'at_sea';
@@ -313,7 +380,7 @@ function JourneyCard({
         </button>
       </div>
       <div className="row" style={{ marginTop: 16 }}>
-        <StatusChip state={bottle.state} />
+        {storm ? <StormChip /> : <StatusChip state={bottle.state} />}
         <div
           className="progress-rail"
           role="progressbar"
@@ -335,14 +402,29 @@ function JourneyCard({
         </div>
         <div className="stat">
           <div className="t-eyebrow">Water</div>
-          <div className="t-stat">{live ? 'Calm' : '—'}</div>
+          <div className="t-stat" style={storm ? { color: '#f0ddae' } : undefined}>
+            {live ? (storm ? 'Rough' : 'Calm') : '—'}
+          </div>
         </div>
-        <button
-          type="button"
-          className="btn-ghost"
-          style={{ marginLeft: 'auto' }}
-          onClick={onPassport}
-        >
+      </div>
+      {storm ? (
+        <p className="card-note">This bottle is in weather. Your other bottles are unaffected.</p>
+      ) : null}
+      {/* The action row (handoff v2.0): the sea viewer is reached only from here, never from a
+          marker tap, and only while the bottle is still at sea. */}
+      <div className="action-row" style={{ marginTop: 14 }}>
+        {onViewAtSea ? (
+          <button
+            type="button"
+            className="btn-primary"
+            aria-label="View this bottle at sea"
+            onClick={onViewAtSea}
+          >
+            <Icon name="viewAtSea" size={18} />
+            View at sea
+          </button>
+        ) : null}
+        <button type="button" className="btn-ghost" onClick={onPassport}>
           <Icon name="passport" size={14} />
           Passport
         </button>

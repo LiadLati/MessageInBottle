@@ -23,7 +23,9 @@ export const invalidCredentials = () =>
 
 function issueSession(ctx: AppContext, userId: string): string {
   const token = newSecretToken();
-  const now = ctx.clock.now();
+  // Real time, never the development clock: a clock jump that lands a bottle must not expire
+  // the session of the person watching it arrive.
+  const now = ctx.realClock.now();
   ctx.db
     .insert(t.sessions)
     .values({
@@ -109,7 +111,7 @@ export function login(
 }
 
 export function resolveSession(ctx: AppContext, token: string): AuthUser | null {
-  const now = ctx.clock.now();
+  const now = ctx.realClock.now();
   const row = ctx.db
     .select({ user: t.users })
     .from(t.sessions)
@@ -137,7 +139,8 @@ export const resetInvalid = () =>
 // exists only in the message; the database keeps its hash.
 export async function requestPasswordReset(ctx: AppContext, email: string): Promise<void> {
   const normalized = normalizeEmail(email);
-  const now = ctx.clock.now();
+  // Reset tokens are an authentication lifetime: real time, like sessions.
+  const now = ctx.realClock.now();
   const user = normalized
     ? ctx.db.select().from(t.users).where(eq(t.users.email, normalized)).get()
     : undefined;
@@ -184,7 +187,7 @@ export async function requestPasswordReset(ctx: AppContext, email: string): Prom
 // Consumes one valid token: sets the password, marks the token used, supersedes every other
 // open token for the account and revokes all of its sessions.
 export function resetPassword(ctx: AppContext, input: { token: string; password: string }): void {
-  const now = ctx.clock.now();
+  const now = ctx.realClock.now();
   const hash = sha256(input.token);
   const row = ctx.db
     .select()

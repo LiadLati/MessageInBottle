@@ -163,9 +163,10 @@ describe('sessions', () => {
     const { token } = await loginAs(app, 'bo');
     expect((await app.request('/api/auth/me', bearer(token))).status).toBe(200);
     expect((await app.request('/api/friends', bearer(token))).status).toBe(200);
-    w.clock.advance(59 * 60 * 1000);
+    // Session lifetime is measured in real time (see the development-clock suite below).
+    w.realClock.advance(59 * 60 * 1000);
     expect((await app.request('/api/auth/me', bearer(token))).status).toBe(200);
-    w.clock.advance(2 * 60 * 1000);
+    w.realClock.advance(2 * 60 * 1000);
     expect((await app.request('/api/auth/me', bearer(token))).status).toBe(401);
   });
 
@@ -308,6 +309,49 @@ describe('rate limiting', () => {
   });
 });
 
+describe('the development clock never touches authentication', () => {
+  it('keeps a session alive when the journey clock jumps past the session TTL', async () => {
+    const w = createTestWorld();
+    const app = createApp(w.ctx);
+    const session = await login(app, 'ada', DEV_SEED_PASSWORD);
+    expect(session.status).toBe(200);
+    const { token } = (await session.json()) as { token: string };
+    const authed = () =>
+      app.request('/api/auth/me', { headers: { authorization: `Bearer ${token}` } });
+    expect((await authed()).status).toBe(200);
+
+    // Land a slow bottle: the journey clock moves days ahead, far past sessionTtlMs.
+    w.clock.advance(w.ctx.config.sessionTtlMs * 100);
+    expect((await authed()).status).toBe(200);
+
+    // Real time passing past the TTL still expires it, exactly as before.
+    w.realClock.advance(w.ctx.config.sessionTtlMs + 1);
+    expect((await authed()).status).toBe(401);
+  });
+
+  it('measures password-reset token lifetime in real time, not journey time', async () => {
+    const w = createTestWorld();
+    const app = createApp(w.ctx);
+    const created = await register(app, 'resetter', 'a good long password');
+    expect(created.status).toBe(201);
+    const res = await app.request('/api/auth/password/forgot', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ email: 'resetter@example.test' }),
+    });
+    expect(res.status).toBe(202);
+    const link = w.outbox.messages.at(-1)!.text.match(/\?reset=([a-f0-9]+)/)![1]!;
+    // Days of journey time pass; the token is still the one that was mailed.
+    w.clock.advance(7 * 24 * 60 * 60 * 1000);
+    const used = await app.request('/api/auth/password/reset', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ token: link, password: 'another good password' }),
+    });
+    expect(used.status).toBe(204);
+  });
+});
+
 describe('migration compatibility', () => {
   it('upgrades a database created before authentication without losing users', async () => {
     // Replay only the migrations that existed before this feature, as an older deployment would.
@@ -372,7 +416,7 @@ describe('migration compatibility', () => {
     // The upgraded database serves the new API: old accounts cannot sign in until they get a
     // password, new accounts register normally, and the dev seed backfills only seed accounts.
     const w = createTestWorld();
-    const app = createApp({ db, clock: w.clock, config, mailer: w.outbox });
+    const app = createApp({ db, clock: w.clock, realClock: w.realClock, config, mailer: w.outbox });
     expect((await login(app, 'oldtimer', 'anything long enough')).status).toBe(401);
     expect((await register(app, 'newcomer', 'newcomer password')).status).toBe(201);
     seedUsers(db, T0);

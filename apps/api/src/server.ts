@@ -29,6 +29,7 @@ async function main(): Promise<void> {
   const ctx: AppContext = {
     db,
     clock: config.devMode ? new DevClock(db) : new SystemClock(),
+    realClock: new SystemClock(),
     config,
     mailer: createMailer(config.mail),
   };

@@ -5,7 +5,12 @@ import type { Mailer } from '../lib/mail.js';
 
 export interface AppContext {
   db: Db;
+  // Journey clock. In development this is the dev clock, so time travel can land bottles and
+  // move simulated weather. Never use it for anything security-sensitive.
   clock: Clock;
+  // Real wall-clock time, always. Sessions, session expiry and password-reset tokens run on
+  // this, so advancing the development clock can never sign a user out (spec §7).
+  realClock: Clock;
   config: AppConfig;
   mailer: Mailer;
 }

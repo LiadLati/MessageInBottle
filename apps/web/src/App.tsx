@@ -14,11 +14,14 @@ import { OceanScreen } from './screens/OceanScreen.js';
 import { ShoreSetupScreen } from './screens/ShoreSetupScreen.js';
 import { WriteScreen } from './screens/WriteScreen.js';
 import { SessionProvider, useSession } from './state/session.js';
+import { WeatherProvider, useWeather } from './state/weather.js';
 
 export function App() {
   return (
     <SessionProvider>
-      <Shell />
+      <WeatherProvider>
+        <Shell />
+      </WeatherProvider>
     </SessionProvider>
   );
 }
@@ -38,6 +41,7 @@ function readResetToken(): string | null {
 
 function Shell() {
   const { user, loading } = useSession();
+  const { phase } = useWeather();
   const [resetToken, setResetToken] = useState<string | null>(readResetToken);
   const [tab, setTab] = useState<Tab>('ocean');
   const [passportId, setPassportId] = useState<string | null>(null);
@@ -107,8 +111,11 @@ function Shell() {
   };
 
   const on3d = tab === 'shore';
+  // The daylight palette belongs to the Ocean surface; every other screen keeps the night
+  // chrome it was designed with.
+  const daylight = tab === 'ocean' ? phase : 'night';
   return (
-    <main className={`app-viewport${immersive ? ' immersive' : ''}`}>
+    <main className={`app-viewport${immersive ? ' immersive' : ''}`} data-daylight={daylight}>
       {unread.length > 0 && tab !== 'shore' && !immersive ? (
         <ArrivalBanner
           message={unread[0]!.message}

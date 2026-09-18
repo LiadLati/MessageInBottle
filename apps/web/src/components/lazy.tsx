@@ -2,6 +2,7 @@ import { Suspense, lazy, type ComponentProps } from 'react';
 import type { OceanMap as OceanMapImpl } from './OceanMap.js';
 import type { ShoreScene as ShoreSceneImpl } from './ShoreScene.js';
 import type { ReleaseSequence as ReleaseSequenceImpl } from './ReleaseSequence.js';
+import type { SeaViewer as SeaViewerImpl } from './SeaViewer.js';
 
 // The map SDK and the 3D engine are the two heavy chunks; they load with the first screen that
 // needs a world layer, never with sign-in.
@@ -12,6 +13,8 @@ const ShoreSceneChunk = lazy(() =>
 const ReleaseSequenceChunk = lazy(() =>
   import('./ReleaseSequence.js').then((m) => ({ default: m.ReleaseSequence })),
 );
+// The sea viewer (and the scene it mounts) load only when "View at sea" is first pressed.
+const SeaViewerChunk = lazy(() => import('./SeaViewer.js').then((m) => ({ default: m.SeaViewer })));
 
 export function OceanMap(props: ComponentProps<typeof OceanMapImpl>) {
   return (
@@ -33,6 +36,14 @@ export function ReleaseSequence(props: ComponentProps<typeof ReleaseSequenceImpl
   return (
     <Suspense fallback={<div className="world-screen" />}>
       <ReleaseSequenceChunk {...props} />
+    </Suspense>
+  );
+}
+
+export function SeaViewer(props: ComponentProps<typeof SeaViewerImpl>) {
+  return (
+    <Suspense fallback={null}>
+      <SeaViewerChunk {...props} />
     </Suspense>
   );
 }

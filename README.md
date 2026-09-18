@@ -113,6 +113,35 @@ source for the land layer instead, set in `apps/web/.env` (see `.env.example`):
 - `VITE_MIB_MAP_SOURCE_LAYER` — the name of that source's land/coastline layer
 - `VITE_MIB_MAP_ATTRIBUTION` — the provider's attribution text (shown per their terms)
 
+### Time of day and simulated weather
+
+The Ocean map switches between the approved daylight and night palettes automatically. Simulated
+weather belongs to **each bottle**: at night an at-sea bottle may be in a storm on its own (two
+bottles on one route can differ), shown as a small cloud glyph above its marker and an `In a storm`
+chip on its card. The card's **View at sea** button opens a real-time view of that bottle on open
+water — calm or stormy, day or night — and **Back to map** returns to exactly the same map view.
+My Shore has its own independent weather. **All of it is cosmetic** — it never changes a route, a
+duration, an arrival or any risk (product spec §9.1), and watching a bottle changes nothing.
+
+| Setting | Default | Where |
+| --- | --- | --- |
+| Daylight window | 07:00–19:00 local, configurable, may wrap midnight | `DAYLIGHT_DEFAULTS` |
+| Zone | the browser's own IANA timezone (never GPS or coordinates) | `state/weather.tsx` |
+| Ocean storm window / chance | 3 h / 45 % per at-sea bottle, night only | `OCEAN_SCHEDULE` |
+| Ocean storm duration | 40–100 min | `OCEAN_SCHEDULE` |
+| Shore storm window / chance | 4 h / 35 % per user | `SHORE_SCHEDULE` |
+| Shore storm duration | 50–150 min | `SHORE_SCHEDULE` |
+| Schedule version | 1 | `SCHEDULE_VERSION` |
+
+The schedule is a pure function of the bottle or user id, the schedule version and the time
+window, so a refresh, a different selection or a server restart reproduces exactly the same
+weather with nothing stored and no migration. In development the dev-clock offset moves weather
+along with journeys; sessions are unaffected because authentication runs on real time.
+
+In a development build the dev bar carries **Sky**, **Ocean storm** and **Shore storm** preview
+switches. They change only what is drawn — no request is made and no bottle is touched. The sea
+view follows the same switches, so calm/storm and day/night can be previewed there too.
+
 ### Geographic datasets and the sea-route graph
 
 All geography is bundled and generated offline; nothing is fetched at runtime.

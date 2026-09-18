@@ -20,6 +20,7 @@ import 'maplibre-gl/dist/maplibre-gl.css';
 import type { Feature } from 'geojson';
 import type { GeoPoint } from '@mib/shared';
 import { prefersReducedMotion } from '../lib/format.js';
+import type { BottleWeather } from '../lib/oceanWeather.js';
 import {
   assertMapStylePolicy,
   boundsOf,
@@ -62,6 +63,15 @@ interface Props {
   showAnchorLabels?: boolean;
   // Glide the camera to this anchor (e.g. a search result) whenever it changes.
   focusAnchorId?: string | null;
+  // Time of day for the map palette. Changing it tweens paint properties in place: the camera,
+  // sources, routes, markers and any open selection are untouched.
+  phase?: MapPhase;
+  // Per-bottle weather (handoff v2.0): a storm belongs to a bottle, never to the map. The
+  // glyph shows above a marker only while its bottle is in a storm and the map is in night mode.
+  weather?: Record<string, BottleWeather>;
+  // While the sea viewer covers the map, the position ticker and pin layout stop; the map keeps
+  // its instance, camera and selection so returning restores them exactly.
+  paused?: boolean;
   fitKey?: string;
   bottomPadding?: number;
   onSelectRoute?: (id: string) => void;
@@ -78,16 +88,52 @@ const CLUSTER_PX = 44;
 const LABEL_ZOOM = 4.5;
 const FOCUS_ZOOM = 5;
 const EMPTY_SELECTION: string[] = [];
+const EMPTY_WEATHER: Record<string, BottleWeather> = {};
 const LAND_URL = '/map/land-50m.geojson';
 // Interior country boundaries (Natural Earth admin-0, 1:50m, public domain via world-atlas).
 // Drawn as thin lines only: no fills, no names (spec §6.2).
 const BORDERS_URL = '/map/borders-50m.geojson';
 
+// Day and night palettes (weather handoff v1.1 · DESIGN_TOKENS.json → color.mapDay/mapNight).
+// Route colours are deliberately absent: they are identical in day, night and storm, which is
+// what makes the three states read as one map.
+export const MAP_PALETTE = {
+  night: {
+    sea: '#092331',
+    land: '#26313a',
+    coast: '#6f8f92',
+    coastOpacity: 0.45,
+    shelfOuter: '#123d4e',
+    shelfOuterOpacity: 0.55,
+    shelfOuterWidth: [7, 18] as [number, number],
+    shelfInnerOpacity: 0,
+    borderOpacity: [0.22, 0.38] as [number, number],
+  },
+  day: {
+    sea: '#15607e',
+    land: '#dcd9c8',
+    coast: '#8a9a90',
+    coastOpacity: 0.7,
+    shelfOuter: '#2e86a4',
+    shelfOuterOpacity: 0.34,
+    shelfOuterWidth: [7, 20] as [number, number],
+    shelfInnerOpacity: 0.3,
+    borderOpacity: [0.3, 0.5] as [number, number],
+  },
+} as const;
+
+const SHELF_INNER_COLOR = '#59aec2';
+
+export type MapPhase = keyof typeof MAP_PALETTE;
+
+const DAY_NIGHT_MS = 600;
+const REDUCED_MS = 180;
+
 // Map style policy (MAP_DESIGN.md): land geometry, thin border lines and nothing else. The
 // default source is the bundled Natural Earth land polygons (public domain, offline, no
 // credentials). A licensed vector source can be supplied with VITE_MIB_MAP_TILES_URL — only its
 // land layer is ever drawn; borders always come from the bundled file.
-function buildStyle(): StyleSpecification {
+function buildStyle(phase: MapPhase): StyleSpecification {
   const tiles = import.meta.env.VITE_MIB_MAP_TILES_URL;
   const sourceLayer = import.meta.env.VITE_MIB_MAP_SOURCE_LAYER;
   const usingTiles = Boolean(tiles && sourceLayer);
@@ -97,22 +143,57 @@ function buildStyle(): StyleSpecification {
   const landRef = usingTiles
     ? { source: 'world', 'source-layer': sourceLayer! }
     : { source: 'world' };
+  const p = MAP_PALETTE[phase];
   return {
     version: 8,
     sources: { world: source, borders: { type: 'geojson', data: BORDERS_URL } },
     layers: [
-      { id: 'sea', type: 'background', paint: { 'background-color': '#092331' } },
+      { id: 'sea', type: 'background', paint: { 'background-color': p.sea } },
+      // Depth: two widening, blurred lines on the land geometry (MAP_DESIGN.md). Round joins —
+      // mitred ones spike on small islands. The inner line is a daylight-only band.
+      {
+        id: 'shelf-outer',
+        type: 'line',
+        ...landRef,
+        layout: { 'line-join': 'round', 'line-cap': 'round' },
+        paint: {
+          'line-color': p.shelfOuter,
+          'line-width': [
+            'interpolate',
+            ['linear'],
+            ['zoom'],
+            1.6,
+            p.shelfOuterWidth[0],
+            5,
+            p.shelfOuterWidth[1],
+          ],
+          'line-opacity': p.shelfOuterOpacity,
+          'line-blur': 3.5,
+        },
+      },
+      {
+        id: 'shelf-inner',
+        type: 'line',
+        ...landRef,
+        layout: { 'line-join': 'round', 'line-cap': 'round' },
+        paint: {
+          'line-color': SHELF_INNER_COLOR,
+          'line-width': ['interpolate', ['linear'], ['zoom'], 1.6, 2.6, 5, 8],
+          'line-opacity': p.shelfInnerOpacity,
+          'line-blur': 1.6,
+        },
+      },
       {
         id: 'land',
         type: 'fill',
         ...landRef,
-        paint: { 'fill-color': '#26313a', 'fill-outline-color': '#26313a' },
+        paint: { 'fill-color': p.land, 'fill-outline-color': p.land },
       },
       {
         id: 'coast',
         type: 'line',
         ...landRef,
-        paint: { 'line-color': '#6f8f92', 'line-width': 0.8, 'line-opacity': 0.45 },
+        paint: { 'line-color': p.coast, 'line-width': 0.8, 'line-opacity': p.coastOpacity },
       },
       {
         id: 'borders',
@@ -120,13 +201,62 @@ function buildStyle(): StyleSpecification {
         source: 'borders',
         layout: { 'line-join': 'round' },
         paint: {
-          'line-color': '#8ea3ab',
+          'line-color': p.coast,
           'line-width': ['interpolate', ['linear'], ['zoom'], 2, 0.45, 5, 0.9],
-          'line-opacity': ['interpolate', ['linear'], ['zoom'], 1.6, 0.22, 4, 0.38],
+          'line-opacity': [
+            'interpolate',
+            ['linear'],
+            ['zoom'],
+            1.6,
+            p.borderOpacity[0],
+            4,
+            p.borderOpacity[1],
+          ],
         },
       },
     ],
   };
+}
+
+// ---------- colour + tween helpers (day↔night and calm↔storm never call setStyle) ----------
+function parseHex(hex: string): [number, number, number] {
+  const v = hex.replace('#', '');
+  const n = parseInt(
+    v.length === 3
+      ? v
+          .split('')
+          .map((c) => c + c)
+          .join('')
+      : v,
+    16,
+  );
+  return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+}
+
+export function mixHex(from: string, to: string, k: number): string {
+  const a = parseHex(from);
+  const b = parseHex(to);
+  const c = a.map((v, i) => Math.round(v + (b[i]! - v) * Math.min(1, Math.max(0, k))));
+  return `#${c.map((v) => v.toString(16).padStart(2, '0')).join('')}`;
+}
+
+const easeStandard = (t: number) => 1 - Math.pow(1 - t, 3);
+
+// A cancellable rAF tween. Returns a stop function so an interrupted transition is reversible.
+function tween(ms: number, onStep: (k: number) => void): () => void {
+  if (ms <= 0) {
+    onStep(1);
+    return () => {};
+  }
+  let raf = 0;
+  const start = performance.now();
+  const step = (now: number) => {
+    const k = Math.min(1, (now - start) / ms);
+    onStep(easeStandard(k));
+    if (k < 1) raf = requestAnimationFrame(step);
+  };
+  raf = requestAnimationFrame(step);
+  return () => cancelAnimationFrame(raf);
 }
 
 export function isWebGLAvailable(): boolean {
@@ -145,6 +275,9 @@ export function OceanMap({
   selectedAnchorId = null,
   showAnchorLabels = false,
   focusAnchorId = null,
+  phase = 'night',
+  weather = EMPTY_WEATHER,
+  paused = false,
   fitKey = '',
   bottomPadding = 280,
   onSelectRoute,
@@ -157,6 +290,10 @@ export function OceanMap({
   const anchorMarkersRef = useRef(new globalThis.Map<string, Marker>());
   const [loaded, setLoaded] = useState(false);
   const [unsupported] = useState(() => !isWebGLAvailable());
+  // The palette in force right now, so an interrupted tween resumes from where it is and the
+  // map is never rebuilt.
+  const phaseRef = useRef<MapPhase>(phase);
+  const stopPhaseTween = useRef<() => void>(() => {});
   const latest = useRef({
     routes,
     anchors,
@@ -310,7 +447,7 @@ export function OceanMap({
   // Create the map once.
   useEffect(() => {
     if (!containerRef.current || unsupported) return;
-    const style = buildStyle();
+    const style = buildStyle(phaseRef.current);
     assertMapStylePolicy(style);
     const map = new MapLibreMap({
       container: containerRef.current,
@@ -438,19 +575,23 @@ export function OceanMap({
       seen.add(r.id);
       let marker = markersRef.current.get(r.id);
       if (!marker) {
+        // The 40 × 58 marker stack (handoff v2.0): a storm glyph slot above the bottle, a
+        // selection ring around it. Tapping opens the bottle's information only — the sea viewer
+        // is reached solely from the card's own "View at sea" action.
         const el = document.createElement('button');
         el.type = 'button';
         el.className = 'map-marker';
-        el.setAttribute('aria-label', 'Bottle at sea');
-        const img = document.createElement('img');
-        img.alt = '';
-        img.src = terminal(r.state) ? '/markers/marker-lost.svg' : '/markers/marker-bottle.svg';
-        el.appendChild(img);
+        el.innerHTML =
+          '<img class="glyph" alt="" src="/markers/storm-cloud-glyph.svg">' +
+          '<span class="bottle"><img class="art" alt=""></span>';
+        el.querySelector<HTMLImageElement>('.art')!.src = terminal(r.state)
+          ? '/markers/marker-lost.svg'
+          : '/markers/marker-bottle.svg';
         el.addEventListener('click', (ev) => {
           ev.stopPropagation();
           latest.current.onSelectRoute?.(r.id);
         });
-        marker = new Marker({ element: el, anchor: 'center' })
+        marker = new Marker({ element: el, anchor: 'bottom', offset: [0, 20] })
           .setLngLat([point.lng, point.lat])
           .addTo(map);
         markersRef.current.set(r.id, marker);
@@ -458,9 +599,16 @@ export function OceanMap({
         marker.setLngLat([point.lng, point.lat]);
       }
       const el = marker.getElement();
+      // Storm styling is night-only by policy; in daylight every bottle reads calm on the map.
+      const stormy = weather[r.id] === 'storm' && phase === 'night' && r.live;
       el.classList.toggle('selected', selected);
       el.classList.toggle('static', !r.live || reduced);
+      el.classList.toggle('storm', stormy);
       el.setAttribute('aria-pressed', String(selected));
+      el.setAttribute(
+        'aria-label',
+        `Bottle${r.label ? ` to ${r.label}` : ''}, ${stormy ? 'in a storm' : statusWord(r.state)}`,
+      );
     }
     for (const [id, m] of markersRef.current) {
       if (!seen.has(id)) {
@@ -497,12 +645,14 @@ export function OceanMap({
     loaded,
     reduced,
     layoutPins,
+    weather,
+    phase,
   ]);
 
   // Ticker: glide the marker along the polyline between server syncs (position stays server-owned).
   useEffect(() => {
     const map = mapRef.current;
-    if (!map || !loaded || reduced) return;
+    if (!map || !loaded || reduced || paused) return;
     if (!routes.some((r) => r.live)) return;
     const id = setInterval(() => {
       if (document.hidden) return;
@@ -525,7 +675,57 @@ export function OceanMap({
       if (trailSource) void trailSource.setData({ type: 'FeatureCollection', features: trail });
     }, 1000);
     return () => clearInterval(id);
-  }, [routes, selectedRouteIds, loaded, reduced]);
+  }, [routes, selectedRouteIds, loaded, reduced, paused]);
+
+  // Day ↔ night: a 600ms per-layer paint tween on the live map. Never setStyle — that reloads
+  // sources, drops the DOM markers and blinks the camera. Route colours are excluded by design.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !loaded || phaseRef.current === phase) return;
+    const from = MAP_PALETTE[phaseRef.current];
+    const to = MAP_PALETTE[phase];
+    phaseRef.current = phase;
+    stopPhaseTween.current();
+    stopPhaseTween.current = tween(reduced ? REDUCED_MS : DAY_NIGHT_MS, (k) => {
+      if (!mapRef.current) return;
+      const lerp = (a: number, b: number) => a + (b - a) * k;
+      map.setPaintProperty('sea', 'background-color', mixHex(from.sea, to.sea, k));
+      map.setPaintProperty('land', 'fill-color', mixHex(from.land, to.land, k));
+      map.setPaintProperty('land', 'fill-outline-color', mixHex(from.land, to.land, k));
+      map.setPaintProperty('coast', 'line-color', mixHex(from.coast, to.coast, k));
+      map.setPaintProperty('coast', 'line-opacity', lerp(from.coastOpacity, to.coastOpacity));
+      map.setPaintProperty('borders', 'line-color', mixHex(from.coast, to.coast, k));
+      map.setPaintProperty('borders', 'line-opacity', [
+        'interpolate',
+        ['linear'],
+        ['zoom'],
+        1.6,
+        lerp(from.borderOpacity[0], to.borderOpacity[0]),
+        4,
+        lerp(from.borderOpacity[1], to.borderOpacity[1]),
+      ]);
+      map.setPaintProperty('shelf-outer', 'line-color', mixHex(from.shelfOuter, to.shelfOuter, k));
+      map.setPaintProperty(
+        'shelf-outer',
+        'line-opacity',
+        lerp(from.shelfOuterOpacity, to.shelfOuterOpacity),
+      );
+      map.setPaintProperty('shelf-outer', 'line-width', [
+        'interpolate',
+        ['linear'],
+        ['zoom'],
+        1.6,
+        lerp(from.shelfOuterWidth[0], to.shelfOuterWidth[0]),
+        5,
+        lerp(from.shelfOuterWidth[1], to.shelfOuterWidth[1]),
+      ]);
+      map.setPaintProperty(
+        'shelf-inner',
+        'line-opacity',
+        lerp(from.shelfInnerOpacity, to.shelfInnerOpacity),
+      );
+    });
+  }, [phase, loaded, reduced]);
 
   // Camera: glide to a focused anchor (search result) close enough for its name to show.
   useEffect(() => {
@@ -560,6 +760,12 @@ export function OceanMap({
       ) : null}
     </div>
   );
+}
+
+function statusWord(state: string): string {
+  if (state === 'at_sea') return 'at sea';
+  if (state === 'delivered') return 'arrived';
+  return terminal(state) ? 'journey ended' : state.replace(/_/g, ' ');
 }
 
 function terminal(state: string): boolean {
