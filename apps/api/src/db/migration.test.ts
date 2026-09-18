@@ -149,5 +149,7 @@ describe('migrating a populated database', () => {
     fs.rmSync(legacyDir, { recursive: true, force: true });
     void app;
     void DEV_SEED_PASSWORD;
-  });
+    // Two full migrations plus the seeded sea graph land just either side of vitest's 5 s default
+    // on a slow machine, so this test's budget is explicit rather than left to flake on timing.
+  }, 60_000);
 });

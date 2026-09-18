@@ -19,8 +19,7 @@ This document records what was reused, what was adapted, and what was rejected, 
 | Daylight map palette (`sea #15607E`, `land #DCD9C8`, coast/border `#8A9A90`, shelf `#2E86A4` / `#59AEC2`) | `OceanMap` style, day variant |
 | Night map palette | unchanged — already the shipped style |
 | Shelf-depth technique (two widening, blurred `line` layers on the land geometry) | `shelf-outer`, `shelf-inner` layers |
-| ~~Storm layer set (`storm-dark`, `storm-cells`, `storm-cells-top`, `storm-edge`)~~ | **Removed by v2.0.** Only `bottle-halo` remains, under every at-sea marker. |
-| Layer order: `bottle-halo` **below** `planned` / `trail` / anchors / marker | unchanged |
+| ~~Storm layer set (`storm-dark`, `storm-cells`, `storm-cells-top`, `storm-edge`, `bottle-halo`)~~ | **Removed by v2.0.** No weather geometry and no halo is drawn on the map at all. |
 | Route colours constant across day, night and storm | unchanged |
 | Transition mechanics: 600 ms per-layer `setPaintProperty` day↔night | `OceanMap` tween (the calm↔storm group fade went with the storm layers) |
 | Shore storm parameter set (exposure, sun, hemisphere, fog, water, waves, foam, sand tints, clouds, rain, spray) | `ShoreScene` weather parameter sets |
@@ -41,7 +40,6 @@ This document records what was reused, what was adapted, and what was rejected, 
 | “Water: Rough” stat | Adopted in v2.0 (`Rough` / `Calm`, `—` once landed). |
 | Shore sub-line “Storm · high water · 2 places free” | Wording reused, the numbers come from the real shore record. |
 | `prototype/shore3d.js` weather branches | Read as an executable spec; ported into the existing `ShoreScene` as parameter sets. The prototype allocates rain/spray only when `storm` — we allocate always, as `IMPLEMENTATION.md` itself requires for switching. |
-| `bottleHalo` layer | Added under the existing DOM marker; kept by v2.0. |
 
 ## Rejected
 
@@ -68,7 +66,7 @@ the package is authoritative for the approved visual direction.
 | From the ZIP | Where it lands |
 | --- | --- |
 | Per-bottle weather model: a storm belongs to a bottle, never to a region; two bottles on one route may differ | `lib/oceanWeather.ts` (`bottleWeatherAt`, `oceanWeatherMap`) over the unchanged v1.1 schedule, which was already keyed on the bottle id |
-| Marker stack 40 × 58: storm glyph 24 × 17 `#E7CFA1` above the bottle, selection ring r15 `#BFE6DE` 1.5 px @ 0.75, glyph drift ±3 px / 5 s | `OceanMap` marker element + `.map-marker` styles; `public/markers/storm-cloud-glyph.svg` (metadata stripped) |
+| Marker stack 40 × 58: storm glyph 24 × 17 `#E7CFA1` above the bottle, glyph drift ±3 px / 5 s (the package's selection ring is not drawn — see *Rejected*) | `OceanMap` marker element + `.map-marker` styles; `public/markers/storm-cloud-glyph.svg` (metadata stripped) |
 | Card action row 52 px: `View at sea` primary (`#F2F6F5→#C7D9D6`, ink `#0A2230`), `Passport` outlined | `JourneyCard` `.action-row` |
 | `▲ IN A STORM` chip (`rgba(199,162,74,.18)` / `.60` border / `#F0DDAE` text), “Water: Rough”, note “This bottle is in weather. Your other bottles are unaffected.” | `JourneyCard`, route list rows |
 | Hint pill “Tap a bottle to follow its journey” (`rgba(6,20,30,.58)`, blur 16) | Ocean screen, clean state only |
@@ -94,7 +92,7 @@ the package is authoritative for the approved visual direction.
 | --- | --- |
 | Geographic storm regions, ellipses, fog patches and any map-wide rain | Replaced outright. `lib/stormGeometry.ts` and the `storm-*` layers/sources are deleted. |
 | Demo bottles, demo routes, hardcoded journey statistics, static map images, CDN dependencies | Real data only; the app bundles its own dependencies. |
-| A second `bottle-halo` and the desktop list-pane redesign in the reference frames | Existing halo and pane kept; the reference frames pre-date the shipped route list. |
+| `bottleHalo` layer, and the desktop list-pane redesign in the reference frames | No circle, ring or halo is drawn around a bottle marker: selection reads as a size change and the keyboard focus ring is the only ring. The reference frames pre-date the shipped route list. |
 | “Raised Write pill” navigation note | Stale: navigation is equal-height and contained, as fixed earlier. |
 | Any wording that weather delays, endangers or protects a bottle | Weather is cosmetic (spec §9.1). The card and the sea screen say so; no odds or protection rules are shown. |
 

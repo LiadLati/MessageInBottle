@@ -520,22 +520,6 @@ export function OceanMap({
           'circle-stroke-width': 1.4,
         },
       });
-      // A foam halo directly under each bottle marker keeps it readable over a storm cell.
-      map.addSource('bottle-halo', {
-        type: 'geojson',
-        data: { type: 'FeatureCollection', features: [] },
-      });
-      map.addLayer({
-        id: 'bottle-halo',
-        type: 'circle',
-        source: 'bottle-halo',
-        paint: {
-          'circle-radius': 22,
-          'circle-color': '#bfe6de',
-          'circle-opacity': 0.14,
-          'circle-blur': 0.6,
-        },
-      });
       // Tapping a route line selects that bottle's journey.
       for (const layer of ['planned', 'trail']) {
         map.on('click', layer, (e) => {
@@ -574,7 +558,6 @@ export function OceanMap({
     const now = Date.now();
     const planned: Feature[] = [];
     const trail: Feature[] = [];
-    const halo: Feature[] = [];
     const seen = new Set<string>();
     for (const r of routes) {
       if (r.points.length < 2) continue;
@@ -600,7 +583,7 @@ export function OceanMap({
         el.className = 'map-marker';
         el.innerHTML =
           '<img class="glyph" alt="" src="/markers/storm-cloud-glyph.svg">' +
-          '<span class="bottle"><span class="ring" aria-hidden></span><img class="art" alt=""></span>';
+          '<span class="bottle"><img class="art" alt=""></span>';
         el.querySelector<HTMLImageElement>('.art')!.src = terminal(r.state)
           ? '/markers/marker-lost.svg'
           : '/markers/marker-bottle.svg';
@@ -626,11 +609,6 @@ export function OceanMap({
         'aria-label',
         `Bottle${r.label ? ` to ${r.label}` : ''}, ${stormy ? 'in a storm' : statusWord(r.state)}`,
       );
-      halo.push({
-        type: 'Feature',
-        properties: { id: r.id },
-        geometry: { type: 'Point', coordinates: [point.lng, point.lat] },
-      });
     }
     for (const [id, m] of markersRef.current) {
       if (!seen.has(id)) {
@@ -645,10 +623,6 @@ export function OceanMap({
     void map.getSource<GeoJSONSource>('trail')?.setData({
       type: 'FeatureCollection',
       features: trail,
-    });
-    void map.getSource<GeoJSONSource>('bottle-halo')?.setData({
-      type: 'FeatureCollection',
-      features: halo,
     });
     void map.getSource<GeoJSONSource>('anchors')?.setData({
       type: 'FeatureCollection',
@@ -684,18 +658,12 @@ export function OceanMap({
       if (document.hidden) return;
       const now = Date.now();
       const trail: Feature[] = [];
-      const halo: Feature[] = [];
       for (const r of routes) {
         if (r.points.length < 2) continue;
         const progress = interpolatedProgress(r, now);
         const pts = unwrapAntimeridian(r.points);
         const { point, index } = geoAlong(pts, progress);
         markersRef.current.get(r.id)?.setLngLat([point.lng, point.lat]);
-        halo.push({
-          type: 'Feature',
-          properties: { id: r.id },
-          geometry: { type: 'Point', coordinates: [point.lng, point.lat] },
-        });
         if (progress > 0) {
           trail.push({
             ...lineFeature(r.id, [...pts.slice(0, index + 1), point]),
@@ -705,9 +673,6 @@ export function OceanMap({
       }
       const trailSource = map.getSource<GeoJSONSource>('trail');
       if (trailSource) void trailSource.setData({ type: 'FeatureCollection', features: trail });
-      void map
-        .getSource<GeoJSONSource>('bottle-halo')
-        ?.setData({ type: 'FeatureCollection', features: halo });
     }, 1000);
     return () => clearInterval(id);
   }, [routes, selectedRouteIds, loaded, reduced, paused]);
