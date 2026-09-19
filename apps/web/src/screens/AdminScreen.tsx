@@ -301,7 +301,15 @@ function CaseBody({ c }: { c: AdminCaseDetailDto }) {
       <section className="stack">
         <h2 className="section-title">Original letter</h2>
         <div className="glass-panel">
-          <LetterPaper text={c.letter.text} font={c.letter.font} readable toolbar="none" />
+          {c.letter.redactedAt ? (
+            <p className="muted">
+              The copy of this letter was removed on{' '}
+              {new Date(c.letter.redactedAt).toLocaleDateString()} under the evidence retention
+              policy. The decision and its reasoning are kept below.
+            </p>
+          ) : (
+            <LetterPaper text={c.letter.text} font={c.letter.font} readable toolbar="none" />
+          )}
         </div>
       </section>
 

@@ -9,6 +9,7 @@ import type { Clock } from '../lib/clock.js';
 import { OutboxMailer } from '../lib/mail.js';
 import type { createApp } from '../http/app.js';
 import type { AppContext, AuthUser } from '../services/context.js';
+import { RETENTION_OFF } from '../services/retention.js';
 
 export class ManualClock implements Clock {
   constructor(private current: number) {}
@@ -53,6 +54,7 @@ export function testConfig(overrides: Partial<AppConfig> = {}): AppConfig {
       tickMs: 1000,
       autoDecide: false,
     },
+    retention: RETENTION_OFF,
     ...overrides,
   };
 }

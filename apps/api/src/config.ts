@@ -1,9 +1,28 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { RISK_POLICY_VERSION } from '@mib/shared';
+import type { RetentionPolicy } from './services/retention.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 export const API_ROOT = path.resolve(here, '..');
+
+function envDays(name: string): number | null {
+  const raw = process.env[name];
+  if (raw === undefined || raw === '') return null;
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n < 0)
+    throw new Error(`${name} must be a non-negative number of days`);
+  return n * 24 * 60 * 60 * 1000;
+}
+
+function loadRetentionPolicy(): RetentionPolicy {
+  return {
+    enabled: (process.env.MIB_RETENTION_ENABLED ?? 'false') === 'true',
+    rejectedAfterMs: envDays('MIB_RETENTION_REJECTED_DAYS'),
+    acceptedAfterMs: envDays('MIB_RETENTION_ACCEPTED_DAYS'),
+    appealWindowMs: envDays('MIB_APPEAL_WINDOW_DAYS'),
+  };
+}
 
 function envInt(name: string, fallback: number): number {
   const raw = process.env[name];
@@ -39,6 +58,9 @@ export interface AppConfig {
   // Local AI review of reported letters (spec §16). The model is reached over HTTP at an
   // Ollama-compatible endpoint; nothing here is a paid API. Reports queue while it is away.
   ai: AiConfig;
+  // How long moderation evidence is kept. Disabled by default: nothing is ever removed until
+  // a policy is configured deliberately. See services/retention.ts.
+  retention: RetentionPolicy;
 }
 
 export interface AiConfig {
@@ -83,6 +105,7 @@ export function loadConfig(): AppConfig {
     appUrl: process.env.MIB_APP_URL ?? 'http://localhost:5173',
     mail: loadMailConfig(devMode),
     riskPolicyVersion: envInt('MIB_RISK_POLICY_VERSION', RISK_POLICY_VERSION),
+    retention: loadRetentionPolicy(),
     ai: {
       enabled: (process.env.MIB_AI_ENABLED ?? 'true') === 'true',
       endpoint: (process.env.MIB_AI_ENDPOINT ?? 'http://127.0.0.1:11434').replace(/\/+$/, ''),

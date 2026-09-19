@@ -1,4 +1,4 @@
-import { and, desc, eq, isNull } from 'drizzle-orm';
+import { and, desc, eq, isNull, sql } from 'drizzle-orm';
 import type { NotificationDto, NotificationKind } from '@mib/shared';
 import type { DbOrTx } from '../db/client.js';
 import * as t from '../db/schema.js';
@@ -60,23 +60,28 @@ function classify(
 }
 
 export function listNotifications(ctx: AppContext, userId: string): NotificationDto[] {
-  return ctx.db
-    .select({ n: t.notifications, lossReason: t.bottles.lossReason })
-    .from(t.notifications)
-    .leftJoin(t.bottles, eq(t.bottles.id, t.notifications.bottleId))
-    .where(eq(t.notifications.userId, userId))
-    .orderBy(desc(t.notifications.createdAt), desc(t.notifications.id))
-    .limit(100)
-    .all()
-    .map(({ n, lossReason }) => ({
-      id: n.id,
-      type: n.type as NotificationDto['type'],
-      kind: classify(n, lossReason),
-      bottleId: n.bottleId,
-      message: n.message,
-      createdAt: new Date(n.createdAt).toISOString(),
-      readAt: n.readAt === null ? null : new Date(n.readAt).toISOString(),
-    }));
+  return (
+    ctx.db
+      .select({ n: t.notifications, lossReason: t.bottles.lossReason })
+      .from(t.notifications)
+      .leftJoin(t.bottles, eq(t.bottles.id, t.notifications.bottleId))
+      .where(eq(t.notifications.userId, userId))
+      // Newest first. Ids are random, so two notices written in the same millisecond (a
+      // suspension and the appeal that lifted it, say) would otherwise come back in a different
+      // order on every read; SQLite's rowid is insertion order, which is the one we mean.
+      .orderBy(desc(t.notifications.createdAt), desc(sql`"notifications"."rowid"`))
+      .limit(100)
+      .all()
+      .map(({ n, lossReason }) => ({
+        id: n.id,
+        type: n.type as NotificationDto['type'],
+        kind: classify(n, lossReason),
+        bottleId: n.bottleId,
+        message: n.message,
+        createdAt: new Date(n.createdAt).toISOString(),
+        readAt: n.readAt === null ? null : new Date(n.readAt).toISOString(),
+      }))
+  );
 }
 
 // Reading the inbox marks everything as read. This touches notifications only: no bottle, marker

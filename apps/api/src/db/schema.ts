@@ -414,6 +414,10 @@ export const moderationCases = sqliteTable(
     evidenceText: text('evidence_text').notNull(),
     evidenceFont: text('evidence_font').notNull(),
     evidenceCharacters: integer('evidence_characters').notNull(),
+    // Set when a retention run has cleared the evidence text from a finally settled case. The
+    // case, its decision and its violation survive; only the copied letter goes. Null on every
+    // case until a retention policy is configured and switched on (services/retention.ts).
+    evidenceRedactedAt: integer('evidence_redacted_at'),
     createdAt: integer('created_at').notNull(),
     updatedAt: integer('updated_at').notNull(),
     aiStatus: text('ai_status', { enum: ['queued', 'running', 'done', 'failed'] })

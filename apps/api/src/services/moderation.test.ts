@@ -22,6 +22,7 @@ import {
 import type { AuthUser } from './context.js';
 import { commitArrivalIfDue } from './journey.js';
 import {
+  REPORTS_PER_HOUR,
   SUSPENSION_MS,
   accountStanding,
   acknowledgeWarning,
@@ -371,14 +372,34 @@ describe('the local AI review queue', () => {
   });
 
   it('carries the multilingual evaluation set the operator runs before enabling auto-decide', () => {
-    expect(AI_EVAL_SAMPLES.length).toBeGreaterThanOrEqual(8);
-    expect(AI_EVAL_SAMPLES.some((s) => /Hebrew/.test(s.language))).toBe(true);
-    expect(AI_EVAL_SAMPLES.some((s) => /Arabic/.test(s.language))).toBe(true);
-    expect(AI_EVAL_SAMPLES.some((s) => /Mixed/.test(s.language))).toBe(true);
-    for (const s of AI_EVAL_SAMPLES) expect(s.acceptable).toContain(s.expected);
+    expect(AI_EVAL_SAMPLES.length).toBeGreaterThanOrEqual(24);
+    const ids = new Set(AI_EVAL_SAMPLES.map((s) => s.id));
+    expect(ids.size).toBe(AI_EVAL_SAMPLES.length);
+    for (const language of [/Hebrew/, /Arabic/, /Russian/, /Mixed/, /Latin letters/])
+      expect(AI_EVAL_SAMPLES.some((s) => language.test(s.language))).toBe(true);
+    for (const s of AI_EVAL_SAMPLES) {
+      expect(s.acceptable).toContain(s.expected);
+      expect(s.text.trim().length).toBeGreaterThan(0);
+      // Every sample says what it is for, so a reviewer reading the output knows why it is hard.
+      expect(s.note.trim().length).toBeGreaterThan(0);
+    }
     // Every unclear sample admits `uncertain`: the model is never required to guess.
     for (const s of AI_EVAL_SAMPLES.filter((x) => x.expected === 'uncertain'))
       expect(s.acceptable).toContain('uncertain');
+
+    // The three traps that produce the dangerous mistakes must all be represented: text that
+    // tries to dictate the answer, an innocent letter carrying a frightening accusation, and
+    // abuse quoted by the person it was aimed at.
+    expect(ids.has('en-injection')).toBe(true);
+    expect(ids.has('en-false-report')).toBe(true);
+    expect(ids.has('he-quoted-abuse')).toBe(true);
+    const falseReport = AI_EVAL_SAMPLES.find((s) => s.id === 'en-false-report')!;
+    expect(falseReport.explanations?.length).toBeGreaterThan(0);
+    expect(falseReport.acceptable).toEqual(['reject']);
+    // Someone in crisis is never an automatic violation: that one must reach a person.
+    expect(AI_EVAL_SAMPLES.find((s) => s.id === 'he-self-harm-crisis')!.acceptable).toEqual([
+      'uncertain',
+    ]);
   });
 });
 
@@ -617,5 +638,88 @@ describe('appeals', () => {
     expect(() =>
       submitAppeal(w.ctx, w.user('ada'), { violationId: 'vio_nope', text: 'x' }),
     ).toThrow(AppError);
+  });
+});
+
+describe('report budgets', () => {
+  // Bo works through a pile of letters from Ada. The shore is made roomy so that the budget,
+  // not the shore, is what stops them.
+  function budgetWorld() {
+    const w = createTestWorld({ defaultShoreCapacity: 80 });
+    w.db
+      .update(t.users)
+      .set({ role: 'admin' })
+      .where(eq(t.users.id, w.user('cy').id))
+      .run();
+    return w;
+  }
+  let n = 0;
+  function letterTo(w: TestWorld): string {
+    const key = `budget-${String(++n).padStart(4, '0')}`;
+    const id = releaseBottle(w.ctx, w.user('ada'), releaseInput(w.user('bo').id, key)).bottleId;
+    w.clock.advance(40 * DAY);
+    expect(commitArrivalIfDue(w.ctx, id, w.clock.now())).toBe(true);
+    openBottle(w.ctx, w.user('bo'), id);
+    return id;
+  }
+  const report = (w: TestWorld, bottleId: string) =>
+    reportLetter(w.ctx, w.user('bo'), { bottleId, reason: 'harassment', hide: false });
+
+  it('allows the hourly budget and then answers 429 with a wait', () => {
+    const w = budgetWorld();
+    const ids = Array.from({ length: REPORTS_PER_HOUR.limit + 1 }, () => letterTo(w));
+    for (const id of ids.slice(0, REPORTS_PER_HOUR.limit))
+      expect(report(w, id).reportId).toBeTruthy();
+
+    let err: AppError | null = null;
+    try {
+      report(w, ids[REPORTS_PER_HOUR.limit]!);
+    } catch (e) {
+      err = e as AppError;
+    }
+    expect(err).toBeInstanceOf(AppError);
+    expect(err!.status).toBe(429);
+    expect(err!.code).toBe('rate_limited');
+    expect((err!.details as { retryAfterSeconds: number }).retryAfterSeconds).toBeGreaterThan(0);
+    // The refused report left nothing behind.
+    expect(listCases(w.ctx, 'all')).toHaveLength(REPORTS_PER_HOUR.limit);
+  });
+
+  it('frees the window as the oldest reports fall out of it', () => {
+    const w = budgetWorld();
+    const ids = Array.from({ length: REPORTS_PER_HOUR.limit + 1 }, () => letterTo(w));
+    for (const id of ids.slice(0, REPORTS_PER_HOUR.limit)) report(w, id);
+    w.realClock.advance(60 * 60 * 1000 + 1000);
+    expect(report(w, ids[REPORTS_PER_HOUR.limit]!).alreadyReported).toBe(false);
+  });
+
+  it('does not charge a repeat report on a letter already reported', () => {
+    const w = budgetWorld();
+    const ids = Array.from({ length: REPORTS_PER_HOUR.limit }, () => letterTo(w));
+    for (const id of ids.slice(0, REPORTS_PER_HOUR.limit - 1)) report(w, id);
+    // Re-reporting the first letter many times writes no row, so the budget is untouched.
+    for (let i = 0; i < 20; i++) expect(report(w, ids[0]!).alreadyReported).toBe(true);
+    expect(report(w, ids[REPORTS_PER_HOUR.limit - 1]!).alreadyReported).toBe(false);
+  });
+
+  it('never blocks a suspended account from reading its standing or appealing', () => {
+    // The budget guards reporting only; the paths a restricted account depends on are
+    // untouched by it (they are not behind a budget at all).
+    const w = budgetWorld();
+    for (const reason of ['one', 'two'] as const) {
+      const id = letterTo(w);
+      const caseId = reportLetter(w.ctx, w.user('bo'), {
+        bottleId: id,
+        reason: 'harassment',
+        hide: false,
+      }).caseId;
+      decideCase(w.ctx, admin(w), caseId, 'accepted', reason);
+    }
+    const standing = accountStanding(w.ctx, w.user('ada').id);
+    expect(standing.standing).toBe('suspended');
+    const violationId = standing.violations.at(-1)!.id;
+    expect(() =>
+      submitAppeal(w.ctx, w.user('ada'), { violationId, text: 'please look again' }),
+    ).not.toThrow();
   });
 });

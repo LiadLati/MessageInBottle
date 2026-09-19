@@ -256,15 +256,30 @@ an explanation, and by default hides the letter for the reporter at once. Report
 letter form **one case** with the letter frozen as protected evidence; a case yields at most one
 violation. The writer is never told who reported them.
 
+**How often you can report.** Reporting is bounded so that it cannot be scripted, with budgets
+wide enough that working through a real harassment campaign never hits them: 10 reports an hour
+and 40 a day per account, in sliding windows counted from the stored reports themselves, so a new
+session, a new device or an API restart does not hand anyone a fresh budget. Re-reporting a letter
+you already reported writes nothing and costs nothing. A spent budget answers `429` with the wait
+in seconds. Reading your standing, acknowledging a warning and appealing are never rate-limited —
+a suspended account must always be able to reach its only remaining actions.
+
 **Local AI review.** Each case is queued for a locally running model (Ollama; see
 `MIB_AI_*` in `.env.example`). The model reads only the reported text and returns a validated
 `accept` / `reject` / `uncertain` with a short reason, a translation for non-English letters and,
 when unsure, why. It has no database or admin powers: the backend validates its output and makes
-every change. By default its verdict is a recommendation shown to admins; set
-`MIB_AI_AUTO_DECIDE=true` only after `pnpm --filter @mib/api ai:eval` (a fixed set of Hebrew,
-Arabic, Russian, Spanish, mixed-language, slang, irony and prompt-injection samples) shows no
-dangerous disagreements with your model. If Ollama or the computer is offline, reports wait in
-the queue and are retried with a growing delay.
+every change. By default its verdict is a recommendation shown to admins. If Ollama or the
+computer is offline, reports wait in the queue and are retried with a growing delay.
+
+`pnpm --filter @mib/api ai:eval` runs 30 representative letters past your model: Hebrew (threats,
+unwanted sexual pressure, doxxing, affectionate vulgar slang, quoted abuse, a crisis message,
+Hebrew written in Latin letters), Arabic, Russian, Spanish, French, Hebrew/English and
+Russian/Hebrew code-switching, and the adversarial cases that produce the dangerous mistakes —
+text that tries to dictate the verdict, and an innocent letter carrying a frightening accusation.
+Run it with `-- --repeat 3`: a model that answers the same letter differently between passes is
+not fit to decide anything. A clean run is the floor, not the bar — read the reasoning, add
+letters from your own users, and treat `MIB_AI_AUTO_DECIDE=true` as a deliberate decision.
+`uncertain` always goes to a person, whatever that setting says.
 
 Setting up Ollama on your machine:
 
@@ -272,8 +287,18 @@ Setting up Ollama on your machine:
 # https://ollama.com/download, then:
 ollama pull qwen2.5:7b          # or any model you prefer; set MIB_AI_MODEL to match
 ollama serve                    # listens on http://127.0.0.1:11434 by default
-pnpm --filter @mib/api ai:eval  # try the sample set before enabling automatic decisions
+pnpm --filter @mib/api ai:eval -- --repeat 3   # judge the model before trusting it
 ```
+
+**Evidence retention.** A case keeps a copy of the reported letter so that admins, and any later
+appeal, judge the same text. Nothing is ever deleted by default. `MIB_RETENTION_*` configures a
+policy, and `pnpm --filter @mib/api retention:plan` shows exactly what it would remove before
+anything is switched on (`-- --apply` carries it out, and refuses unless the policy is enabled).
+Whatever is configured, evidence is held while a report is undecided, while an appeal is pending
+or still possible, and while the violation it justifies is still in force. Redaction clears the
+letter copy and the reporters' explanations; the case, its decision, its reasoning and the
+violation all survive, so account standing and the admin record are unaffected.
+`docs/ARCHITECTURE.md` carries the recommended windows and the two product decisions they need.
 
 **Admins.** An admin icon appears beside the notification icon for admin accounts; its menu opens
 Reports and Appeals. Every admin endpoint (`/api/admin/*`) is enforced server-side from the role

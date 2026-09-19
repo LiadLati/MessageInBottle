@@ -21,6 +21,7 @@ const NEWEST = new Set([
   '0008_journey_rules',
   '0009_account_time_zone',
   '0010_reporting_and_moderation',
+  '0011_evidence_retention',
 ]);
 
 function tableNames(sqlite: Database.Database): string[] {
@@ -120,6 +121,7 @@ describe('migrating a populated database', () => {
     expect(columnsOf(sqlite, 'users')).toContain('role');
     for (const table of ['moderation_cases', 'letter_reports', 'violations', 'appeals'])
       expect(tableNames(sqlite)).toContain(table);
+    expect(columnsOf(sqlite, 'moderation_cases')).toContain('evidence_redacted_at');
     expect(columnsOf(sqlite, 'bottles')).toContain('outcome_at');
     seedChart(db, testConfig().defaultShoreCapacity, T0);
 

@@ -334,10 +334,73 @@ journeys are untouched; `bottles.moderation_status` (declared since stage 3) is 
   which looks an account up by normalised e-mail, prints its stable id, and writes only when
   that id is passed back with `--confirm`. Registration never sets it; no request body is read
   for it. The sender-facing DTOs (`AccountStandingDto`, notifications) carry no reporter.
+- **Report budgets.** Two sliding windows per reporter — 10 an hour, 40 a day
+  (`REPORTS_PER_HOUR` / `REPORTS_PER_DAY`) — counted in `assertReportBudget` directly from the
+  `letter_reports` rows, so they are durable: a new session, a new device or a restart does not
+  reset them. They are charged only when a report is actually written, so re-reporting a letter
+  costs nothing. The route adds per-address windows on top (`REPORTS_PER_ADDRESS`,
+  `APPEALS_PER_ADDRESS`) for one machine driving many accounts. Standing, acknowledgement and
+  appeals carry no budget at all: a restricted account must always reach its last actions.
+
+### Evidence retention (`services/retention.ts`)
+
+A case stores a copy of the reported letter (`moderation_cases.evidence_text`) so that admins
+and any later appeal judge the same text, frozen at the moment of the first report. That copy is
+the most sensitive thing the system holds, and it cannot simply be aged out: a suspension rests
+on it, and a person who appeals two months later is entitled to have their case read against the
+same evidence.
+
+The module separates the part that needs no product decision from the part that does.
+
+**The safety rule, enforced unconditionally.** `planRetention` classifies every case, and
+evidence is redactable only when *none* of these holds apply:
+
+| hold | meaning |
+| --- | --- |
+| `case_pending` | nobody has decided the report yet |
+| `ai_in_queue` | a model review is in flight and this text is its input |
+| `appeal_pending` | an appeal is waiting to be decided |
+| `appeal_open` | the sender may still appeal (always true while no deadline is configured) |
+| `violation_in_force` | it justifies a sanction the account is still under |
+| `within_window` | settled, but younger than the configured window |
+| `no_policy` | no window is configured for this outcome — the default for everything |
+
+`applyRetention` re-checks each case inside the transaction before touching it, so a report or
+appeal that arrived after the plan was drawn up wins. "Redact" clears the letter copy and the
+reporters' explanations and stamps `evidence_redacted_at`; the case, its status, category,
+decision, reasoning, the violation and who reported it all survive, so account standing, the
+appeal record and the admin history are untouched. The admin screen shows the redaction date in
+place of the letter.
+
+**What is switched off, and why.** `MIB_RETENTION_ENABLED` defaults to false and every window
+defaults to unset, so out of the box nothing is ever removed and every settled case reads
+`no_policy`. `retention:plan` still reports what a policy *would* remove, so it can be reviewed
+against real data first. Two questions have to be answered by the product, not by this code:
+
+1. **How long may someone appeal?** Accepted-case evidence cannot be released until appeals
+   close, so with no deadline it is kept for ever. *Recommendation: 30 days from the decision,
+   with the exception already implemented — a suspended or banned account may appeal at any
+   time, because the appeal is its only remaining move.* Set `MIB_APPEAL_WINDOW_DAYS=30` to
+   adopt it; `submitAppeal` then answers `appeal_window_closed` for a warned account past the
+   deadline, and nothing changes for a restricted one.
+2. **Do violations age out of the count?** Standing counts every violation still in force, for
+   ever, so a third one bans an account whatever the interval. *Recommendation: a violation
+   stops counting 12 months after its decision (history kept, `standingOf` ignoring it).* This
+   is **not** implemented: it changes who is banned, which is a policy call, and it is the
+   precondition for accepted-case evidence ever being released.
+
+**Recommended policy once those are answered:** `MIB_RETENTION_REJECTED_DAYS=90` (a rejected
+report is kept long enough to spot a reporter abusing the system, then goes) and
+`MIB_RETENTION_ACCEPTED_DAYS=180`, measured from the last moment the text could have mattered —
+the revocation, the appeal decision or the appeal deadline, whichever is latest.
+
+Out of scope here, and worth stating plainly: redaction removes the *moderation copy*. The
+original row in `letters` is the sender's own data and is governed by account deletion, which
+this project does not implement yet.
 
 ## Deliberately not implemented (per task scope)
 
 AI writing/rewriting, random recipients, appended notes, chat, GPS-assisted shore suggestion,
 island publication, rescue/discard, moderation console, push notifications,
-password reset / e-mail verification, request rate limiting outside authentication. Draft persistence is client-side (`sessionStorage`), as the
+password reset / e-mail verification. Draft persistence is client-side (`sessionStorage`), as the
 specification's Draft state has no live journey.

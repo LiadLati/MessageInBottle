@@ -1,4 +1,4 @@
-import { and, asc, eq, isNull } from 'drizzle-orm';
+import { and, asc, eq, gte, isNull } from 'drizzle-orm';
 import type {
   AccountStandingDto,
   ReportReason,
@@ -9,7 +9,7 @@ import type {
 import type { DbOrTx } from '../db/client.js';
 import * as t from '../db/schema.js';
 import { newId } from '../lib/ids.js';
-import { badRequest, conflict, forbidden, notFound } from '../lib/errors.js';
+import { badRequest, conflict, forbidden, notFound, tooManyRequests } from '../lib/errors.js';
 import type { AppContext, AuthUser } from './context.js';
 import { enqueueNotification } from './notifications.js';
 
@@ -26,6 +26,46 @@ import { enqueueNotification } from './notifications.js';
 //     (an accepted appeal) recalculates the account at once.
 
 export const SUSPENSION_MS = 7 * 24 * 60 * 60 * 1000;
+
+// ---------- report budgets ----------
+
+// Someone working through a harassment campaign legitimately reports several letters in a
+// row, so these are wide: they exist to bound scripted abuse (a bot burying an account in
+// reports, or farming cases to keep a queue busy), not to ration honest reporting. Both
+// windows are sliding and are counted from the persisted reports themselves, so signing out,
+// switching device or restarting the API does not hand anyone a fresh budget. A repeat report
+// on a letter this reader already reported writes no row, so it never costs anything.
+export interface ReportBudget {
+  limit: number;
+  windowMs: number;
+}
+export const REPORTS_PER_HOUR: ReportBudget = { limit: 10, windowMs: 60 * 60 * 1000 };
+export const REPORTS_PER_DAY: ReportBudget = { limit: 40, windowMs: 24 * 60 * 60 * 1000 };
+const REPORT_BUDGETS: readonly ReportBudget[] = [REPORTS_PER_HOUR, REPORTS_PER_DAY];
+
+// Throws 429 when this reporter has spent a budget, naming the wait in the error details.
+// Sliding: the window frees up when the oldest report still inside it falls out of it.
+function assertReportBudget(tx: DbOrTx, userId: string, now: number): void {
+  for (const rule of REPORT_BUDGETS) {
+    const inWindow = tx
+      .select({ createdAt: t.letterReports.createdAt })
+      .from(t.letterReports)
+      .where(
+        and(
+          eq(t.letterReports.reporterId, userId),
+          gte(t.letterReports.createdAt, now - rule.windowMs),
+        ),
+      )
+      .orderBy(asc(t.letterReports.createdAt))
+      .all();
+    if (inWindow.length < rule.limit) continue;
+    const oldestCounted = inWindow[inWindow.length - rule.limit]!.createdAt;
+    throw tooManyRequests(
+      oldestCounted + rule.windowMs - now,
+      'you have reported a lot of letters recently — please wait before reporting another',
+    );
+  }
+}
 
 const iso = (ms: number) => new Date(ms).toISOString();
 const isoOrNull = (ms: number | null) => (ms === null ? null : iso(ms));
@@ -127,6 +167,8 @@ export function reportLetter(
         alreadyReported: true,
       };
     }
+    // Only a new report costs budget; the duplicate path above returned already.
+    assertReportBudget(tx, user.id, now);
     const reportId = newId('rpt');
     tx.insert(t.letterReports)
       .values({
@@ -315,6 +357,17 @@ export function submitAppeal(
     const v = tx.select().from(t.violations).where(eq(t.violations.id, input.violationId)).get();
     if (!v || v.userId !== user.id) throw notFound('violation');
     if (v.revokedAt !== null) throw badRequest('already_revoked', 'this violation was revoked');
+    // An appeal deadline, when one is configured at all (it is not by default), never closes
+    // while the account is still suspended or banned: appealing is its only remaining move.
+    const window = ctx.config.retention.appealWindowMs;
+    if (window !== null && now >= v.decidedAt + window) {
+      const standing = standingOf(tx, user.id, now).standing;
+      if (standing !== 'suspended' && standing !== 'banned')
+        throw badRequest(
+          'appeal_window_closed',
+          'the time allowed to appeal this decision has passed',
+        );
+    }
     const existing = tx.select().from(t.appeals).where(eq(t.appeals.violationId, v.id)).get();
     if (existing) {
       throw conflict(

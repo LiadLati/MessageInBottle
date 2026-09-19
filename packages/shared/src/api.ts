@@ -525,8 +525,14 @@ export const AdminCaseSummarySchema = z.object({
 export type AdminCaseSummaryDto = z.infer<typeof AdminCaseSummarySchema>;
 
 export const AdminCaseDetailSchema = AdminCaseSummarySchema.extend({
-  // The protected evidence: the letter exactly as it read when it was first reported.
-  letter: z.object({ text: z.string(), font: LetterFontSchema, characters: z.number().int() }),
+  // The protected evidence: the letter exactly as it read when it was first reported. `text`
+  // is empty and `redactedAt` is set once a retention run has cleared a finally settled case.
+  letter: z.object({
+    text: z.string(),
+    font: LetterFontSchema,
+    characters: z.number().int(),
+    redactedAt: z.string().nullable(),
+  }),
   releasedAt: z.string(),
   reports: z.array(LetterReportSchema),
   appeal: z

@@ -108,6 +108,7 @@ function detailOf(db: DbOrTx, c: CaseRow): AdminCaseDetailDto {
       text: c.evidenceText,
       font: c.evidenceFont as LetterFont,
       characters: c.evidenceCharacters,
+      redactedAt: c.evidenceRedactedAt === null ? null : iso(c.evidenceRedactedAt),
     },
     releasedAt: iso(bottle.releasedAt),
     reports: reports.map((r) => ({

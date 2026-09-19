@@ -2,6 +2,8 @@
 //
 //   pnpm --filter @mib/api admin:grant -- --email someone@example.com
 //       looks the account up by its normalised e-mail and prints its stable id; changes nothing
+//   pnpm --filter @mib/api admin:grant -- --username someone
+//       the same, for an account registered under a different address than you remember
 //   pnpm --filter @mib/api admin:grant -- --email someone@example.com --confirm usr_…
 //       grants admin to that account, and only if the id printed above matches
 //   pnpm --filter @mib/api admin:grant -- --revoke usr_…
@@ -11,7 +13,7 @@
 // sets a role and no request ever carries one, so this file is the whole grant surface.
 import os from 'node:os';
 import { eq } from 'drizzle-orm';
-import { normalizeEmail } from '@mib/shared';
+import { normalizeEmail, normalizeUsername } from '@mib/shared';
 import { loadEnvFiles } from '../lib/env.js';
 import { loadConfig } from '../config.js';
 import { createDb, runMigrations } from '../db/client.js';
@@ -28,6 +30,7 @@ const { db } = createDb(config.databasePath);
 runMigrations(db);
 
 const email = arg('email');
+const username = arg('username');
 const confirm = arg('confirm');
 const revoke = arg('revoke');
 const by = `cli:${os.userInfo().username}@${os.hostname()}`;
@@ -44,12 +47,29 @@ if (revoke) {
   process.exit(0);
 }
 
-if (!email)
-  fail('Usage: admin:grant -- --email <address> [--confirm <user id>] | --revoke <user id>');
-const normalized = normalizeEmail(email);
-const user = db.select().from(t.users).where(eq(t.users.email, normalized)).get();
-if (!user) fail(`No account is registered with ${normalized}. Nothing was changed.`);
-console.log(`Account for ${normalized}:`);
+if (!email && !username)
+  fail(
+    'Usage: admin:grant -- (--email <address> | --username <name>) [--confirm <user id>] | --revoke <user id>',
+  );
+const normalized = email ? normalizeEmail(email) : normalizeUsername(username!);
+const user = email
+  ? db.select().from(t.users).where(eq(t.users.email, normalized)).get()
+  : db.select().from(t.users).where(eq(t.users.username, normalized)).get();
+if (!user) {
+  console.error(
+    email
+      ? `No account is registered with ${normalized}. Nothing was changed.`
+      : `No account has the username ${normalized}. Nothing was changed.`,
+  );
+  if (email)
+    console.error(
+      'If the account was registered under another address, look it up by name instead:\n' +
+        '  admin:grant -- --username <name>',
+    );
+  process.exit(1);
+}
+const lookedUpBy = email ? normalized : `username ${normalized}`;
+console.log(`Account for ${lookedUpBy}:`);
 console.log(`  id          ${user.id}`);
 console.log(`  username    ${user.username}`);
 console.log(`  display     ${user.displayName}`);
@@ -58,7 +78,9 @@ console.log(`  status      ${user.status}`);
 console.log(`  role        ${user.role}`);
 if (!confirm) {
   console.log(
-    `\nTo grant admin to this account, run again with:  --email ${normalized} --confirm ${user.id}`,
+    `\nTo grant admin to this account, run again with:  ${
+      email ? `--email ${normalized}` : `--username ${normalized}`
+    } --confirm ${user.id}`,
   );
   process.exit(0);
 }
