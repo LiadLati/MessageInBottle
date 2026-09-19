@@ -36,6 +36,27 @@
       "when": 1789414109926,
       "tag": "0004_shore_regions",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1789768624789,
+      "tag": "0005_bottle_outcomes",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1789819243395,
+      "tag": "0006_public_openings",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "6",
+      "when": 1789822944742,
+      "tag": "0007_notification_kinds",
+      "breakpoints": true
     }
   ]
 }

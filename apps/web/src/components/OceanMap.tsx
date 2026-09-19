@@ -45,6 +45,15 @@ export interface MapAnchor {
   role: 'origin' | 'destination' | 'shore';
 }
 
+// A named harbour label: the signed-in user's own harbour (always), the destination of the
+// selected bottle (while selected), or one label for both when they are the same shore.
+export interface HarborLabel {
+  id: string;
+  name: string;
+  geo: GeoPoint;
+  kind: 'own' | 'destination' | 'both';
+}
+
 type MapDebugHost = HTMLDivElement & { __mibMap?: MapLibreMap };
 
 export interface OceanMapHandle {
@@ -63,6 +72,14 @@ interface Props {
   showAnchorLabels?: boolean;
   // Glide the camera to this anchor (e.g. a search result) whenever it changes.
   focusAnchorId?: string | null;
+  // Harbour labels drawn as DOM markers (anchor icon + name). Overlapping labels are stacked.
+  harbors?: HarborLabel[];
+  // Terminal markers whose first appearance inside the visible viewport must be reported (a
+  // sunk bottle's red X). Reported at most once per id per mount, only while the page is
+  // visible and the map is not covered.
+  watchIds?: string[];
+  onSeen?: (id: string) => void;
+  ariaLabel?: string;
   // Time of day for the map palette. Changing it tweens paint properties in place: the camera,
   // sources, routes, markers and any open selection are untouched.
   phase?: MapPhase;
@@ -88,6 +105,7 @@ const CLUSTER_PX = 44;
 const LABEL_ZOOM = 4.5;
 const FOCUS_ZOOM = 5;
 const EMPTY_SELECTION: string[] = [];
+const EMPTY_HARBORS: HarborLabel[] = [];
 const EMPTY_WEATHER: Record<string, BottleWeather> = {};
 const LAND_URL = '/map/land-50m.geojson';
 // Interior country boundaries (Natural Earth admin-0, 1:50m, public domain via world-atlas).
@@ -275,6 +293,10 @@ export function OceanMap({
   selectedAnchorId = null,
   showAnchorLabels = false,
   focusAnchorId = null,
+  harbors = EMPTY_HARBORS,
+  watchIds = EMPTY_SELECTION,
+  onSeen,
+  ariaLabel = 'Private ocean chart',
   phase = 'night',
   weather = EMPTY_WEATHER,
   paused = false,
@@ -288,6 +310,9 @@ export function OceanMap({
   const mapRef = useRef<MapLibreMap | null>(null);
   const markersRef = useRef(new globalThis.Map<string, Marker>());
   const anchorMarkersRef = useRef(new globalThis.Map<string, Marker>());
+  const harborMarkersRef = useRef(new globalThis.Map<string, Marker>());
+  // Ids already reported as seen this mount: the first sighting is the one that counts.
+  const seenRef = useRef(new Set<string>());
   const [loaded, setLoaded] = useState(false);
   const [unsupported] = useState(() => !isWebGLAvailable());
   // The palette in force right now, so an interrupted tween resumes from where it is and the
@@ -297,6 +322,11 @@ export function OceanMap({
   const latest = useRef({
     routes,
     anchors,
+    harbors,
+    watchIds,
+    onSeen,
+    paused,
+    bottomPadding,
     selectedRouteIds,
     selectedAnchorId,
     showAnchorLabels,
@@ -307,6 +337,11 @@ export function OceanMap({
     latest.current = {
       routes,
       anchors,
+      harbors,
+      watchIds,
+      onSeen,
+      paused,
+      bottomPadding,
       selectedRouteIds,
       selectedAnchorId,
       showAnchorLabels,
@@ -323,7 +358,9 @@ export function OceanMap({
     const chosen = rs.filter((r) => sel.includes(r.id));
     const shown = chosen.length > 0 ? chosen : rs;
     const points =
-      shown.length > 0 ? shown.flatMap((r) => unwrapAntimeridian(r.points)) : as.map((a) => a.geo);
+      shown.length > 0
+        ? shown.flatMap((r) => (r.fixed ? [r.fixed] : unwrapAntimeridian(r.points)))
+        : as.map((a) => a.geo);
     const b = boundsOf(points);
     if (!b) return;
     const wide = map.getContainer().clientWidth >= 900;
@@ -444,6 +481,86 @@ export function OceanMap({
     }
   }, [reduced]);
 
+  // Harbour labels: the user's own harbour and the selected destination, as anchor + name.
+  // When two labels would overlap on screen the destination is stacked under the other one;
+  // when both are the same shore the caller passes a single 'both' label.
+  const layoutHarbors = useCallback(() => {
+    const map = mapRef.current;
+    if (!map) return;
+    const { harbors: hs } = latest.current;
+    const keep = new Set<string>();
+    const placed: Array<{ x: number; y: number; w: number; h: number }> = [];
+    const ordered = [...hs].sort(
+      (a, b) => (a.kind === 'destination' ? 1 : 0) - (b.kind === 'destination' ? 1 : 0),
+    );
+    for (const h of ordered) {
+      keep.add(h.id);
+      let m = harborMarkersRef.current.get(h.id);
+      if (!m) {
+        const el = document.createElement('div');
+        el.className = 'map-harbor';
+        el.innerHTML =
+          '<span class="dot"></span><span class="label"><img class="icon" alt="" src="/markers/harbor-anchor.svg"><span class="name"></span></span>';
+        m = new Marker({ element: el, anchor: 'top' }).setLngLat([h.geo.lng, h.geo.lat]).addTo(map);
+        harborMarkersRef.current.set(h.id, m);
+      }
+      const el = m.getElement();
+      el.querySelector('.name')!.textContent = h.name;
+      el.dataset.kind = h.kind;
+      el.setAttribute(
+        'aria-label',
+        h.kind === 'own'
+          ? `Your harbour: ${h.name}`
+          : h.kind === 'destination'
+            ? `Destination harbour: ${h.name}`
+            : `Your harbour and the destination: ${h.name}`,
+      );
+      // Overlap: stack this label below any label already placed over the same pixels.
+      const p = map.project([h.geo.lng, h.geo.lat]);
+      const w = Math.max(80, el.offsetWidth || 120);
+      const hgt = 40;
+      let dy = 0;
+      for (const box of placed) {
+        const overlapsX = Math.abs(p.x - box.x) < (w + box.w) / 2;
+        const overlapsY = Math.abs(p.y + dy - box.y) < (hgt + box.h) / 2;
+        if (overlapsX && overlapsY) dy = box.y + box.h / 2 + hgt / 2 + 4 - p.y;
+      }
+      m.setOffset([0, dy]);
+      el.classList.toggle('stacked', dy !== 0);
+      placed.push({ x: p.x, y: p.y + dy, w, h: hgt });
+    }
+    for (const [id, m] of harborMarkersRef.current) {
+      if (!keep.has(id)) {
+        m.remove();
+        harborMarkersRef.current.delete(id);
+      }
+    }
+  }, []);
+
+  // Report a watched terminal marker the first time it is actually inside the visible part of
+  // the viewport (above the sheet, inside the container) while the page is visible and the map
+  // is not covered by the sea viewer. A marker fetched but off screen is never reported.
+  const reportSeen = useCallback(() => {
+    const map = mapRef.current;
+    if (!map) return;
+    const { watchIds: ids, onSeen: cb, paused: covered, bottomPadding: pad } = latest.current;
+    if (!cb || ids.length === 0 || covered || document.visibilityState !== 'visible') return;
+    const w = map.getContainer().clientWidth;
+    const h = map.getContainer().clientHeight;
+    const wide = w >= 900;
+    const bottomLimit = h - (wide ? 0 : pad);
+    for (const id of ids) {
+      if (seenRef.current.has(id)) continue;
+      const m = markersRef.current.get(id);
+      if (!m) continue;
+      const p = map.project(m.getLngLat());
+      if (p.x >= 0 && p.x <= w && p.y >= 0 && p.y <= bottomLimit) {
+        seenRef.current.add(id);
+        cb(id);
+      }
+    }
+  }, []);
+
   // Create the map once.
   useEffect(() => {
     if (!containerRef.current || unsupported) return;
@@ -529,9 +646,15 @@ export function OceanMap({
         map.on('mouseenter', layer, () => (map.getCanvas().style.cursor = 'pointer'));
         map.on('mouseleave', layer, () => (map.getCanvas().style.cursor = ''));
       }
-      map.on('moveend', () => layoutPins());
+      map.on('moveend', () => {
+        layoutPins();
+        layoutHarbors();
+        reportSeen();
+      });
       setLoaded(true);
     });
+    const onVisible = () => reportSeen();
+    document.addEventListener('visibilitychange', onVisible);
     map.on('error', (e) => {
       // Tile/source hiccups must never surface as page errors; the sea stays drawn.
       if (import.meta.env.DEV) console.debug('map', e.error.message);
@@ -540,16 +663,20 @@ export function OceanMap({
     ro.observe(containerRef.current);
     const markers = markersRef.current;
     const anchorMarkers = anchorMarkersRef.current;
+    const harborMarkers = harborMarkersRef.current;
     return () => {
       ro.disconnect();
+      document.removeEventListener('visibilitychange', onVisible);
       markers.forEach((m) => m.remove());
       anchorMarkers.forEach((m) => m.remove());
+      harborMarkers.forEach((m) => m.remove());
       markers.clear();
       anchorMarkers.clear();
+      harborMarkers.clear();
       map.remove();
       mapRef.current = null;
     };
-  }, [unsupported, layoutPins]);
+  }, [unsupported, layoutPins, layoutHarbors, reportSeen]);
 
   // Routes, anchors and markers follow the data.
   useEffect(() => {
@@ -560,17 +687,24 @@ export function OceanMap({
     const trail: Feature[] = [];
     const seen = new Set<string>();
     for (const r of routes) {
-      if (r.points.length < 2) continue;
+      if (!r.fixed && r.points.length < 2) continue;
       const selected = selectedRouteIds.includes(r.id);
-      const progress = interpolatedProgress(r, now);
-      const pts = unwrapAntimeridian(r.points);
-      const { point, index } = geoAlong(pts, progress);
-      planned.push({ ...lineFeature(r.id, pts), properties: { id: r.id, selected } });
-      if (progress > 0) {
-        trail.push({
-          ...lineFeature(r.id, [...pts.slice(0, index + 1), point]),
-          properties: { id: r.id, selected },
-        });
+      let point: GeoPoint;
+      if (r.fixed) {
+        // An ended journey: a fixed marker, no planned line and no trail.
+        point = r.fixed;
+      } else {
+        const progress = interpolatedProgress(r, now);
+        const pts = unwrapAntimeridian(r.points);
+        const along = geoAlong(pts, progress);
+        point = along.point;
+        planned.push({ ...lineFeature(r.id, pts), properties: { id: r.id, selected } });
+        if (progress > 0) {
+          trail.push({
+            ...lineFeature(r.id, [...pts.slice(0, along.index + 1), point]),
+            properties: { id: r.id, selected },
+          });
+        }
       }
       seen.add(r.id);
       let marker = markersRef.current.get(r.id);
@@ -581,12 +715,12 @@ export function OceanMap({
         const el = document.createElement('button');
         el.type = 'button';
         el.className = 'map-marker';
+        el.dataset.bottleId = r.id;
         el.innerHTML =
           '<img class="glyph" alt="" src="/markers/storm-cloud-glyph.svg">' +
-          '<span class="bottle"><img class="art" alt=""></span>';
-        el.querySelector<HTMLImageElement>('.art')!.src = terminal(r.state)
-          ? '/markers/marker-lost.svg'
-          : '/markers/marker-bottle.svg';
+          '<img class="mark-sunk" alt="" src="/markers/mark-sunk.svg">' +
+          '<span class="bottle"><img class="art" alt="" src="/markers/marker-bottle.svg">' +
+          '<img class="pennant" alt="" src="/markers/pennant-gold.svg"></span>';
         el.addEventListener('click', (ev) => {
           ev.stopPropagation();
           latest.current.onSelectRoute?.(r.id);
@@ -604,10 +738,19 @@ export function OceanMap({
       el.classList.toggle('selected', selected);
       el.classList.toggle('static', !r.live || reduced);
       el.classList.toggle('storm', stormy);
+      el.classList.toggle('sunk', r.mark === 'sunk');
+      el.classList.toggle('adrift', r.mark === 'adrift');
+      el.classList.toggle('mine', r.mark === 'adrift' && r.mine === true);
       el.setAttribute('aria-pressed', String(selected));
       el.setAttribute(
         'aria-label',
-        `Bottle${r.label ? ` to ${r.label}` : ''}, ${stormy ? 'in a storm' : statusWord(r.state)}`,
+        r.mark === 'sunk'
+          ? `Bottle${r.label ? ` to ${r.label}` : ''}, sunk at sea`
+          : r.mark === 'adrift'
+            ? r.mine
+              ? 'Your bottle, adrift in the public ocean'
+              : 'A lost bottle, adrift'
+            : `Bottle${r.label ? ` to ${r.label}` : ''}, ${stormy ? 'in a storm' : statusWord(r.state)}`,
       );
     }
     for (const [id, m] of markersRef.current) {
@@ -636,18 +779,29 @@ export function OceanMap({
     });
 
     layoutPins();
+    layoutHarbors();
+    reportSeen();
   }, [
     routes,
     anchors,
+    harbors,
+    watchIds,
     selectedRouteIds,
     selectedAnchorId,
     showAnchorLabels,
     loaded,
     reduced,
     layoutPins,
+    layoutHarbors,
+    reportSeen,
     weather,
     phase,
   ]);
+
+  // The sea viewer closing uncovers the map: anything now on screen counts as seen.
+  useEffect(() => {
+    if (!paused) reportSeen();
+  }, [paused, reportSeen]);
 
   // Ticker: glide the marker along the polyline between server syncs (position stays server-owned).
   useEffect(() => {
@@ -659,7 +813,7 @@ export function OceanMap({
       const now = Date.now();
       const trail: Feature[] = [];
       for (const r of routes) {
-        if (r.points.length < 2) continue;
+        if (r.fixed || r.points.length < 2) continue;
         const progress = interpolatedProgress(r, now);
         const pts = unwrapAntimeridian(r.points);
         const { point, index } = geoAlong(pts, progress);
@@ -751,7 +905,7 @@ export function OceanMap({
   }, [loaded, fitKey]);
 
   return (
-    <div className="ocean-map" ref={containerRef} role="region" aria-label="Private ocean chart">
+    <div className="ocean-map" ref={containerRef} role="region" aria-label={ariaLabel}>
       {!loaded && !unsupported ? <div className="map-fade" /> : null}
       {unsupported ? (
         <p className="scene-fallback">

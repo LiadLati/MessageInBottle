@@ -1,11 +1,12 @@
-import { useMemo, useRef, useState } from 'react';
-import type { SentBottleSummaryDto } from '@mib/shared';
-import { api } from '../api/client.js';
+import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from 'react';
+import type { OpenedLetterDto, PublicBottleDto, SentBottleSummaryDto } from '@mib/shared';
+import { ApiError, api } from '../api/client.js';
+import { LetterModal } from '../components/LetterModal.js';
 import { OceanMap, SeaViewer } from '../components/lazy.js';
-import type { MapAnchor, MapRoute, OceanMapHandle } from '../components/OceanMap.js';
-import { Avatar, ErrorNote, Skeleton, StatusChip } from '../components/ui.js';
+import type { HarborLabel, MapAnchor, MapRoute, OceanMapHandle } from '../components/OceanMap.js';
+import { Avatar, ErrorNote, OutcomeChip, Skeleton, StatusChip } from '../components/ui.js';
 import { Icon } from '../design/Icon.js';
-import { formatDuration, formatTime } from '../lib/format.js';
+import { formatDate, formatDuration, formatTime } from '../lib/format.js';
 import { useAsync } from '../lib/useAsync.js';
 import { oceanWeatherMap, type BottleWeather } from '../lib/oceanWeather.js';
 import { useSession } from '../state/session.js';
@@ -13,8 +14,19 @@ import { useWeather } from '../state/weather.js';
 
 const POLL_MS = 15_000;
 
+export type OceanMode = 'private' | 'public';
+
 interface Props {
   focusId?: string | null | undefined;
+  // Open straight onto the public ocean with this bottle selected (Letters → Lost → Show on
+  // public map).
+  focusPublicId?: string | null | undefined;
+  // The shell calls this before navigating to another application screen, so the private map
+  // can acknowledge the terminal markers the sender has actually seen on this visit.
+  leaveRef?: RefObject<(() => void) | null>;
+  // Unread notifications, shown on the envelope beside the + control.
+  unread?: number;
+  onOpenInbox?: () => void;
   onOpenPassport: (id: string) => void;
   onWrite: () => void;
   onOpenProfile: () => void;
@@ -28,6 +40,24 @@ type View =
   | { kind: 'bottle'; id: string; fromRoute: string | null };
 
 function toRoute(b: SentBottleSummaryDto): MapRoute | null {
+  if (b.outcome) {
+    // An ended journey (a sunk bottle on the private map): a fixed marker at the persisted
+    // outcome position, no route.
+    if (!b.outcome.position.geo) return null;
+    return {
+      id: b.id,
+      points: [],
+      progress: b.outcome.progress,
+      progressAsOf: Date.parse(b.position.asOf),
+      plannedDurationMs: b.route.plannedDurationMs,
+      live: false,
+      state: b.state,
+      label: b.recipient.displayName,
+      fixed: b.outcome.position.geo,
+      mark: b.outcome.reason === 'sunk' ? 'sunk' : 'adrift',
+      mine: true,
+    };
+  }
   if (!b.route.geoPoints || b.route.geoPoints.length < 2) return null;
   return {
     id: b.id,
@@ -41,39 +71,80 @@ function toRoute(b: SentBottleSummaryDto): MapRoute | null {
   };
 }
 
+function publicRoute(b: PublicBottleDto): MapRoute {
+  return {
+    id: b.id,
+    points: [],
+    progress: 0,
+    progressAsOf: Date.parse(b.lostAt),
+    plannedDurationMs: 0,
+    live: false,
+    state: 'lost',
+    fixed: b.position.geo,
+    mark: 'adrift',
+    mine: b.mine,
+  };
+}
+
 const overrideToForce = (v: 'auto' | 'on' | 'off') => (v === 'auto' ? null : v);
 
 // Bottles share a route when they follow the same sequence of passages.
 const routeKeyOf = (b: SentBottleSummaryDto) => b.route.nodeIds.join('>');
 
-// S1 · Ocean — private journeys over the real world map.
-export function OceanScreen({ focusId = null, onOpenPassport, onWrite, onOpenProfile }: Props) {
+// A bottle belongs on the sender's private map until the recipient opens it, or the sea ends
+// the journey: an adrift bottle moves to the public ocean at once, a sunk one stays at its
+// sinking position until the sender has seen it and left the map (see the visibility rules).
+function onPrivateMap(b: SentBottleSummaryDto): boolean {
+  if (b.state === 'opened') return false;
+  if (b.state !== 'lost') return true;
+  if (b.outcome?.reason !== 'sunk') return false;
+  return b.visibility?.acknowledgedAt == null;
+}
+
+// S1 · Ocean — private journeys over the real world map, and the public ocean beside it.
+export function OceanScreen({
+  focusId = null,
+  focusPublicId = null,
+  leaveRef,
+  unread = 0,
+  onOpenInbox,
+  onOpenPassport,
+  onWrite,
+  onOpenProfile,
+}: Props) {
   const { user } = useSession();
   const { phase, nowMs, oceanStormOverride } = useWeather();
+  const [mode, setMode] = useState<OceanMode>(focusPublicId ? 'public' : 'private');
   const bottles = useAsync(() => api.sentBottles(), [], POLL_MS);
   const chart = useAsync(() => api.chart(), []);
-  const [view, setView] = useState<View>(() =>
-    focusId ? { kind: 'bottle', id: focusId, fromRoute: null } : { kind: 'clean' },
+  const publicOcean = useAsync(
+    () => (mode === 'public' ? api.publicOcean() : Promise.resolve(null)),
+    [mode],
+    POLL_MS,
   );
-  const [fitKey, setFitKey] = useState(focusId ?? 'initial');
+  const [view, setView] = useState<View>(() => {
+    const id = focusPublicId ?? focusId;
+    return id ? { kind: 'bottle', id, fromRoute: null } : { kind: 'clean' };
+  });
+  const [fitKey, setFitKey] = useState(focusPublicId ?? focusId ?? 'initial');
   const mapHandle = useRef<OceanMapHandle>(null);
 
-  // The active map: a journey stays until the recipient opens the letter, then it belongs to
-  // history (Letters → Sent / Received, the passport) and leaves the map.
-  const list = useMemo(
-    () => (bottles.data?.bottles ?? []).filter((b) => b.state !== 'opened'),
-    [bottles.data],
-  );
+  const list = useMemo(() => (bottles.data?.bottles ?? []).filter(onPrivateMap), [bottles.data]);
   const groups = useMemo(() => {
     const map = new Map<string, SentBottleSummaryDto[]>();
     for (const b of list) {
+      if (b.outcome) continue; // an ended journey has no route to share
       const key = routeKeyOf(b);
       map.set(key, [...(map.get(key) ?? []), b]);
     }
     return map;
   }, [list]);
 
+  const isPublic = mode === 'public';
+  const publicList = useMemo(() => publicOcean.data?.bottles ?? [], [publicOcean.data]);
   const current = view.kind === 'bottle' ? (list.find((b) => b.id === view.id) ?? null) : null;
+  const currentPublic =
+    view.kind === 'bottle' ? (publicList.find((b) => b.id === view.id) ?? null) : null;
   const routeBottles = useMemo(
     () => (view.kind === 'route' ? (groups.get(view.routeKey) ?? []) : []),
     [view, groups],
@@ -88,7 +159,13 @@ export function OceanScreen({ focusId = null, onOpenPassport, onWrite, onOpenPro
     [view, routeBottles],
   );
 
-  const routes = useMemo(() => list.map(toRoute).filter((r): r is MapRoute => r !== null), [list]);
+  const privateRoutes = useMemo(
+    () => list.map(toRoute).filter((r): r is MapRoute => r !== null),
+    [list],
+  );
+  const publicRoutes = useMemo(() => publicList.map(publicRoute), [publicList]);
+  const routes = isPublic ? publicRoutes : privateRoutes;
+
   // Per-bottle simulated weather: night only, only for this sender's own at-sea bottles, and a
   // deterministic schedule per bottle id — so two bottles on one route can differ, and nothing
   // rerolls on refresh, selection or opening the sea viewer.
@@ -111,28 +188,160 @@ export function OceanScreen({ focusId = null, onOpenPassport, onWrite, onOpenPro
     [weatherKey],
   );
   const weatherOf = (id: string) => (phase === 'night' ? (weather[id] ?? 'calm') : 'calm');
+  // Reading a letter from the public ocean: the sender re-reading their own (a pure read), or a
+  // finder reading the bottle they have just opened. Both use the ordinary letter reader.
+  const [reading, setReading] = useState<{
+    letter: OpenedLetterDto;
+    justOpened: boolean;
+    // Only the sender's own read needs a line of its own; a found letter carries no attribution
+    // and the reader states that itself.
+    provenance?: string;
+  } | null>(null);
+  // Set when this bottle turned out to be gone — someone else opened it first.
+  const [claimedIds, setClaimedIds] = useState<string[]>([]);
+  const [publicBusy, setPublicBusy] = useState(false);
+  const [publicError, setPublicError] = useState<Error | null>(null);
   // The dedicated sea viewer: opened only from the card's "View at sea", never from a marker.
   const [viewing, setViewing] = useState<string | null>(null);
   const viewingBottle = viewing ? (list.find((b) => b.id === viewing) ?? null) : null;
   const focusBottle = current ?? routeBottles[0] ?? null;
+  const shoreById = useMemo(
+    () => new Map((chart.data?.shores ?? []).map((s) => [s.id, s])),
+    [chart.data],
+  );
   const anchors = useMemo<MapAnchor[]>(() => {
-    if (!focusBottle || !chart.data) return [];
-    const byId = new Map(chart.data.shores.map((s) => [s.id, s]));
-    const o = byId.get(focusBottle.originShore.id);
-    const d = byId.get(focusBottle.destinationShore.id);
+    if (!focusBottle || focusBottle.outcome) return [];
+    const o = shoreById.get(focusBottle.originShore.id);
+    const d = shoreById.get(focusBottle.destinationShore.id);
     const out: MapAnchor[] = [];
     if (o?.geo) out.push({ id: o.id, name: o.name, geo: o.geo, role: 'origin' });
     if (d?.geo) out.push({ id: d.id, name: d.name, geo: d.geo, role: 'destination' });
     return out;
-  }, [focusBottle, chart.data]);
+  }, [focusBottle, shoreById]);
+
+  // Harbour labels: the signed-in user's own harbour always; the selected bottle's destination
+  // while it is selected on the private map. The same shore for both is one label. The public
+  // ocean never names a destination.
+  const ownShoreId = user?.shoreId ?? null;
+  const harbors = useMemo<HarborLabel[]>(() => {
+    const own = ownShoreId ? shoreById.get(ownShoreId) : null;
+    const dest =
+      !isPublic && focusBottle && !focusBottle.outcome
+        ? shoreById.get(focusBottle.destinationShore.id)
+        : null;
+    const out: HarborLabel[] = [];
+    if (own?.geo && dest?.geo && own.id === dest.id) {
+      out.push({ id: own.id, name: own.name, geo: own.geo, kind: 'both' });
+      return out;
+    }
+    if (own?.geo) out.push({ id: own.id, name: own.name, geo: own.geo, kind: 'own' });
+    if (dest?.geo) out.push({ id: dest.id, name: dest.name, geo: dest.geo, kind: 'destination' });
+    return out;
+  }, [ownShoreId, shoreById, focusBottle, isPublic]);
+
+  // ---- terminal-marker visibility (sunk bottles on the private map) ----
+  // "Seen" is reported by the map when the marker is actually inside the visible viewport;
+  // "acknowledged" when the sender leaves the private map afterwards. Both are persisted per
+  // account on the server, so a refresh never erases an unseen marker.
+  const sunkIds = useMemo(
+    () => list.filter((b) => b.outcome?.reason === 'sunk').map((b) => b.id),
+    [list],
+  );
+  const seenNow = useRef(new Set<string>());
+  const reloadBottles = bottles.reload;
+  const onSeen = useCallback((id: string) => {
+    if (seenNow.current.has(id)) return;
+    seenNow.current.add(id);
+    void api.markOutcomeSeen(id).catch(() => seenNow.current.delete(id));
+  }, []);
+  const listRef = useRef(list);
+  useEffect(() => {
+    listRef.current = list;
+  });
+  const acknowledgeSeen = useCallback(() => {
+    for (const b of listRef.current) {
+      if (b.outcome?.reason !== 'sunk' || b.visibility?.acknowledgedAt) continue;
+      if (b.visibility?.seenAt || seenNow.current.has(b.id)) {
+        void api.acknowledgeOutcome(b.id).catch(() => {});
+      }
+    }
+  }, []);
+  useEffect(() => {
+    if (!leaveRef) return;
+    leaveRef.current = acknowledgeSeen;
+    return () => {
+      leaveRef.current = null;
+    };
+  }, [leaveRef, acknowledgeSeen]);
+
+  const reloadPublic = publicOcean.reload;
+  // The sender's own read: never claims the bottle, never takes it off the map.
+  const readOwn = async (id: string) => {
+    setPublicError(null);
+    setPublicBusy(true);
+    try {
+      const letter = await api.ownLetter(id);
+      setReading({
+        letter,
+        justOpened: false,
+        provenance: `Your letter · ${formatDuration(letter.bottle.journeyDurationMs)} at sea`,
+      });
+    } catch (err) {
+      setPublicError(err instanceof Error ? err : new Error(String(err)));
+    } finally {
+      setPublicBusy(false);
+    }
+  };
+  // One server-owned action: it grants this account the letter and removes the bottle from the
+  // public map for everyone. If somebody else was first, the card says so and shows nothing.
+  const openFound = async (id: string) => {
+    setPublicError(null);
+    setPublicBusy(true);
+    try {
+      const letter = await api.openPublicBottle(id);
+      setReading({ letter, justOpened: true });
+      await reloadPublic();
+    } catch (err) {
+      if (err instanceof ApiError && err.code === 'already_opened') {
+        setClaimedIds((ids) => (ids.includes(id) ? ids : [...ids, id]));
+        await reloadPublic();
+      } else {
+        setPublicError(err instanceof Error ? err : new Error(String(err)));
+      }
+    } finally {
+      setPublicBusy(false);
+    }
+  };
 
   const refit = (key: string) => setFitKey(`${key}:${Date.now()}`);
+  const switchMode = (next: OceanMode) => {
+    if (next === mode) return;
+    // Leaving the private map for the public ocean counts as leaving it.
+    if (mode === 'private') {
+      acknowledgeSeen();
+      seenNow.current.clear();
+    } else {
+      void reloadBottles();
+    }
+    setMode(next);
+    setView({ kind: 'clean' });
+    setViewing(null);
+    setPublicError(null);
+    refit(`mode:${next}`);
+  };
   // A tap on a bottle marker or route line: one bottle opens directly, a shared route lists them.
   const selectFromMap = (bottleId: string) => {
+    if (isPublic) {
+      if (publicList.some((b) => b.id === bottleId)) {
+        setView({ kind: 'bottle', id: bottleId, fromRoute: null });
+        refit(bottleId);
+      }
+      return;
+    }
     const b = list.find((x) => x.id === bottleId);
     if (!b) return;
     const key = routeKeyOf(b);
-    const group = groups.get(key) ?? [b];
+    const group = b.outcome ? [b] : (groups.get(key) ?? [b]);
     if (group.length === 1) setView({ kind: 'bottle', id: b.id, fromRoute: null });
     else setView({ kind: 'route', routeKey: key });
     refit(key);
@@ -144,20 +353,31 @@ export function OceanScreen({ focusId = null, onOpenPassport, onWrite, onOpenPro
 
   const synced = list[0]?.serverTime ?? null;
   const atSeaCount = list.filter((b) => b.state === 'at_sea').length;
-  const subline =
-    bottles.loading && !bottles.data
+  const subline = isPublic
+    ? publicOcean.loading && !publicOcean.data
+      ? 'Charting…'
+      : publicList.length === 0
+        ? 'Nothing adrift right now'
+        : `${publicList.length} ${publicList.length === 1 ? 'bottle' : 'bottles'} adrift · tap one`
+    : bottles.loading && !bottles.data
       ? 'Charting…'
       : list.length === 0
         ? 'Nothing at sea'
         : `${synced ? `Synced ${formatTime(synced)} · ` : ''}${list.length === 1 ? 'tap the bottle' : 'tap a bottle or route'}`;
 
+  const loadError = isPublic ? publicOcean.error : (bottles.error ?? chart.error);
+
   return (
-    <div className="world-screen two-pane">
+    <div className="world-screen two-pane" data-mode={mode}>
       <div className="world-layer">
         <OceanMap
           handle={mapHandle}
           routes={routes}
-          anchors={anchors}
+          anchors={isPublic ? [] : anchors}
+          harbors={harbors}
+          watchIds={isPublic ? [] : sunkIds}
+          onSeen={onSeen}
+          ariaLabel={isPublic ? 'Public ocean chart' : 'Private ocean chart'}
           selectedRouteIds={selectedRouteIds}
           onSelectRoute={selectFromMap}
           phase={phase}
@@ -170,7 +390,9 @@ export function OceanScreen({ focusId = null, onOpenPassport, onWrite, onOpenPro
       <div className="scrim-map-header" />
       <header className="world-header">
         <div>
-          <h1 className="t-title">{atSeaCount > 0 ? 'At sea' : 'Ocean'}</h1>
+          <h1 className="t-title">
+            {isPublic ? 'Public ocean' : atSeaCount > 0 ? 'At sea' : 'Ocean'}
+          </h1>
           <p className="t-meta">{subline}</p>
         </div>
         <div className="header-actions">
@@ -182,6 +404,21 @@ export function OceanScreen({ focusId = null, onOpenPassport, onWrite, onOpenPro
           >
             <Icon name="plus" size={18} />
           </button>
+          {onOpenInbox ? (
+            <button
+              type="button"
+              className="glass-control inbox-control"
+              aria-label={unread > 0 ? `Notifications, ${unread} unread` : 'Notifications'}
+              onClick={onOpenInbox}
+            >
+              <Icon name="inbox" size={18} />
+              {unread > 0 ? (
+                <span className="inbox-count" aria-hidden>
+                  {unread > 9 ? '9+' : unread}
+                </span>
+              ) : null}
+            </button>
+          ) : null}
           <button
             type="button"
             className="avatar"
@@ -192,15 +429,23 @@ export function OceanScreen({ focusId = null, onOpenPassport, onWrite, onOpenPro
           </button>
         </div>
       </header>
+      {/* Private / Public: the same map component over two data modes. Navigation stays put. */}
       <div className="mode-switch" role="group" aria-label="Map mode">
-        <span className="active">Private</span>
         <button
           type="button"
-          className="inactive"
-          disabled
-          title="Public discovery arrives in the next stage"
+          className={mode === 'private' ? 'mode-option active' : 'mode-option'}
+          aria-pressed={mode === 'private'}
+          onClick={() => switchMode('private')}
         >
-          Lost bottles
+          Private
+        </button>
+        <button
+          type="button"
+          className={mode === 'public' ? 'mode-option active' : 'mode-option'}
+          aria-pressed={mode === 'public'}
+          onClick={() => switchMode('public')}
+        >
+          Public
         </button>
       </div>
       <div className="zoom-cluster">
@@ -230,12 +475,47 @@ export function OceanScreen({ focusId = null, onOpenPassport, onWrite, onOpenPro
         </button>
       </div>
 
-      {view.kind === 'clean' && list.length > 0 && !viewing ? (
+      {view.kind === 'clean' && (isPublic ? publicList.length : list.length) > 0 && !viewing ? (
         <p className="hint-pill" aria-hidden>
-          Tap a bottle to follow its journey
+          {isPublic ? 'Tap a bottle adrift' : 'Tap a bottle to follow its journey'}
         </p>
       ) : null}
-      {bottles.loading && !bottles.data ? (
+      {isPublic ? (
+        publicOcean.loading && !publicOcean.data ? (
+          <section className="sheet" aria-label="Public ocean">
+            <Skeleton />
+          </section>
+        ) : publicOcean.error ? (
+          <section className="sheet" aria-label="Public ocean">
+            <ErrorNote error={publicOcean.error} />
+          </section>
+        ) : publicList.length === 0 ? (
+          <section className="sheet" aria-label="Public ocean">
+            <div className="stack">
+              <h2 className="t-display-sm">Nothing adrift</h2>
+              <p className="t-meta" style={{ fontSize: 13.5 }}>
+                Bottles swept off course in a storm drift here, for anyone to see.
+              </p>
+            </div>
+          </section>
+        ) : view.kind === 'bottle' && (currentPublic || claimedIds.includes(view.id)) ? (
+          <section className="sheet" aria-label="Adrift bottle">
+            {currentPublic ? (
+              <PublicCard
+                bottle={currentPublic}
+                busy={publicBusy}
+                error={publicError}
+                onClose={close}
+                onPassport={currentPublic.mine ? () => onOpenPassport(currentPublic.id) : null}
+                onRead={currentPublic.mine ? () => void readOwn(currentPublic.id) : null}
+                onOpen={currentPublic.mine ? null : () => void openFound(currentPublic.id)}
+              />
+            ) : (
+              <UnavailableCard onClose={close} />
+            )}
+          </section>
+        ) : null
+      ) : bottles.loading && !bottles.data ? (
         <section className="sheet" aria-label="Journey">
           <Skeleton />
         </section>
@@ -249,7 +529,7 @@ export function OceanScreen({ focusId = null, onOpenPassport, onWrite, onOpenPro
             <button type="button" className="btn-primary" onClick={onWrite}>
               Write a letter
             </button>
-            <ErrorNote error={bottles.error ?? chart.error} />
+            <ErrorNote error={loadError} />
           </div>
         </section>
       ) : view.kind === 'route' ? (
@@ -288,7 +568,7 @@ export function OceanScreen({ focusId = null, onOpenPassport, onWrite, onOpenPro
               </li>
             ))}
           </ul>
-          <ErrorNote error={bottles.error ?? chart.error} />
+          <ErrorNote error={loadError} />
         </section>
       ) : view.kind === 'bottle' && current ? (
         <section className="sheet" aria-label="Journey">
@@ -302,12 +582,20 @@ export function OceanScreen({ focusId = null, onOpenPassport, onWrite, onOpenPro
             onClose={close}
             onPassport={() => onOpenPassport(current.id)}
           />
-          <ErrorNote error={bottles.error ?? chart.error} />
+          <ErrorNote error={loadError} />
         </section>
-      ) : bottles.error || chart.error ? (
+      ) : loadError ? (
         <section className="sheet" aria-label="Journey">
-          <ErrorNote error={bottles.error ?? chart.error} />
+          <ErrorNote error={loadError} />
         </section>
+      ) : null}
+      {reading ? (
+        <LetterModal
+          letter={reading.letter}
+          justOpened={reading.justOpened}
+          provenance={reading.provenance}
+          onClose={() => setReading(null)}
+        />
       ) : null}
       {viewing ? (
         <SeaViewer
@@ -353,6 +641,7 @@ function JourneyCard({
   const passages = Math.max(1, bottle.route.nodeIds.length - 1);
   const pct = Math.round(bottle.position.progress * 100);
   const live = bottle.state === 'at_sea';
+  const outcome = bottle.outcome;
   return (
     <div>
       <div className="row">
@@ -380,7 +669,13 @@ function JourneyCard({
         </button>
       </div>
       <div className="row" style={{ marginTop: 16 }}>
-        {storm ? <StormChip /> : <StatusChip state={bottle.state} />}
+        {outcome ? (
+          <OutcomeChip reason={outcome.reason} />
+        ) : storm ? (
+          <StormChip />
+        ) : (
+          <StatusChip state={bottle.state} />
+        )}
         <div
           className="progress-rail"
           role="progressbar"
@@ -400,14 +695,25 @@ function JourneyCard({
           <div className="t-eyebrow">{live ? 'At sea for' : 'Journey took'}</div>
           <div className="t-stat">{formatDuration(bottle.elapsedMs)}</div>
         </div>
-        <div className="stat">
-          <div className="t-eyebrow">Water</div>
-          <div className="t-stat" style={storm ? { color: '#f0ddae' } : undefined}>
-            {live ? (storm ? 'Rough' : 'Calm') : '—'}
+        {outcome ? (
+          <div className="stat">
+            <div className="t-eyebrow">{outcome.reason === 'sunk' ? 'Sank' : 'Lost'}</div>
+            <div className="t-stat t-stat-date">{formatDate(outcome.at)}</div>
           </div>
-        </div>
+        ) : (
+          <div className="stat">
+            <div className="t-eyebrow">Water</div>
+            <div className="t-stat" style={storm ? { color: '#f0ddae' } : undefined}>
+              {live ? (storm ? 'Rough' : 'Calm') : '—'}
+            </div>
+          </div>
+        )}
       </div>
-      {storm ? (
+      {outcome?.reason === 'sunk' ? (
+        <p className="card-note">
+          It went down here, in a storm. The letter stays in your passport.
+        </p>
+      ) : storm ? (
         <p className="card-note">This bottle is in weather. Your other bottles are unaffected.</p>
       ) : null}
       {/* The action row (handoff v2.0): the sea viewer is reached only from here, never from a
@@ -429,6 +735,106 @@ function JourneyCard({
           Passport
         </button>
       </div>
+    </div>
+  );
+}
+
+// The public ocean card: the strict public projection only. A sender recognises their own
+// bottle by the pennant and the "Your bottle" title; nobody is told whose the others are.
+function PublicCard({
+  bottle,
+  busy,
+  error,
+  onClose,
+  onPassport,
+  onRead,
+  onOpen,
+}: {
+  bottle: PublicBottleDto;
+  busy: boolean;
+  error: Error | null;
+  onClose: () => void;
+  onPassport: (() => void) | null;
+  onRead: (() => void) | null;
+  onOpen: (() => void) | null;
+}) {
+  return (
+    <div>
+      <div className="row">
+        <span className={`avatar glass${bottle.mine ? ' pennant-avatar' : ''}`} aria-hidden>
+          {bottle.mine ? '⚑' : '◦'}
+        </span>
+        <div className="grow" style={{ minWidth: 0 }}>
+          <div className="t-card-title">{bottle.mine ? 'Your bottle' : 'A lost bottle'}</div>
+          <div className="t-meta">Adrift since {formatDate(bottle.lostAt)}</div>
+        </div>
+        <button type="button" className="glass-control" aria-label="Close" onClick={onClose}>
+          <Icon name="close" size={16} />
+        </button>
+      </div>
+      <div className="row" style={{ marginTop: 16 }}>
+        <OutcomeChip reason="adrift" />
+      </div>
+      <p className="card-note">
+        {bottle.mine
+          ? 'Swept off course in a storm. Its delivery is over; it drifts here for anyone to see.'
+          : 'Swept off course in a storm. It drifts here, sealed.'}
+      </p>
+      {onOpen ? (
+        // Said plainly before the action, because it cannot be undone and it is the one thing
+        // that changes for everybody else looking at this map.
+        <p className="card-note warn">Opening this bottle will remove it from the public map.</p>
+      ) : null}
+      <div className="action-row" style={{ marginTop: 14 }}>
+        {onOpen ? (
+          <button type="button" className="btn-primary" disabled={busy} onClick={onOpen}>
+            <Icon name="letters" size={16} />
+            {busy ? 'Opening…' : 'Open bottle'}
+          </button>
+        ) : null}
+        {onRead ? (
+          <button type="button" className="btn-primary" disabled={busy} onClick={onRead}>
+            <Icon name="letters" size={16} />
+            {busy ? 'Opening…' : 'Read your letter'}
+          </button>
+        ) : null}
+        {onPassport ? (
+          <button type="button" className="btn-ghost" onClick={onPassport}>
+            <Icon name="passport" size={14} />
+            Passport
+          </button>
+        ) : null}
+      </div>
+      {onRead ? (
+        <p className="t-meta" style={{ marginTop: 10 }}>
+          Reading your own letter changes nothing: the bottle stays adrift on the map.
+        </p>
+      ) : null}
+      <ErrorNote error={error} />
+    </div>
+  );
+}
+
+// Somebody else opened this bottle first. It is gone from the map, and nothing about it —
+// least of all a word of the letter — is shown here.
+function UnavailableCard({ onClose }: { onClose: () => void }) {
+  return (
+    <div>
+      <div className="row">
+        <span className="avatar glass" aria-hidden>
+          ◦
+        </span>
+        <div className="grow" style={{ minWidth: 0 }}>
+          <div className="t-card-title">No longer adrift</div>
+          <div className="t-meta">Another traveller opened this bottle first</div>
+        </div>
+        <button type="button" className="glass-control" aria-label="Close" onClick={onClose}>
+          <Icon name="close" size={16} />
+        </button>
+      </div>
+      <p className="card-note">
+        Its letter belongs to whoever found it. The public ocean has other bottles.
+      </p>
     </div>
   );
 }

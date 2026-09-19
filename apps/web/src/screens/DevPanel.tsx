@@ -86,6 +86,32 @@ function DevPanelInner({ onChanged, refreshKey }: { onChanged: () => void; refre
               ))}
             </div>
           ) : null}
+          {atSea.length > 0 ? (
+            // Journey outcomes (spec §9): the risk policy is not approved, so nothing happens on
+            // its own. These end a journey through the same server-owned path a hazard engine
+            // would use — persisted once, never rerolled.
+            <div className="row">
+              <span className="t-meta">Outcome preview · server-owned, never automatic</span>
+              {atSea.map((b) => (
+                <span key={b.id} className="row" style={{ gap: 4 }}>
+                  <button
+                    type="button"
+                    className="chip"
+                    onClick={() => void run(() => api.devLose(b.id, 'adrift'))}
+                  >
+                    Adrift: {b.recipient.displayName}
+                  </button>
+                  <button
+                    type="button"
+                    className="chip"
+                    onClick={() => void run(() => api.devLose(b.id, 'sunk'))}
+                  >
+                    Sink: {b.recipient.displayName}
+                  </button>
+                </span>
+              ))}
+            </div>
+          ) : null}
           <WeatherPreview />
           {outbox.data && outbox.data.provider !== 'smtp' ? (
             <div className="row outbox">

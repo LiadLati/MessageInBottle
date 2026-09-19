@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { BOTTLE_STATES, JOURNEY_EVENT_TYPES } from './bottle-state.js';
+import { BOTTLE_STATES, JOURNEY_EVENT_TYPES, LOSS_REASONS } from './bottle-state.js';
 import { LETTER_FONTS } from './fonts.js';
 import { LETTER_MAX_BYTES, LETTER_MAX_CHARACTERS, countLetterCharacters } from './letter.js';
 
@@ -179,6 +179,27 @@ export const BottlePositionSchema = z.object({
   asOf: z.string(),
 });
 
+export const LossReasonSchema = z.enum(LOSS_REASONS);
+
+// A committed journey outcome (spec §9, §11): where and when the sea ended the delivery. Written
+// once by the server; never derived on a client and never rerolled.
+export const OutcomeSchema = z.object({
+  reason: LossReasonSchema,
+  at: z.string(),
+  position: z.object({ point: ChartPointSchema, geo: GeoPointSchema.nullable() }),
+  progress: z.number().min(0).max(1),
+});
+export type OutcomeDto = z.infer<typeof OutcomeSchema>;
+
+// Per-account visibility of a terminal marker on the private map: `seenAt` once the marker has
+// actually been inside the sender's viewport, `acknowledgedAt` once they left the map after
+// seeing it. Both are server-persisted so a refresh never erases an unseen marker.
+export const OutcomeVisibilitySchema = z.object({
+  seenAt: z.string().nullable(),
+  acknowledgedAt: z.string().nullable(),
+});
+export type OutcomeVisibilityDto = z.infer<typeof OutcomeVisibilitySchema>;
+
 export const SentBottleSchema = z.object({
   id: IdSchema,
   state: BottleStateSchema,
@@ -194,6 +215,9 @@ export const SentBottleSchema = z.object({
   plannedArrivalAt: z.string(),
   route: RouteViewSchema,
   position: BottlePositionSchema,
+  // Null until the sea ends the journey; then the persisted loss/sinking record.
+  outcome: OutcomeSchema.nullable(),
+  visibility: OutcomeVisibilitySchema.nullable(),
   letter: z.object({ text: z.string(), font: LetterFontSchema, characters: z.number().int() }),
   events: z.array(JourneyEventSchema),
   serverTime: z.string(),
@@ -226,21 +250,83 @@ export const ShoreResponseSchema = z.object({
 });
 export type ShoreResponse = z.infer<typeof ShoreResponseSchema>;
 
+// A letter in the reader's own archive (Letters → Received). Two ways in: it arrived on their
+// shore and they opened it (`shore`), or they found it adrift in the public ocean and opened it
+// there (`public`). A found bottle deliberately carries **no sender and no origin shore**: the
+// public ocean never attributes a letter, and sender attribution in public discovery is still an
+// open decision (spec D03). Nothing else about the journey is exposed either.
+export const ReceivedLetterSchema = z.object({
+  id: IdSchema,
+  source: z.enum(['shore', 'public']),
+  state: z.enum(['delivered', 'opened', 'lost']),
+  sender: z.object({ id: IdSchema, displayName: z.string() }).nullable(),
+  originShore: z.object({ id: IdSchema, name: z.string() }).nullable(),
+  releasedAt: z.string(),
+  // Null for a bottle found adrift: it never reached a shore.
+  deliveredAt: z.string().nullable(),
+  openedAt: z.string().nullable(),
+  journeyDurationMs: z.number().int(),
+});
+export type ReceivedLetterDto = z.infer<typeof ReceivedLetterSchema>;
+
 // Letters the user has opened, newest first (Letters → Received).
-export const ReceivedLettersResponseSchema = z.object({ letters: z.array(ShoreBottleSchema) });
+export const ReceivedLettersResponseSchema = z.object({ letters: z.array(ReceivedLetterSchema) });
 export type ReceivedLettersResponse = z.infer<typeof ReceivedLettersResponseSchema>;
 
 export const OpenedLetterSchema = z.object({
-  bottle: ShoreBottleSchema,
+  bottle: ReceivedLetterSchema,
   letter: z.object({ text: z.string(), font: LetterFontSchema, characters: z.number().int() }),
   aging: AgingProfileSchema,
 });
 export type OpenedLetterDto = z.infer<typeof OpenedLetterSchema>;
 
+// ---------- public ocean ----------
+// The public projection of a bottle adrift (spec §10.3: "deliberately more limited than the
+// private passport"). Exactly these fields and nothing else: no letter, no sender name, no
+// recipient, no destination, no route — only that a bottle is drifting here since this moment.
+// `mine` is computed per caller on the server so a sender can recognise their own bottle.
+export const PublicBottleSchema = z
+  .object({
+    id: IdSchema,
+    reason: z.literal('adrift'),
+    lostAt: z.string(),
+    position: z.object({ geo: GeoPointSchema }),
+    mine: z.boolean(),
+  })
+  .strict();
+export type PublicBottleDto = z.infer<typeof PublicBottleSchema>;
+
+export const PublicOceanResponseSchema = z.object({
+  bottles: z.array(PublicBottleSchema),
+  serverTime: z.string(),
+});
+export type PublicOceanResponse = z.infer<typeof PublicOceanResponseSchema>;
+
+// Opening a bottle found adrift: one server-owned action that grants the finder access to the
+// letter and takes the bottle off the public map for everyone. The response is the ordinary
+// opened-letter payload, so the finder reads it in the same reader as any other letter.
+export const PublicOpenResponseSchema = OpenedLetterSchema;
+export type PublicOpenResponse = z.infer<typeof PublicOpenResponseSchema>;
+
 // ---------- notifications ----------
+// What an inbox row is about. The four approved events plus the two older sender events that
+// already exist in history (a cancelled delivery, a drifting bottle someone opened).
+export const NOTIFICATION_KINDS = [
+  'received_arrived',
+  'sent_arrived',
+  'sent_adrift',
+  'sent_sunk',
+  'sent_found',
+  'sent_cancelled',
+  'other',
+] as const;
+export const NotificationKindSchema = z.enum(NOTIFICATION_KINDS);
+export type NotificationKind = z.infer<typeof NotificationKindSchema>;
+
 export const NotificationSchema = z.object({
   id: IdSchema,
   type: z.enum(['bottle_arrived', 'journey_event']),
+  kind: NotificationKindSchema,
   bottleId: IdSchema.nullable(),
   message: z.string(),
   createdAt: z.string(),
@@ -257,6 +343,12 @@ export const DevAdvanceRequestSchema = z.object({
     .max(1000 * 60 * 60 * 24 * 365),
 });
 export const DevArriveRequestSchema = z.object({ bottleId: IdSchema });
+// Development-only outcome control: ends one of the caller's own at-sea journeys now, through the
+// same server path an automatic hazard engine would use once its policy values are approved.
+export const DevLoseRequestSchema = z.object({
+  bottleId: IdSchema,
+  reason: z.enum(['adrift', 'sunk']),
+});
 export const DevStatusSchema = z.object({
   devMode: z.boolean(),
   serverTime: z.string(),

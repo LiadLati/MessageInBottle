@@ -1269,31 +1269,26 @@ button.avatar {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 6px 4px 6px 12px;
+  padding: 4px;
   border-radius: 999px;
   background: var(--glass-control-bg);
   backdrop-filter: blur(var(--glass-control-blur));
   -webkit-backdrop-filter: blur(var(--glass-control-blur));
   border: var(--glass-control-border);
 }
-.mode-switch .active {
-  font-size: 10.5px;
-  font-weight: 600;
-  letter-spacing: 1.4px;
-  color: #bfe0d8;
-  text-transform: uppercase;
-}
-.mode-switch .inactive {
+.mode-switch .mode-option {
   padding: 5px 11px;
   border-radius: 999px;
-  background: rgba(215, 231, 228, 0.1);
   font-size: 11px;
-  font-weight: 500;
+  font-weight: 600;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
   color: rgba(222, 234, 233, 0.7);
   min-height: 28px;
 }
-.mode-switch .inactive:disabled {
-  color: rgba(222, 234, 233, 0.45);
+.mode-switch .mode-option.active {
+  background: rgba(143, 211, 204, 0.18);
+  color: #bfe0d8;
 }
 .zoom-cluster {
   position: absolute;
@@ -1721,6 +1716,10 @@ button.avatar {
     padding: calc(var(--header-pad-top) + 20px) 24px 24px;
     animation: none;
     box-shadow: none;
+  }
+  /* The cosmetic weather note belongs to the scene, never over the side pane's controls. */
+  .world-screen.two-pane .weather-advisory.shore {
+    right: calc(var(--pane-width) + 24px);
   }
   .world-screen.two-pane .sheet.preview {
     padding: 0;
@@ -2299,4 +2298,208 @@ button.avatar {
   .sea-card {
     animation-name: sea-chrome-in;
   }
+}
+
+/* ---------- journey outcomes: markers, harbour labels, chips, Lost list ---------- */
+/* A sunk bottle: the bottle icon stays, a red X sits above it in the glyph slot. Adrift on the
+   public ocean: the sender's own bottle carries a small golden pennant beside it. Nothing here
+   draws a circle, ring or halo around a bottle. */
+/* The red X rides just above the bottle's shoulder: small enough not to compete with it, close
+   enough to read as one marker, and a different shape from the storm glyph at a glance. */
+.map-marker .mark-sunk {
+  display: none;
+  width: 14px;
+  height: 14px;
+  margin-bottom: -3px;
+}
+.map-marker.sunk .mark-sunk {
+  display: block;
+}
+.map-marker.sunk .glyph {
+  display: none;
+}
+.map-marker.sunk .art {
+  opacity: 0.78;
+  filter: saturate(0.6);
+}
+.map-marker .bottle {
+  position: relative;
+}
+.map-marker .pennant {
+  display: none;
+  position: absolute;
+  right: -9px;
+  top: -4px;
+  width: 14px;
+  height: 20px;
+  animation: pennant-flutter 2.6s ease-in-out infinite;
+  transform-origin: 3px 20px;
+}
+.map-marker.mine .pennant {
+  display: block;
+}
+@keyframes pennant-flutter {
+  0%,
+  100% {
+    transform: rotate(-4deg);
+  }
+  50% {
+    transform: rotate(5deg);
+  }
+}
+/* Harbour labels reuse the onboarding pin styling: anchor dot plus a named pill. */
+.map-harbor {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  pointer-events: none;
+  filter: var(--shadow-marker);
+}
+.map-harbor .dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--map-anchor);
+  border: 1.6px solid var(--ink-deep);
+  box-shadow: 0 0 0 6px rgba(143, 211, 204, 0.14);
+}
+.map-harbor .label {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 9px 3px 7px;
+  border-radius: 999px;
+  background: rgba(6, 20, 30, 0.72);
+  border: 1px solid rgba(215, 231, 228, 0.22);
+  color: var(--foam-white);
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.4px;
+  white-space: nowrap;
+}
+.map-harbor .icon {
+  width: 12px;
+  height: 12px;
+  display: block;
+}
+.map-harbor[data-kind='destination'] .label {
+  border-color: rgba(143, 211, 204, 0.6);
+  color: #bfe0d8;
+}
+.map-harbor[data-kind='destination'] .dot {
+  box-shadow: 0 0 0 3px rgba(143, 211, 204, 0.6);
+}
+.map-harbor[data-kind='both'] .label::after {
+  content: ' · destination';
+  font-weight: 500;
+  color: #bfe0d8;
+}
+.map-harbor.stacked .dot {
+  visibility: hidden;
+}
+.status-outcome-sunk {
+  color: var(--status-lost);
+  background: rgba(193, 85, 61, 0.16);
+  border-color: rgba(193, 85, 61, 0.5);
+}
+.status-outcome-adrift,
+.status-outcome-destroyed {
+  color: #f0ddae;
+  background: rgba(199, 162, 74, 0.18);
+  border-color: rgba(199, 162, 74, 0.6);
+}
+.avatar.pennant-avatar {
+  color: #e4b94e;
+}
+.t-stat-date {
+  font-size: 13px;
+  line-height: 1.35;
+}
+.card-note.warn {
+  color: rgba(240, 221, 174, 0.92);
+}
+.lost-row {
+  align-items: flex-start;
+}
+.lost-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+}
+.btn-ghost.small {
+  min-height: 32px;
+  padding: 0 12px;
+  font-size: 12.5px;
+}
+@media (prefers-reduced-motion: reduce) {
+  .map-marker .pennant {
+    animation: none;
+  }
+}
+
+/* ---------- notifications inbox ---------- */
+.inbox-control {
+  position: relative;
+}
+.inbox-count {
+  position: absolute;
+  top: -5px;
+  right: -5px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 999px;
+  background: var(--status-lost-core);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 16px;
+  text-align: center;
+}
+.inbox-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.inbox-row {
+  align-items: flex-start;
+  cursor: default;
+}
+.inbox-row.unread {
+  border-color: rgba(143, 211, 204, 0.35);
+}
+.inbox-text {
+  display: block;
+  font-size: 14px;
+  line-height: 1.45;
+  color: var(--foam-white);
+}
+.inbox-icon {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 12px;
+  background: rgba(9, 26, 39, 0.7);
+  border: 1px solid rgba(215, 231, 228, 0.16);
+}
+.inbox-icon.tone-gold {
+  color: #e4b94e;
+}
+.inbox-icon.tone-red {
+  color: #e04b32;
+}
+.inbox-icon.tone-green {
+  color: var(--status-arrived);
+}
+.inbox-icon.tone-foam {
+  color: var(--foam);
+}
+.inbox-icon.tone-muted {
+  color: var(--text-secondary);
 }

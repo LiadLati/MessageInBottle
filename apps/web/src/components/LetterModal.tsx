@@ -9,6 +9,9 @@ import { LetterPaper } from './LetterPaper.js';
 interface Props {
   letter: OpenedLetterDto;
   justOpened: boolean;
+  // Overrides the provenance line. Used for a letter that carries no attribution — one found
+  // adrift, or the sender re-reading their own.
+  provenance?: string | undefined;
   onClose: () => void;
 }
 
@@ -20,7 +23,7 @@ const CLOSE_MS_REDUCED = 120;
 // app is `inert`, focus is trapped and restored, Escape closes, the page behind cannot scroll.
 // Exactly two controls (Back to shore, Readable Print); text is selectable, dir="auto", and the
 // stored words are rendered verbatim (storyboard §D).
-export function LetterModal({ letter, justOpened, onClose }: Props) {
+export function LetterModal({ letter, justOpened, provenance, onClose }: Props) {
   const [readable, setReadable] = useState(false);
   const [closing, setClosing] = useState(false);
   const dialogRef = useRef<HTMLDivElement>(null);
@@ -88,7 +91,10 @@ export function LetterModal({ letter, justOpened, onClose }: Props) {
             Back to shore
           </button>
           <span id={titleId} className="grow provenance">
-            From {b.sender.displayName} · {formatDuration(b.journeyDurationMs)} at sea
+            {provenance ??
+              `${b.sender ? `From ${b.sender.displayName}` : 'Found adrift'} · ${formatDuration(
+                b.journeyDurationMs,
+              )} at sea`}
           </span>
           <button
             type="button"
@@ -111,8 +117,12 @@ export function LetterModal({ letter, justOpened, onClose }: Props) {
           />
         </div>
         <p className="letter-modal-foot letter-chrome">
-          {justOpened ? 'Opening ended its journey. ' : ''}Fonts and aging change the look only,
-          never the words.
+          {justOpened && b.source === 'public'
+            ? 'This bottle has left the public map. '
+            : justOpened
+              ? 'Opening ended its journey. '
+              : ''}
+          Fonts and aging change the look only, never the words.
         </p>
       </div>
     </div>,

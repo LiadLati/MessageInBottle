@@ -142,6 +142,53 @@ In a development build the dev bar carries **Sky**, **Ocean storm** and **Shore 
 switches. They change only what is drawn — no request is made and no bottle is touched. The sea
 view follows the same switches, so calm/storm and day/night can be previewed there too.
 
+### Notifications
+
+The envelope beside the `+` control in the Ocean header counts unread notifications and opens a
+full-screen inbox (newest first, each row an icon, one sentence and its time; rows do nothing
+when tapped). Four events are recorded, one row per account per bottle, never duplicated by
+worker retries: a bottle you sent reached its destination, was lost at sea and drifted into the
+public ocean, or sank at sea; and a new bottle arrived at your shore. Opening the inbox marks
+everything read, and that is remembered across reloads and sessions. Reading a notice about a
+sunk bottle does not count as seeing its marker on the map.
+
+The badge on **My Shore** means only that a bottle is waiting there for you to open; it clears
+when you open it, not when you read the inbox, and nothing you sent can light it.
+
+### Lost bottles and the public ocean
+
+The Ocean has a compact **Private / Public** switch. Private is your own journeys; Public shows
+every bottle that is *adrift* — swept off course in a storm — at the position where the sea ended
+its delivery. Your own adrift bottle carries a small golden pennant that only you can see; its
+card says **Your bottle · Adrift in the public ocean**. Nobody is told whose the others are: the
+public API returns only `id`, `reason`, `lostAt`, `position` and `mine` — never the letter, the
+sender, the intended recipient, the destination or the route.
+
+Tapping somebody else's adrift bottle opens its public card, which says plainly that **opening
+this bottle will remove it from the public map** before you act. **Open bottle** is one
+server-owned action: it gives you the letter, takes the bottle off the map for everyone, and
+keeps it in your **Letters → Received** as *Found adrift* — with no sender, no origin shore and
+no destination, because the public ocean attributes nothing. If someone opened it first you are
+told it is no longer adrift and shown nothing of it. The sender has their own **Read your
+letter** action on their own bottle: a pure read, as often as they like, that never claims it or
+takes it off the map. Nobody can rescue, re-release or re-send a found bottle in this version.
+
+A **sunk** bottle stays on your private map at its sinking position with a red X above it and no
+route. It remains there until you have actually seen it (the marker was inside your viewport
+while the page was active — no tap needed) *and* then left the map for another screen; after
+that it is hidden from later visits, on every device, and a refresh never hides an unseen one.
+Both outcomes stay under **Letters → Lost** with the outcome time, the intended recipient and the
+Passport; an adrift entry offers **Show on public map**.
+
+The map always names your own harbour with an anchor label, and the destination harbour of the
+bottle you have selected.
+
+Outcomes are server-owned and written once: retrying, refreshing, viewing a bottle or opening the
+sea viewer can never move or reroll them, and a journey cannot both arrive and be lost. **Nothing
+loses a bottle on its own yet**: the risk policy (spec D08) is not approved, so in development the
+dev bar offers *Adrift* / *Sink* controls per at-sea bottle (`POST /api/dev/lose`), and
+production has no automatic outcomes.
+
 ### Geographic datasets and the sea-route graph
 
 All geography is bundled and generated offline; nothing is fetched at runtime.
@@ -209,6 +256,12 @@ instead of blaming the request. Check, in order:
 
 ## API overview
 
+Outcome-related endpoints (all require a session): `GET /api/ocean/public`,
+`POST /api/ocean/public/:id/open` (the finder's single atomic action),
+`GET /api/bottles/sent/:id/letter` (the sender's own read),
+`POST /api/bottles/sent/:id/seen`, `POST /api/bottles/sent/:id/acknowledge`, and in development
+`POST /api/dev/lose { bottleId, reason: 'adrift' | 'sunk' }`.
+
 All routes are under `/api`, JSON, bearer-token authenticated except sign-in.
 
 | Method | Path                          | Purpose                                                       |
@@ -233,7 +286,7 @@ All routes are under `/api`, JSON, bearer-token authenticated except sign-in.
 | GET    | `/shore`                      | Recipient's shore: delivered/opened bottles only              |
 | POST   | `/shore/bottles/:id/open`     | Open a delivered bottle (completes the journey)               |
 | GET    | `/shore/bottles/:id/letter`   | Re-read an opened letter                                      |
-| GET    | `/notifications`              | In-app events (arrival notices are created only on commit)    |
+| GET    | `/notifications`              | Inbox events with a `kind`, newest first; `POST /notifications/read-all` marks them read |
 | GET    | `/dev/status`, POST `/dev/advance`, `/dev/arrive`, `/dev/tick` | Dev-mode clock and worker controls |
 | GET    | `/dev/outbox`                 | Dev-mode captured e-mails (password-reset links)              |
 

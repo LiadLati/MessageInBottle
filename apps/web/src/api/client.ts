@@ -6,6 +6,8 @@ import type {
   MeResponse,
   NotificationDto,
   OpenedLetterDto,
+  OutcomeVisibilityDto,
+  PublicOceanResponse,
   ReleasePreviewResponse,
   SentBottleDto,
   SentBottleSummaryDto,
@@ -108,6 +110,18 @@ export const api = {
   blockUser: (username: string) => request<void>('POST', '/friends/blocks', { username }),
   sentBottles: () => request<{ bottles: SentBottleSummaryDto[] }>('GET', '/bottles/sent'),
   sentBottle: (id: string) => request<{ bottle: SentBottleDto }>('GET', `/bottles/sent/${id}`),
+  // Private-map visibility of a terminal marker (the sender's own record, per account).
+  markOutcomeSeen: (id: string) =>
+    request<{ visibility: OutcomeVisibilityDto }>('POST', `/bottles/sent/${id}/seen`),
+  acknowledgeOutcome: (id: string) =>
+    request<{ visibility: OutcomeVisibilityDto }>('POST', `/bottles/sent/${id}/acknowledge`),
+  // The public ocean: only the strict public projection ever comes back from here.
+  publicOcean: () => request<PublicOceanResponse>('GET', '/ocean/public'),
+  // One server-owned action: it grants the caller the letter and takes the bottle off the
+  // public map for everyone. 409 `already_opened` means somebody else was first.
+  openPublicBottle: (id: string) => request<OpenedLetterDto>('POST', `/ocean/public/${id}/open`),
+  // The sender reading their own letter: a pure read that never claims the bottle.
+  ownLetter: (id: string) => request<OpenedLetterDto>('GET', `/bottles/sent/${id}/letter`),
   previewRelease: (recipientId: string) =>
     request<ReleasePreviewResponse>('POST', '/bottles/preview', { recipientId }),
   release: (input: {
@@ -129,6 +143,8 @@ export const api = {
   devStatus: () => request<DevStatus>('GET', '/dev/status'),
   devAdvance: (ms: number) => request<DevStatus>('POST', '/dev/advance', { ms }),
   devArrive: (bottleId: string) => request<DevStatus>('POST', '/dev/arrive', { bottleId }),
+  devLose: (bottleId: string, reason: 'adrift' | 'sunk') =>
+    request<DevStatus>('POST', '/dev/lose', { bottleId, reason }),
   devOutbox: () =>
     request<{
       provider: string;

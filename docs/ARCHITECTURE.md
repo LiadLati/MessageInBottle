@@ -70,14 +70,22 @@ Rules live in `services/` and are tested directly against an in-memory database
 - `letters` — immutable text, character count, original font, disclosure version.
 - `bottles` — sender/recipient/letter refs, **snapshots** of names and shores taken at release,
   `state` (full v0.2 enum), optimistic `version`, `moderation_status`, timestamps, `loss_reason`,
-  frozen `aging_profile`.
+  frozen `aging_profile`, and the persisted outcome (`outcome_at`, `outcome_progress`, chart/geo
+  position) once the sea ends a journey.
+- `bottle_outcome_views` — per (user, bottle): when a terminal marker was first seen inside the
+  sender's viewport and when the sender left the map after seeing it.
+- `public_openings` — one row per bottle found adrift and opened (`bottle_id` primary key, the
+  finder and the moment). Its primary key is what makes the opening race-free.
 - `route_plans` — one active plan per bottle with `plan_version`, `graph_version`, node list,
   `starts_at`, `start_progress` (rescue continuity) and `planned_duration_ms`. Prior plans are kept.
 - `journey_events` — append-only `(bottle_id, seq)` history.
 - `capacity_reservations` — exactly one per bottle, `held|released`; released once at opening or a
   terminal outcome via a guarded update.
 - `idempotency_keys` — `(user, scope, key)` with request fingerprint and stored response.
-- `notifications` — with a unique `dedupe_key` so replays never duplicate.
+- `notifications` — with a unique `dedupe_key` so replays never duplicate, and a `kind`
+  (`received_arrived`, `sent_arrived`, `sent_adrift`, `sent_sunk`, `sent_found`,
+  `sent_cancelled`) for the inbox icon; rows written before `kind` existed are classified from
+  their dedupe key when listed. Migration `0007_notification_kinds` is additive.
 - `password_resets` — hashed single-use reset tokens with expiry/used/invalidated timestamps.
 - `dev_clock` — persisted dev offset (dev mode only).
 
@@ -105,9 +113,84 @@ event types for them are already declared in `@mib/shared`.
    presentation switch over the same string. Aging parameters are derived once at arrival and stored.
 8. **Capacity**: held through travel and while delivered-unopened; released exactly once.
 
+## Journey outcomes: loss, sinking and the public ocean (stage 4, first slice)
+
+Weather stays cosmetic (§9.1 above); this is the first *real* outcome path, kept deliberately
+narrow.
+
+- **Model.** `bottles.state = lost` with `loss_reason ∈ {adrift, sunk}` (`destroyed` is declared,
+  never produced), plus the persisted outcome: `outcome_at`, `outcome_progress`, chart and geo
+  position. `bottle_outcome_views (user_id, bottle_id, seen_at, acknowledged_at)` records the
+  private-map visibility of a terminal marker per account. Migration `0005_bottle_outcomes` is
+  additive only.
+- **Commit.** `services/outcomes.ts → commitLoss(bottleId, reason, at)` runs in one transaction:
+  the position is computed from the persisted plan at `at` and written to the row, the state
+  moves through the optimistic `transitionBottle` (state + version), the destination slot is
+  released once, a `lost` event is appended with reason/position/progress, and one sender
+  notification is queued under a dedupe key. The route plan row is kept as the journey snapshot.
+  A retry, a later read, a clock jump or the sea viewer can never move or reroll it.
+- **Arrival vs loss.** Both are `at_sea → X` optimistic transitions inside SQLite's single writer,
+  so exactly one commits. `commitLoss` also refuses (`arrival_due`) once the planned arrival has
+  passed, and `commitArrivalIfDue` only acts on `at_sea`, so a lost journey never delivers and
+  never produces an arrival notification. The recipient is never told anything.
+- **Public ocean.** `GET /api/ocean/public` (signed-in users) returns the strict
+  `PublicBottleSchema` — `id, reason, lostAt, position.geo, mine` — for adrift bottles only.
+  Letter, sender, recipient, destination and route never leave the server through it; pairs with
+  a block in either direction are hidden; `mine` is computed per caller. Sunk bottles are private.
+- **Opening a bottle found adrift.** `POST /api/ocean/public/:id/open` is one transaction in
+  `openPublicBottle`: insert into `public_openings` (the bottle id is the primary key, so the
+  insert itself elects the single winner of a race), freeze the aging profile, append an
+  `opened` event with `{scope:'public'}`, and notify the sender once — never naming the finder
+  (spec D03). The bottle leaves the public list for everyone (`listPublicOcean` excludes any
+  bottle with an opening) and the finder reads the letter in the ordinary reader. It is
+  idempotent for the finder and a `409 already_opened` with no content for anyone else; the
+  sender is refused (`400 own_bottle`), blocked pairs and non-adrift bottles get `404`.
+  **The journey outcome is untouched**: the bottle stays `lost`, so the sender keeps letter,
+  passport and Lost entry, and the intended recipient is never delivered to — no arrival path
+  acts on a bottle that is not `at_sea`. Nothing else is granted: no rescue, re-release, further
+  travel or transfer of ownership.
+- **Reading afterwards.** The finder's bottle appears in their own `GET /api/shore/received`
+  (`source: 'public'`, **no sender and no origin shore** — the public ocean attributes nothing)
+  and is re-readable through `GET /api/shore/bottles/:id/letter`. The sender reads their own
+  letter with `GET /api/bottles/sent/:id/letter`, a pure read they may repeat at will: it never
+  claims the bottle, never removes it from the map and never touches the outcome.
+- **Private marker visibility.** `POST /api/bottles/sent/:id/seen` is called by the map the first
+  time a sunk marker is actually inside the visible viewport while the page is visible and the
+  map is not covered; `POST …/acknowledge` when the sender leaves the private map (another
+  application screen, or the Public switch) and only if the marker was seen. Fetching, opening
+  Ocean with the marker off screen, opening/closing a card, the sea viewer and a refresh never
+  count. After acknowledgement the marker is gone from later private-map visits; the letter,
+  passport and history are untouched (Letters → Lost).
+- **What triggers a loss is not decided.** Spec D08 (storm frequency, exposure rules, loss
+  probabilities, the adrift/sunk split, when a storm resolves, and any protection rule) is open,
+  and nothing about it exists in this repository. Until those values are approved the only
+  caller of `commitLoss` is the development control `POST /api/dev/lose` (owner only, dev mode
+  only); no worker loses a bottle on its own, and production has no automatic outcomes.
+
+## Notifications inbox and the My Shore badge
+
+- **Events.** Four approved events, each one row per account per bottle under its own dedupe
+  key: the recipient's *A new bottle has arrived at your shore* (`arrived:`), and the sender's
+  *reached its destination* (`sent_arrived:`), *lost at sea and drifted into the public ocean*
+  (`lost:` + reason adrift) and *sank at sea* (`lost:` + reason sunk). The two arrival events
+  are written in the same transaction as the arrival, for two different accounts. Worker
+  retries, repeated ticks and replayed requests insert nothing new. Older sender events
+  (`cancelled:`, `public_opened:`) stay in history with their own icons.
+- **Inbox.** The envelope beside the `+` control shows the unread count; opening it marks all of
+  this account's notifications read (`POST /api/notifications/read-all`), which is persisted, so
+  a reload or another session shows the same state. Rows are newest first, information only:
+  no row opens a bottle, navigates, or touches a marker. Reading a sinking notice is not seeing
+  the marker — `bottle_outcome_views` is written only by the map viewport, as before.
+- **My Shore badge.** It was `unread.length` over *every* notification, so a sender's own lost,
+  sunk or cancelled events lit My Shore with nothing to open there, and only a visit to the
+  (possibly empty) shore cleared them. It is now the shore's own count of sealed bottles
+  (`GET /api/shore`), refreshed on each visit: it lights only while a bottle is waiting to be
+  opened, and clears when that bottle is opened — never by reading the inbox. The top strip
+  remains an *arrival* banner and reacts to unread `received_arrived` events only.
+
 ## Deliberately not implemented (per task scope)
 
 AI writing/rewriting, random recipients, appended notes, chat, GPS-assisted shore suggestion,
-storms/loss, island publication, rescue/discard/expiry, moderation console, push notifications,
+automatic storm outcomes (the risk policy is unapproved — see above), island publication, rescue/discard/expiry, moderation console, push notifications,
 password reset / e-mail verification, request rate limiting outside authentication. Draft persistence is client-side (`sessionStorage`), as the
 specification's Draft state has no live journey.

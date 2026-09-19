@@ -14,6 +14,16 @@ export const ICONS = {
   letters:
     '<rect x="3" y="5.5" width="18" height="13" rx="2"></rect><path d="M4 7l8 6 8-6"></path>',
   lost: '<circle cx="12" cy="12" r="8"></circle><path d="M8.5 8.5l7 7M15.5 8.5l-7 7"></path>',
+  // Inbox (notifications). Drawn to the same 24×24 stroke grammar as the handoff set.
+  inbox:
+    '<rect x="3" y="5.5" width="18" height="13" rx="2.4"></rect><path d="M3.5 7l8.5 6.2L20.5 7"></path>',
+  pennant:
+    '<path d="M6 3v18"></path><path d="M7 4.5h10.5L14 9l3.5 4.5H7z" fill="currentColor" stroke="none" opacity=".9"></path>',
+  sunkX: '<path d="M6 6l12 12M18 6L6 18" stroke-width="2.6"></path>',
+  anchorCheck:
+    '<circle cx="12" cy="5" r="2.2"></circle><path d="M12 7.2V21M5 12H2.5c0 5 4.3 8.5 9.5 8.5s9.5-3.5 9.5-8.5H19M8.5 12h7"></path><path d="M14.5 15.5l2 2 4-4.5" stroke-width="2.2"></path>',
+  bottleIn:
+    '<rect x="11.5" y="2.5" width="5" height="5" rx="1.5"></rect><path d="M11.5 7.5h5l1.8 3.4c.5 1 .7 2 .7 3V19a2.5 2.5 0 0 1-2.5 2.5h-5A2.5 2.5 0 0 1 9 19v-3.4"></path><path d="M2.5 12h8M7.5 9l3 3-3 3"></path>',
   minus: '<path d="M5 12h14"></path>',
   ocean:
     '<path d="M2 9c2.6-2.6 4.4-2.6 7 0s4.4 2.6 7 0 4.4-2.6 6 0"></path><path d="M2 15c2.6-2.6 4.4-2.6 7 0s4.4 2.6 7 0 4.4-2.6 6 0"></path>',

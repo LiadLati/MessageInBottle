@@ -38,7 +38,11 @@ export function isTerminal(state: BottleState): boolean {
   return TERMINAL_STATES.has(state);
 }
 
-export const LOSS_REASONS = ['sunk', 'destroyed'] as const;
+// Why a bottle is Lost. `adrift`: swept off its route in a storm and now drifting in the public
+// ocean at its persisted loss position (its delivery is over; public claiming is not built yet).
+// `sunk`: gone under at its persisted position — private to the sender. `destroyed` is declared
+// by the spec and not produced by any code path yet.
+export const LOSS_REASONS = ['adrift', 'sunk', 'destroyed'] as const;
 export type LossReason = (typeof LOSS_REASONS)[number];
 
 export const MODERATION_STATUSES = ['clear', 'quarantined', 'removed'] as const;

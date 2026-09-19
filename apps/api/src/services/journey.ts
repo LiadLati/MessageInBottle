@@ -84,6 +84,7 @@ export function commitArrivalIfDue(ctx: AppContext, bottleId: string, now: numbe
       enqueueNotification(tx, {
         userId: bottle.senderId,
         type: 'journey_event',
+        kind: 'sent_cancelled',
         bottleId,
         dedupeKey: `cancelled:${bottleId}`,
         message: 'Delivery unavailable. The journey has ended.',
@@ -103,17 +104,33 @@ export function commitArrivalIfDue(ctx: AppContext, bottleId: string, now: numbe
     });
     if (!moved) return false;
     appendEvent(tx, bottleId, 'delivered', arrivalAt, { shoreId: bottle.destinationShoreId });
-    // The recipient learns about the bottle only now, after the committed arrival (spec §14).
+    // The recipient learns about the bottle only now, after the committed arrival (spec §14);
+    // the sender is told separately. Two events, two accounts, one row each.
     enqueueNotification(tx, {
       userId: bottle.recipientId,
       type: 'bottle_arrived',
+      kind: 'received_arrived',
       bottleId,
       dedupeKey: `arrived:${bottleId}`,
-      message: `A bottle from ${bottle.senderNameSnapshot} has washed up on your shore.`,
+      message: 'A new bottle has arrived at your shore.',
+      now,
+    });
+    enqueueNotification(tx, {
+      userId: bottle.senderId,
+      type: 'journey_event',
+      kind: 'sent_arrived',
+      bottleId,
+      dedupeKey: `sent_arrived:${bottleId}`,
+      message: `The bottle you sent to ${recipientName(bottle)} reached its destination.`,
       now,
     });
     return true;
   });
+}
+
+// The recipient's name as the sender already knows it; a natural fallback if it is missing.
+export function recipientName(bottle: { recipientNameSnapshot: string }): string {
+  return bottle.recipientNameSnapshot.trim() || 'your friend';
 }
 
 export function releaseCapacityOnce(db: DbOrTx, bottleId: string, now: number): boolean {
