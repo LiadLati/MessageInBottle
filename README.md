@@ -99,6 +99,14 @@ All variables are optional and documented in `.env.example`. The important ones:
 - `MIB_MS_PER_CHART_UNIT` / `MIB_MIN_JOURNEY_MS`: the provisional travel model (spec decision D01 is
   still open). Defaults give roughly 1–4 days per crossing.
 - `MIB_DEFAULT_SHORE_CAPACITY`: destination slots per shore (spec D06 is open).
+- `MIB_RISK_POLICY_VERSION` (default `1`): the automatic storm-outcome policy new journeys are
+  released under (spec §9.3). `1` is the approved policy; `0` releases new journeys with no
+  automatic risk at all. The value is stamped on each bottle at release, so changing it never
+  touches a journey already at sea, and journeys released before the policy existed carry no
+  version and are never put at risk.
+- `MIB_TIME_ZONE` (default `UTC`): the IANA zone whose nights (19:00–07:00 local) the risk worker
+  uses for per-bottle storm nights. Set it to your audience's zone so the storms the server
+  schedules fall in their night as well.
 
 ### Map provider
 
@@ -256,9 +264,11 @@ instead of blaming the request. Check, in order:
 
 ## API overview
 
-Outcome-related endpoints (all require a session): `GET /api/ocean/public`,
-`POST /api/ocean/public/:id/open` (the finder's single atomic action),
-`GET /api/bottles/sent/:id/letter` (the sender's own read),
+Outcome-related endpoints (all require a session): `GET /api/ocean/public` (each entry carries
+its `expiresAt`), `POST /api/ocean/public/:id/open` (the finder's single atomic action; the
+response is `Cache-Control: no-store`), `GET /api/ocean/reading` (the finder's still-open
+one-time reading, if any, for recovery after a refresh), `POST /api/ocean/public/:id/close`
+(ends that reading for good), `GET /api/bottles/sent/:id/letter` (the sender's own read),
 `POST /api/bottles/sent/:id/seen`, `POST /api/bottles/sent/:id/acknowledge`, and in development
 `POST /api/dev/lose { bottleId, reason: 'adrift' | 'sunk' }`.
 

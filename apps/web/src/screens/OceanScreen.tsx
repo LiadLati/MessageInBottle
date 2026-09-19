@@ -197,8 +197,10 @@ export function OceanScreen({
     // and the reader states that itself.
     provenance?: string;
   } | null>(null);
-  // Set when this bottle turned out to be gone — someone else opened it first.
+  // Set when this bottle turned out to be gone — someone else opened it first, its 72 hours
+  // ran out, or the finder's own one reading is over.
   const [claimedIds, setClaimedIds] = useState<string[]>([]);
+  const [unavailableWhy, setUnavailableWhy] = useState<Record<string, string>>({});
   const [publicBusy, setPublicBusy] = useState(false);
   const [publicError, setPublicError] = useState<Error | null>(null);
   // The dedicated sea viewer: opened only from the card's "View at sea", never from a marker.
@@ -275,6 +277,28 @@ export function OceanScreen({
   }, [leaveRef, acknowledgeSeen]);
 
   const reloadPublic = publicOcean.reload;
+  // A finder's one-time reading survives a refresh or a dropped connection for a short,
+  // server-bounded while: if this account has one open, bring it straight back.
+  useEffect(() => {
+    let alive = true;
+    void api
+      .activeReading()
+      .then((r) => {
+        if (alive && r.reading) setReading({ letter: r.reading, justOpened: true });
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, []);
+  // Closing the reader ends the finder's access at once (the sender's own read is a plain read).
+  const closeReader = () => {
+    const r = reading;
+    setReading(null);
+    if (r && r.letter.bottle.source === 'public') {
+      void api.closeReading(r.letter.bottle.id).catch(() => {});
+    }
+  };
   // The sender's own read: never claims the bottle, never takes it off the map.
   const readOwn = async (id: string) => {
     setPublicError(null);
@@ -302,8 +326,14 @@ export function OceanScreen({
       setReading({ letter, justOpened: true });
       await reloadPublic();
     } catch (err) {
-      if (err instanceof ApiError && err.code === 'already_opened') {
+      if (
+        err instanceof ApiError &&
+        (err.code === 'already_opened' ||
+          err.code === 'listing_expired' ||
+          err.code === 'reading_closed')
+      ) {
         setClaimedIds((ids) => (ids.includes(id) ? ids : [...ids, id]));
+        setUnavailableWhy((m) => ({ ...m, [id]: err.code }));
         await reloadPublic();
       } else {
         setPublicError(err instanceof Error ? err : new Error(String(err)));
@@ -489,15 +519,6 @@ export function OceanScreen({
           <section className="sheet" aria-label="Public ocean">
             <ErrorNote error={publicOcean.error} />
           </section>
-        ) : publicList.length === 0 ? (
-          <section className="sheet" aria-label="Public ocean">
-            <div className="stack">
-              <h2 className="t-display-sm">Nothing adrift</h2>
-              <p className="t-meta" style={{ fontSize: 13.5 }}>
-                Bottles swept off course in a storm drift here, for anyone to see.
-              </p>
-            </div>
-          </section>
         ) : view.kind === 'bottle' && (currentPublic || claimedIds.includes(view.id)) ? (
           <section className="sheet" aria-label="Adrift bottle">
             {currentPublic ? (
@@ -511,8 +532,19 @@ export function OceanScreen({
                 onOpen={currentPublic.mine ? null : () => void openFound(currentPublic.id)}
               />
             ) : (
-              <UnavailableCard onClose={close} />
+              <UnavailableCard why={unavailableWhy[view.id] ?? 'already_opened'} onClose={close} />
             )}
+          </section>
+        ) : publicList.length === 0 ? (
+          // After the unavailable card: someone who just lost a race, or whose bottle expired
+          // under them, is told why before the map is called empty.
+          <section className="sheet" aria-label="Public ocean">
+            <div className="stack">
+              <h2 className="t-display-sm">Nothing adrift</h2>
+              <p className="t-meta" style={{ fontSize: 13.5 }}>
+                Bottles swept off course in a storm drift here, for anyone to see.
+              </p>
+            </div>
           </section>
         ) : null
       ) : bottles.loading && !bottles.data ? (
@@ -594,7 +626,8 @@ export function OceanScreen({
           letter={reading.letter}
           justOpened={reading.justOpened}
           provenance={reading.provenance}
-          onClose={() => setReading(null)}
+          oneTime={reading.letter.bottle.source === 'public'}
+          onClose={closeReader}
         />
       ) : null}
       {viewing ? (
@@ -766,7 +799,10 @@ function PublicCard({
         </span>
         <div className="grow" style={{ minWidth: 0 }}>
           <div className="t-card-title">{bottle.mine ? 'Your bottle' : 'A lost bottle'}</div>
-          <div className="t-meta">Adrift since {formatDate(bottle.lostAt)}</div>
+          <div className="t-meta">
+            Adrift since {formatDate(bottle.lostAt)} · on the map until{' '}
+            {formatDate(bottle.expiresAt)}
+          </div>
         </div>
         <button type="button" className="glass-control" aria-label="Close" onClick={onClose}>
           <Icon name="close" size={16} />
@@ -783,7 +819,10 @@ function PublicCard({
       {onOpen ? (
         // Said plainly before the action, because it cannot be undone and it is the one thing
         // that changes for everybody else looking at this map.
-        <p className="card-note warn">Opening this bottle will remove it from the public map.</p>
+        <p className="card-note warn">
+          Opening this bottle will remove it from the public map. You can read the letter once;
+          after you close it, it cannot be opened again.
+        </p>
       ) : null}
       <div className="action-row" style={{ marginTop: 14 }}>
         {onOpen ? (
@@ -817,7 +856,13 @@ function PublicCard({
 
 // Somebody else opened this bottle first. It is gone from the map, and nothing about it —
 // least of all a word of the letter — is shown here.
-function UnavailableCard({ onClose }: { onClose: () => void }) {
+function UnavailableCard({ why, onClose }: { why: string; onClose: () => void }) {
+  const line =
+    why === 'listing_expired'
+      ? 'Its 72 hours on the public map are over'
+      : why === 'reading_closed'
+        ? 'You have already read this letter'
+        : 'Another traveller opened this bottle first';
   return (
     <div>
       <div className="row">
@@ -826,14 +871,18 @@ function UnavailableCard({ onClose }: { onClose: () => void }) {
         </span>
         <div className="grow" style={{ minWidth: 0 }}>
           <div className="t-card-title">No longer adrift</div>
-          <div className="t-meta">Another traveller opened this bottle first</div>
+          <div className="t-meta">{line}</div>
         </div>
         <button type="button" className="glass-control" aria-label="Close" onClick={onClose}>
           <Icon name="close" size={16} />
         </button>
       </div>
       <p className="card-note">
-        Its letter belongs to whoever found it. The public ocean has other bottles.
+        {why === 'listing_expired'
+          ? 'Nobody opened it in time. It has left the public map for good.'
+          : why === 'reading_closed'
+            ? 'A found letter can be read once. It stays with the person who sent it.'
+            : 'Its letter belongs to whoever found it. The public ocean has other bottles.'}
       </p>
     </div>
   );

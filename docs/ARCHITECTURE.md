@@ -149,11 +149,11 @@ narrow.
   passport and Lost entry, and the intended recipient is never delivered to — no arrival path
   acts on a bottle that is not `at_sea`. Nothing else is granted: no rescue, re-release, further
   travel or transfer of ownership.
-- **Reading afterwards.** The finder's bottle appears in their own `GET /api/shore/received`
-  (`source: 'public'`, **no sender and no origin shore** — the public ocean attributes nothing)
-  and is re-readable through `GET /api/shore/bottles/:id/letter`. The sender reads their own
-  letter with `GET /api/bottles/sent/:id/letter`, a pure read they may repeat at will: it never
-  claims the bottle, never removes it from the map and never touches the outcome.
+- **Reading afterwards.** The finder gets one reading session (see *Journey rules* below);
+  nothing is archived for them and `GET /api/shore/received` lists shore deliveries only. The
+  sender reads their own letter with `GET /api/bottles/sent/:id/letter`, a pure read they may
+  repeat at will: it never claims the bottle, never removes it from the map and never touches
+  the outcome or the listing deadline.
 - **Private marker visibility.** `POST /api/bottles/sent/:id/seen` is called by the map the first
   time a sunk marker is actually inside the visible viewport while the page is visible and the
   map is not covered; `POST …/acknowledge` when the sender leaves the private map (another
@@ -161,11 +161,78 @@ narrow.
   Ocean with the marker off screen, opening/closing a card, the sea viewer and a refresh never
   count. After acknowledgement the marker is gone from later private-map visits; the letter,
   passport and history are untouched (Letters → Lost).
-- **What triggers a loss is not decided.** Spec D08 (storm frequency, exposure rules, loss
-  probabilities, the adrift/sunk split, when a storm resolves, and any protection rule) is open,
-  and nothing about it exists in this repository. Until those values are approved the only
-  caller of `commitLoss` is the development control `POST /api/dev/lose` (owner only, dev mode
-  only); no worker loses a bottle on its own, and production has no automatic outcomes.
+- **What triggers a loss** is the versioned risk policy in the next section; the development
+  control `POST /api/dev/lose` (owner only, dev mode only) goes through the same `commitLoss`.
+
+## Journey rules: automatic storm outcomes, 72-hour listing, one-time reading, same harbour
+
+Approved 2026-09-19 and shipped behind an explicit policy version. Migration `0008_journey_rules`
+is additive: `bottles.risk_policy_version`, `bottles.public_deadline_at`,
+`bottles.public_expired_at`, `public_openings.session_expires_at`, `public_openings.closed_at`
+and the new `risk_decisions` table (one row per bottle per storm night, unique on both).
+
+- **Policy v1** (`RISK_POLICY`, `RISK_POLICY_VERSION = 1` in `packages/shared/src/weather.ts`):
+  each night (19:00→07:00 local in `MIB_TIME_ZONE`, the existing day/night convention) every
+  at-sea bottle has, independently, a 25 % chance of a storm of 40–100 minutes; calm nights
+  carry no risk. A storm night yields at most one **risk decision**, taken at the midpoint of the
+  storm window (a stable moment after the storm has become visible). The decision is *eligible*
+  only if the bottle is still at sea at that moment and its planned progress is below 80 %; only
+  the first five eligible decisions of a journey carry risk (cap 1 − 0.99⁵ ≈ 4.9 %). An eligible
+  decision loses the bottle with probability 1 %; conditional on loss it is adrift with 75 % and
+  sunk with 25 %. The 80 % cutoff is internal protection and appears in no user-facing copy;
+  storms may still be shown after the cap or the cutoff — they are cosmetic then. Same-harbour
+  journeys never sail and have no exposure.
+- **Determinism.** Every draw is `hashSeed(policyVersion, 'risk', bottleId, nightKey)` →
+  `draw(seed, i)`; the storm window, decision time, loss and reason are functions of the bottle
+  id, the night and the policy version alone. Retries, restarts, clock jumps, selection, the sea
+  viewer and refreshes cannot reroll anything, and a new policy version reshuffles nothing for
+  bottles stamped with an older one.
+- **Worker.** `runJourneyTick` runs `processRiskDecisions → arrivals → expirePublicListings`.
+  For each at-sea bottle with a non-null `risk_policy_version` it walks the storm nights between
+  release and now, skips storms that started before release or whose decision is still in the
+  future, and inserts one `risk_decisions` row per night inside a transaction (the unique key
+  makes a concurrent tick a no-op); a losing decision calls `commitLoss(id, reason, decisionAt)`
+  — the same transactional service as before, so arrival and loss still race on the optimistic
+  `at_sea → X` transition, the reservation is released once and the sender is told once. Decisions
+  that fell due while nothing was running are taken deterministically on the next tick, at their
+  original decision time (progress and arrival are evaluated at that time, not at catch-up).
+- **Activation.** `MIB_RISK_POLICY_VERSION` (default `1`) is stamped on each bottle at release;
+  `0` stamps `null`. Bottles released before this migration have `risk_policy_version = NULL`
+  and are never put at risk, however long they sail; nothing is backfilled. The client no longer
+  computes bottle storms: `SentBottleSummaryDto.storms` carries the server's windows for the
+  nights around now, and the map still shows them only during the browser's own night phase.
+- **72-hour public listing.** `commitLoss(…, 'adrift')` sets `public_deadline_at = outcome_at +
+  72 h`. `listPublicOcean` and `openPublicBottle` enforce the deadline themselves (`>` now to
+  list, `409 listing_expired` at or after it), so the rule holds even if no worker runs;
+  `expirePublicListings` then records the fact once — `public_expired_at`, a `public_expired`
+  event and one `sent_expired` notification (dedupe `public_expired:<id>`, clock icon): *72
+  hours passed and the bottle you sent to [recipient] was not opened. It was removed from the
+  public map.* The bottle stays `lost` with letter and passport in the sender's Lost, whose
+  action reads *Removed from the public map after 72 hours* instead of *Show on public map*.
+  Sender reads never move the deadline; an opening before the deadline is the winner and is
+  atomic against expiry (both are `public_openings`/`bottles` writes in SQLite's single writer,
+  and expiry refuses a bottle with an opening). Adrift bottles from before the migration have
+  no deadline; `activatePublicListings` at API boot gives each of them 72 h from that moment
+  (idempotent, journey clock), and logs how many it activated.
+- **One-time reading.** The opening row gets `session_expires_at = now + 15 min`. While the
+  session is open the finder can recover the same reading after a refresh or a dropped
+  connection through `GET /api/ocean/reading` or by re-posting the open; `POST
+  /api/ocean/public/:id/close` sets `closed_at` and ends access at once, and a stale session is
+  refused the same way (`409 reading_closed`, no content). The finder is never given a shore or
+  received entry, `GET /api/shore/received` is shore deliveries only and
+  `GET /api/shore/bottles/:id/letter` is recipient-only. The one-time responses are
+  `Cache-Control: no-store`; the client keeps the letter in React state only (no localStorage,
+  sessionStorage or other durable storage). Openings recorded before this change keep their
+  rows and events; with both session columns `NULL` they grant no further reads — the finder
+  archive entries they used to produce simply disappear from the Received list. The sender's
+  own reads stay unlimited.
+- **Same harbour.** When origin and destination shore are the same, `releaseBottle` stamps
+  `risk_policy_version = NULL`, plans the route snapshot with `plannedDurationMs = 0` and calls
+  `commitArrival` inside the release transaction: the bottle is `delivered` at `releasedAt`, the
+  shore bottle, badge, aging profile, `arrived` event and both ordinary notifications
+  (`received_arrived`, `sent_arrived`) are produced exactly as for any arrival, and the
+  idempotency key replays the same delivered bottle. No sea journey, storm risk, reminder or
+  separate opening rule exists for it, and no notification about the recipient opening it.
 
 ## Notifications inbox and the My Shore badge
 
@@ -191,6 +258,6 @@ narrow.
 ## Deliberately not implemented (per task scope)
 
 AI writing/rewriting, random recipients, appended notes, chat, GPS-assisted shore suggestion,
-automatic storm outcomes (the risk policy is unapproved — see above), island publication, rescue/discard/expiry, moderation console, push notifications,
+island publication, rescue/discard, moderation console, push notifications,
 password reset / e-mail verification, request rate limiting outside authentication. Draft persistence is client-side (`sessionStorage`), as the
 specification's Draft state has no live journey.

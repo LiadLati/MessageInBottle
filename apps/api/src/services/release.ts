@@ -23,6 +23,7 @@ import { AppError, conflict } from '../lib/errors.js';
 import { geoOf, getShore, loadActiveGraph, toShoreDto } from './chart.js';
 import type { AppContext, AuthUser } from './context.js';
 import { areAcceptedFriends, isBlockedEitherWay } from './friends.js';
+import { commitArrival } from './journey.js';
 
 export class ReleaseRejectedError extends AppError {
   constructor(public readonly rejection: ReleaseRejection) {
@@ -218,6 +219,10 @@ export function releaseBottle(
     const now = ctx.clock.now();
     const letterId = newId('ltr');
     const bottleId = newId('btl');
+    // Sender and recipient anchored at the same harbour: the bottle arrives the moment it is
+    // released, through the ordinary arrival transaction below — no sea journey, no storm
+    // exposure, the usual two notifications and the usual opening afterwards.
+    const sameHarbour = e.originShore.id === e.destinationShore.id;
     tx.insert(t.letters)
       .values({
         id: letterId,
@@ -244,6 +249,10 @@ export function releaseBottle(
         version: 1,
         releasedAt: now,
         createdAt: now,
+        // The risk policy this journey sails under (spec §9.3). A same-harbour bottle never
+        // sails, so it carries none; 0 (disabled) is stored as null.
+        riskPolicyVersion:
+          sameHarbour || ctx.config.riskPolicyVersion <= 0 ? null : ctx.config.riskPolicyVersion,
       })
       .run();
     tx.insert(t.routePlans)
@@ -254,7 +263,7 @@ export function releaseBottle(
         graphVersion: e.graph.version,
         nodeIds: e.path.nodeIds,
         totalLength: e.path.totalLength,
-        plannedDurationMs: e.plannedDurationMs,
+        plannedDurationMs: sameHarbour ? 0 : e.plannedDurationMs,
         startsAt: now,
         startProgress: 0,
         active: true,
@@ -296,6 +305,10 @@ export function releaseBottle(
         createdAt: now,
       })
       .run();
+    if (sameHarbour) {
+      const bottle = tx.select().from(t.bottles).where(eq(t.bottles.id, bottleId)).get()!;
+      commitArrival(tx, bottle, { plannedDurationMs: 0 }, now, now);
+    }
     return { bottleId, replayed: false };
   });
 }

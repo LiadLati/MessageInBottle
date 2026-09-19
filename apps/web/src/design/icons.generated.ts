@@ -20,6 +20,7 @@ export const ICONS = {
   pennant:
     '<path d="M6 3v18"></path><path d="M7 4.5h10.5L14 9l3.5 4.5H7z" fill="currentColor" stroke="none" opacity=".9"></path>',
   sunkX: '<path d="M6 6l12 12M18 6L6 18" stroke-width="2.6"></path>',
+  clock: '<circle cx="12" cy="12" r="8.5"></circle><path d="M12 7.5V12l3.2 2"></path>',
   anchorCheck:
     '<circle cx="12" cy="5" r="2.2"></circle><path d="M12 7.2V21M5 12H2.5c0 5 4.3 8.5 9.5 8.5s9.5-3.5 9.5-8.5H19M8.5 12h7"></path><path d="M14.5 15.5l2 2 4-4.5" stroke-width="2.2"></path>',
   bottleIn:

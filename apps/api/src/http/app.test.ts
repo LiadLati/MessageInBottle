@@ -109,6 +109,7 @@ describe('HTTP surface', () => {
       const body = (await res.json()) as { bottles: Array<Record<string, unknown>> };
       expect(body.bottles).toHaveLength(1);
       expect(Object.keys(body.bottles[0]!).sort()).toEqual([
+        'expiresAt',
         'id',
         'lostAt',
         'mine',

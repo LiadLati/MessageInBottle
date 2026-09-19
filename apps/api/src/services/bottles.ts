@@ -6,6 +6,7 @@ import {
   type LetterFont,
   type OpenedLetterDto,
   type OutcomeDto,
+  type PublicListingDto,
   type ReceivedLetterDto,
   type SentBottleDto,
   type SentBottleSummaryDto,
@@ -27,6 +28,7 @@ import { loadGraphVersion, toShoreDto } from './chart.js';
 import type { AppContext, AuthUser } from './context.js';
 import { activePlan, appendEvent, releaseCapacityOnce, transitionBottle } from './journey.js';
 import { outcomeVisibility, publicOpeningOf } from './outcomes.js';
+import { stormWindowsFor } from './risk.js';
 
 type BottleRow = typeof t.bottles.$inferSelect;
 type PlanRow = typeof t.routePlans.$inferSelect;
@@ -87,7 +89,23 @@ function sentSummary(
         },
     outcome,
     visibility: outcome ? outcomeVisibility(ctx.db, bottle.senderId, bottle.id) : null,
+    storms: stormWindowsFor(ctx, bottle, now),
+    publicListing: publicListingOf(ctx, bottle, now),
     serverTime: iso(now),
+  };
+}
+
+function publicListingOf(ctx: AppContext, bottle: BottleRow, now: number): PublicListingDto | null {
+  if (bottle.state !== 'lost' || bottle.lossReason !== 'adrift' || bottle.publicDeadlineAt === null)
+    return null;
+  const opened = publicOpeningOf(ctx.db, bottle.id);
+  return {
+    deadlineAt: iso(bottle.publicDeadlineAt),
+    status: opened
+      ? 'opened'
+      : bottle.publicExpiredAt !== null || bottle.publicDeadlineAt <= now
+        ? 'expired'
+        : 'listed',
   };
 }
 
@@ -228,7 +246,9 @@ export function getMyShore(ctx: AppContext, user: AuthUser): ShoreResponse {
 // and bottles they found adrift and opened in the public ocean. The rows are the same bottles —
 // nothing is deleted or rewritten when a bottle leaves the shore or the public map.
 export function listReceivedLetters(ctx: AppContext, user: AuthUser): ReceivedLetterDto[] {
-  const fromShore = ctx.db
+  // A bottle found adrift is a one-time reading (spec §9.3), never an archive entry: only
+  // letters that arrived on this user's own shore live here.
+  return ctx.db
     .select()
     .from(t.bottles)
     .where(
@@ -238,16 +258,9 @@ export function listReceivedLetters(ctx: AppContext, user: AuthUser): ReceivedLe
         eq(t.bottles.moderationStatus, 'clear'),
       ),
     )
+    .orderBy(desc(t.bottles.openedAt))
     .all()
-    .map((b) => ({ at: b.openedAt ?? b.releasedAt, dto: receivedLetter(b, 'shore') }));
-  const found = ctx.db
-    .select({ bottle: t.bottles, openedAt: t.publicOpenings.openedAt })
-    .from(t.publicOpenings)
-    .innerJoin(t.bottles, eq(t.bottles.id, t.publicOpenings.bottleId))
-    .where(and(eq(t.publicOpenings.openedById, user.id), eq(t.bottles.moderationStatus, 'clear')))
-    .all()
-    .map((r) => ({ at: r.openedAt, dto: receivedLetter(r.bottle, 'public', r.openedAt) }));
-  return [...fromShore, ...found].sort((a, b) => b.at - a.at).map((r) => r.dto);
+    .map((b) => receivedLetter(b, 'shore'));
 }
 
 export function openedLetter(
@@ -301,9 +314,8 @@ export function openBottle(ctx: AppContext, user: AuthUser, bottleId: string): O
   return openedLetter(ctx, result);
 }
 
-// Re-reading a letter the caller already holds. Two ways to hold one: it arrived on their shore
-// and they opened it, or they found it adrift and opened it. Anyone else gets 404 — knowing an
-// id is not authorization (spec §7).
+// Re-reading a letter that arrived on the caller's own shore and was opened there. Anyone else
+// gets 404 — knowing an id is not authorization (spec §7).
 export function readOpenedLetter(
   ctx: AppContext,
   user: AuthUser,
@@ -311,10 +323,7 @@ export function readOpenedLetter(
 ): OpenedLetterDto {
   const bottle = ctx.db.select().from(t.bottles).where(eq(t.bottles.id, bottleId)).get();
   if (!bottle || bottle.moderationStatus !== 'clear') throw notFound('letter');
-  const opening = publicOpeningOf(ctx.db, bottleId);
-  if (opening && opening.openedById === user.id) {
-    return openedLetter(ctx, bottle, 'public', opening.openedAt);
-  }
+  // A finder's one-time reading is served by activeReading only, never from here.
   if (bottle.recipientId !== user.id || bottle.state !== 'opened') throw notFound('letter');
   return openedLetter(ctx, bottle);
 }

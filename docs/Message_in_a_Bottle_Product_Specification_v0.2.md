@@ -151,7 +151,9 @@ Shore catalog (decided 2026-09-14): the catalog is global. Every coastal country
 
 Model supported water paths as a versioned graph of shore anchors, sea waypoints, island access points, and permitted passages. Edges must connect navigable virtual water paths. A bottle cannot cross land, jump between disconnected water bodies, or strand on an unreachable island.
 
-Only supported connected shores can be selected. If no route exists, block release with a clear explanation; never fabricate a direct line. Decide explicitly which canals or passages are included. Same-shore sends need an approved local sea-loop or minimum-duration rule rather than an instantaneous arrival.
+Only supported connected shores can be selected. If no route exists, block release with a clear explanation; never fabricate a direct line. Decide explicitly which canals or passages are included.
+
+Decided 2026-09-19 (supersedes the earlier local-loop/minimum-duration requirement): **two users at the same harbour deliver immediately.** When the sender's and the recipient's shore are the same harbour, release delivers the bottle at once to the recipient's My Shore through the ordinary arrival transaction — the shore bottle and badge, the sender's arrived notification, the recipient's incoming notification and the standard opening and history. There is no sea journey, no storm exposure, no special reminder and no separate opening rule; release and arrival are idempotent under retries and refreshes. No notification about whether the recipient has opened the letter is sent; that reminder was considered and rejected.
 
 Decided 2026-09-14: the maritime network is a reusable world graph (version 2) generated offline from the bundled land data — a 1° water grid whose passages are checked against a land mask, plus authored straits and canals (Gibraltar, the Turkish straits, Messina, the Danish straits, Suez, Panama, Bab-el-Mandeb, Hormuz, Singapore, Sunda, Lombok, Torres, Tsugaru, Magellan, Bering, Kerch and several harbour inlets) and connectors from every shore. The Caspian Sea and lakes are excluded. Graph version 1 and every existing route snapshot are kept unchanged; bottles released on an earlier version keep their path and arrival time.
 
@@ -235,7 +237,26 @@ Two terminal outcomes are implemented end to end — **adrift** (the bottle is s
 
 **Opening a bottle found adrift (added 2026-09-19).** Any signed-in user who is not the sender may open one bottle they find, after the card has told them that opening removes it from the public map. The opening is a single server-owned, atomic action: it grants that account access to the letter and withdraws the bottle from the public map for everyone, with the bottle id as the primary key of the opening record so exactly one of two simultaneous attempts wins; the loser is told it is no longer adrift and is shown nothing of its content. It is idempotent for the finder. The letter is never exposed by the public map API or its information card — only by the opening itself. A found letter is kept in the finder's own received archive and carries **no sender, origin shore or destination**: sender attribution in public discovery is still open (D03). The journey outcome does not change: the bottle remains lost, the sender keeps their letter, passport and Lost entry and may read their own letter at any time without claiming it, and the intended recipient is never delivered to afterwards. Rescue, re-release, further travel and transfer of ownership remain out of scope.
 
-**What is still undecided (D08).** No rule in the product or the code decides *when* a bottle is lost: storm frequency and exposure rules, the loss probability, the split between adrift and sunk, the moment a storm resolves, and any protection rule remain unapproved. Until they are, no automatic outcome exists; a development-only control ends a journey through the same server path so the behaviour can be exercised.
+**One-time reading by the finder (amended 2026-09-19, replaces the finder archive above).** The sender's lost letter appears only in the sender's own Letters → Lost. A finder is told before acting that opening removes the bottle from the public map and that the letter cannot be reopened once closed; opening then atomically withdraws the bottle and opens the letter for one reading. The letter is never added to the finder's Received list or any permanent archive. The reading stays available during the active session and may be recovered briefly after a network interruption or refresh (server-enforced, 15 minutes from opening, bound to that finder and that opening); closing the letter ends access immediately. The one-time response is not cacheable and the letter text is never kept in durable client storage. Afterwards no finder endpoint, old link or Letters page returns the letter, while the opening event stays in the journey history. The sender's access is unlimited and never claims the bottle or alters its deadline. An opened bottle never reaches the intended recipient. Openings recorded before this rule keep their history but grant no further reads. This is an in-app rule; it makes no claim about screenshots.
+
+### 9.3 Automatic storm outcomes — risk policy version 1 (decided 2026-09-19)
+
+D08 is resolved for journeys released from this version on. The policy is server-owned and versioned; every journey is stamped at release with the version it sails under, so a later change can never retroactively put an active bottle at risk, and journeys released before any policy existed carry no version and are never at risk.
+
+| Rule | Value (policy v1) |
+| --- | --- |
+| Storm chance | 25 % per night per bottle, independent per bottle, on the existing day/night convention (nights 19:00–07:00 local in the server's configured zone); calm nights carry no risk |
+| Storm length | 40–100 minutes within the night |
+| Risk decisions | at most one per storm night, taken at the midpoint of the storm window (a stable point after the storm has become visible) |
+| Eligibility | the bottle is still at sea at the decision time and its progress is below the internal protection threshold |
+| Loss chance | 1 % per eligible decision |
+| Cap | only the first five eligible decisions of a journey carry risk — a maximum of about 4.9 % per journey |
+| Outcome on loss | 75 % adrift (public ocean), 25 % sunk |
+| Same harbour | no exposure — the journey never sails |
+
+The scheduling and every decision are deterministic from the bottle, the night and the policy version and are persisted, so refreshes, retries, restarts, clock changes, selection and the sea viewer never reroll fate; decisions that fell due while nothing was running are taken later at their original moment. A loss commits through the same transactional service as before: arrival and loss can never both commit, the destination slot is released once and the sender receives the existing loss notification exactly once. Storms may still be shown after the cap or the protection threshold as weather only. The protection threshold itself is internal and never appears in user-facing copy. The My Shore weather stays independent and cosmetic. If the sea viewer is open when an outcome commits, it reconciles to the saved state.
+
+**Public expiry (resolves D02).** An adrift bottle is listed for exactly 72 hours from its persisted loss time; the server is the source of truth and sender reads do not extend it. The first eligible non-sender may open it before the deadline; at the deadline an unopened bottle is permanently removed from the public map, never resumes and is never delivered. The sender keeps letter and passport in Lost, whose action reads *Removed from the public map after 72 hours*, and receives one notification with a clock icon: *72 hours passed and the bottle you sent to [recipient] was not opened. It was removed from the public map.* Listing and opening enforce the deadline even if no worker runs; at the exact deadline opening is no longer possible, and opening and expiry are atomic against each other. Adrift bottles listed before this rule were given 72 hours from its activation.
 
 **Time of day.** The Ocean map renders a daylight palette between 07:00 and 19:00 and the approved night palette otherwise, using the local hour in the browser's own IANA timezone — never GPS and never coordinates. Both ends of the window are configurable and a window that wraps midnight is supported. The same clock and zone drive weather scheduling and weather display. Authentication is explicitly excluded: sessions, session expiry, password-reset tokens and rate limiting run on real wall-clock time, so a development clock that advances journeys can never sign a user out.
 
@@ -252,7 +273,7 @@ Two terminal outcomes are implemented end to end — **adrift** (the bottle is s
 
 Confirmed: the bottle disappears from the public map after three days. Proposed clock: 72 hours from publication, unaffected by reads. Validate deadline server-side on every read and action; do not depend on a cleanup job running on time.
 
-Open: whether expiry ends the journey or automatically resumes it. The earlier suggestion of automatic resumption is a recommendation, not a confirmed decision. Until decided, model expiry explicitly and do not implement an implicit default. Repeated stranding and whether each incident receives a fresh window also need approval.
+Decided 2026-09-19 (§9.3): expiry is permanent — the bottle never resumes and is never delivered. Rescue, discard and repeated stranding remain out of scope.
 
 Public read access must end after rescue, discard, expiry, cancellation, or moderation restriction. This cannot retract screenshots or copies already made. Proposed: authenticated eligible visitors only, no public search-engine indexing, no retained copy for visitors. Concurrent visitors may read while available; only one valid rescue or discard can commit. Whether reading should temporarily reserve a bottle is open.
 
@@ -385,10 +406,10 @@ Claude Design should provide screen layouts, storyboards, assets/layers, anchors
 | Stranding/publication | Sender | Explain public-map transfer and deadline |
 | Rescue | Sender | Explain resumed journey; rescuer attribution open |
 | Discard/loss | Sender | Clearly state terminal failure |
-| Public expiry | Sender | Copy depends on approved expiry fate |
+| Public expiry | Sender | One deduplicated notice with a clock icon: *72 hours passed and the bottle you sent to [recipient] was not opened. It was removed from the public map.* (decided 2026-09-19) |
 | Arrival | Recipient | Only after server commits delivery |
 | Unopened interval | Sender | Recheck unopened status at dispatch |
-| Arrival/read receipt | Sender | Proposed; requires confirmation |
+| Arrival/read receipt | Sender | Arrival: the existing *reached its destination* notice. A notification about whether the recipient opened the letter was considered and rejected (2026-09-19). |
 | Delivery invalidated | Sender | Generic message; do not expose a block |
 
 In-app events are required. Push delivery depends on platform and permission; the journey works without push permission. Hide letter excerpts on lock screens by default. Notification failure never rolls back arrival. Use event IDs, retry limits, and stale-event checks; notifications must not leak hidden incoming journeys.
@@ -539,14 +560,14 @@ This roadmap is a plan only. The current task ends with the updated specificatio
 
 | ID | Decision | Recommendation or clarification |
 | --- | --- | --- |
-| D01 | Travel speed and duration | Tie travel to route length; decide range and same-shore behavior. No approved duration yet. |
-| D02 | Fate after three public days | Public disappearance is confirmed; permanent expiry versus automatic resumption is not. |
+| D01 | Travel speed and duration | Tie travel to route length; decide range. Same-shore behaviour decided 2026-09-19: immediate delivery (§6.3). No approved duration yet. |
+| D02 | Fate after three public days | **Decided 2026-09-19:** permanent removal after exactly 72 hours from the loss; no resumption (§9.3). |
 | D03 | Public identity fields and participant access | Hide recipient/destination; propose excluding sender and recipient from discovery interactions. Decide sender attribution. |
 | D04 | Completion and retention | Propose private received archive and visual recycling; user confirmed only that opening ends the journey. Decide sender copy after loss. |
 | D05 | Unread timing and expiration | Set notification interval; separately decide whether unopened bottles ever expire. |
 | D06 | Capacity and anti-spam | Set slot count, reservations, release rules, and technical limits without reinstating a daily product quota. |
 | D07 | Friends and changing eligibility | Confirm mutual approval, discovery method, unfriending behavior, and in-flight cancellation policy. |
-| D08 | Risk model | Set storm frequency, exposure rules, stranding/loss probabilities, rescue risk, and repeat-stranding limits. |
+| D08 | Risk model | **Decided 2026-09-19** as risk policy v1 (§9.3): 25 % storm nights, 1 % loss per eligible decision, five-decision cap, internal progress protection, 75/25 adrift/sunk. Rescue risk and repeat stranding remain out of scope. |
 | D09 | Shore catalog | Confirm nearest-connected-coast rule, naming, supported passages, and shore changes during transit. |
 | D10 | Receipts and postarrival map | Decide sender arrival/read receipts and recipient access to completed route. |
 | D11 | Public discovery mechanics | Confirm authenticated access, concurrent reading, optional reading lease, and protections against mass discard. |

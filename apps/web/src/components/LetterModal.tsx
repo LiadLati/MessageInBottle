@@ -12,6 +12,8 @@ interface Props {
   // Overrides the provenance line. Used for a letter that carries no attribution — one found
   // adrift, or the sender re-reading their own.
   provenance?: string | undefined;
+  // A finder's one reading of a bottle found adrift: says so, and that closing ends it.
+  oneTime?: boolean;
   onClose: () => void;
 }
 
@@ -23,7 +25,7 @@ const CLOSE_MS_REDUCED = 120;
 // app is `inert`, focus is trapped and restored, Escape closes, the page behind cannot scroll.
 // Exactly two controls (Back to shore, Readable Print); text is selectable, dir="auto", and the
 // stored words are rendered verbatim (storyboard §D).
-export function LetterModal({ letter, justOpened, provenance, onClose }: Props) {
+export function LetterModal({ letter, justOpened, provenance, oneTime = false, onClose }: Props) {
   const [readable, setReadable] = useState(false);
   const [closing, setClosing] = useState(false);
   const dialogRef = useRef<HTMLDivElement>(null);
@@ -88,7 +90,7 @@ export function LetterModal({ letter, justOpened, provenance, onClose }: Props) 
         <div className="letter-modal-top letter-chrome">
           <button type="button" className="btn-ghost" onClick={close}>
             <Icon name="back" size={14} />
-            Back to shore
+            {oneTime ? 'Close letter' : 'Back to shore'}
           </button>
           <span id={titleId} className="grow provenance">
             {provenance ??
@@ -117,8 +119,8 @@ export function LetterModal({ letter, justOpened, provenance, onClose }: Props) 
           />
         </div>
         <p className="letter-modal-foot letter-chrome">
-          {justOpened && b.source === 'public'
-            ? 'This bottle has left the public map. '
+          {oneTime
+            ? 'This bottle has left the public map. This is your one reading: closing the letter ends it. '
             : justOpened
               ? 'Opening ended its journey. '
               : ''}

@@ -1,5 +1,6 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { RISK_POLICY_VERSION } from '@mib/shared';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 export const API_ROOT = path.resolve(here, '..');
@@ -31,6 +32,13 @@ export interface AppConfig {
   // Public URL of the web app, used to build links in e-mails.
   appUrl: string;
   mail: MailConfig;
+  // The IANA zone in which nights are counted for the journey risk policy (spec §9.3). Set it
+  // to the audience's zone so the storms that can matter are the ones people see at night.
+  timeZone: string;
+  // Journey risk policy version applied to *new* journeys: 0 disables automatic outcomes,
+  // RISK_POLICY_VERSION (1) enables the approved policy. Existing journeys keep the version
+  // they were released under.
+  riskPolicyVersion: number;
 }
 
 export type MailProvider = 'outbox' | 'smtp' | 'disabled';
@@ -58,6 +66,8 @@ export function loadConfig(): AppConfig {
     trustProxy: (process.env.MIB_TRUST_PROXY ?? 'false') === 'true',
     appUrl: process.env.MIB_APP_URL ?? 'http://localhost:5173',
     mail: loadMailConfig(devMode),
+    timeZone: process.env.MIB_TIME_ZONE ?? 'UTC',
+    riskPolicyVersion: envInt('MIB_RISK_POLICY_VERSION', RISK_POLICY_VERSION),
   };
 }
 

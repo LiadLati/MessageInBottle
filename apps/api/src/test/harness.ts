@@ -43,6 +43,8 @@ export function testConfig(overrides: Partial<AppConfig> = {}): AppConfig {
       from: 'test <no-reply@test>',
       smtp: { host: '', port: 587, secure: false, user: '', pass: '' },
     },
+    timeZone: 'UTC',
+    riskPolicyVersion: 1,
     ...overrides,
   };
 }
