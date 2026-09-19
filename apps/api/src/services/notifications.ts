@@ -11,7 +11,7 @@ export function enqueueNotification(
   db: DbOrTx,
   input: {
     userId: string;
-    type: 'bottle_arrived' | 'journey_event';
+    type: 'bottle_arrived' | 'journey_event' | 'moderation';
     kind: NotificationKind;
     bottleId: string | null;
     dedupeKey: string;

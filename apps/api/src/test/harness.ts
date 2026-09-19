@@ -45,6 +45,14 @@ export function testConfig(overrides: Partial<AppConfig> = {}): AppConfig {
       smtp: { host: '', port: 587, secure: false, user: '', pass: '' },
     },
     riskPolicyVersion: RISK_POLICY_VERSION,
+    ai: {
+      enabled: true,
+      endpoint: 'http://ai.test',
+      model: 'test-model',
+      timeoutMs: 1000,
+      tickMs: 1000,
+      autoDecide: false,
+    },
     ...overrides,
   };
 }
@@ -86,6 +94,7 @@ export function createTestWorld(overrides: Partial<AppConfig> = {}): TestWorld {
         shoreId: row.shoreId,
         email: row.email,
         timeZone: row.timeZone,
+        role: row.role,
       };
     },
   };

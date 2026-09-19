@@ -36,6 +36,25 @@ export interface AppConfig {
   // RISK_POLICY_VERSION (3) enables the approved policy. Existing journeys keep the version
   // they were released under.
   riskPolicyVersion: number;
+  // Local AI review of reported letters (spec §16). The model is reached over HTTP at an
+  // Ollama-compatible endpoint; nothing here is a paid API. Reports queue while it is away.
+  ai: AiConfig;
+}
+
+export interface AiConfig {
+  // false: reported cases are queued but never sent to a model; admins decide everything.
+  enabled: boolean;
+  // Ollama-compatible base URL (POST {endpoint}/api/chat). Local by default; a cloud host later
+  // is a URL change, nothing else.
+  endpoint: string;
+  model: string;
+  timeoutMs: number;
+  // How often the worker looks for queued cases.
+  tickMs: number;
+  // false (default): the model's verdict is a recommendation shown to admins. true: a clear
+  // `accept` or `reject` decides the case itself; `uncertain` always goes to an admin. Enable
+  // only after running `pnpm --filter @mib/api ai:eval` against your own model.
+  autoDecide: boolean;
 }
 
 export type MailProvider = 'outbox' | 'smtp' | 'disabled';
@@ -64,6 +83,14 @@ export function loadConfig(): AppConfig {
     appUrl: process.env.MIB_APP_URL ?? 'http://localhost:5173',
     mail: loadMailConfig(devMode),
     riskPolicyVersion: envInt('MIB_RISK_POLICY_VERSION', RISK_POLICY_VERSION),
+    ai: {
+      enabled: (process.env.MIB_AI_ENABLED ?? 'true') === 'true',
+      endpoint: (process.env.MIB_AI_ENDPOINT ?? 'http://127.0.0.1:11434').replace(/\/+$/, ''),
+      model: process.env.MIB_AI_MODEL ?? 'qwen2.5:7b',
+      timeoutMs: envInt('MIB_AI_TIMEOUT_MS', 60_000),
+      tickMs: envInt('MIB_AI_TICK_MS', 10_000),
+      autoDecide: (process.env.MIB_AI_AUTO_DECIDE ?? 'false') === 'true',
+    },
   };
 }
 

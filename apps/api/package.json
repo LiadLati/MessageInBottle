@@ -12,7 +12,9 @@
     "db:migrate": "tsx src/db/migrate.ts",
     "db:seed": "tsx src/db/seed.ts",
     "db:reset": "tsx src/db/reset.ts",
-    "db:generate": "drizzle-kit generate"
+    "db:generate": "drizzle-kit generate",
+    "admin:grant": "tsx src/tools/grant-admin.ts",
+    "ai:eval": "tsx src/tools/ai-eval.ts"
   },
   "dependencies": {
     "@hono/node-server": "^1.19.0",

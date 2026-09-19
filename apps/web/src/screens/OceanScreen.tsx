@@ -27,6 +27,8 @@ interface Props {
   // Unread notifications, shown on the envelope beside the + control.
   unread?: number;
   onOpenInbox?: () => void;
+  // Present only for an admin account: opens the admin menu (Reports, Appeals).
+  onOpenAdmin?: ((section: 'reports' | 'appeals') => void) | undefined;
   onOpenPassport: (id: string) => void;
   onWrite: () => void;
   onOpenProfile: () => void;
@@ -108,6 +110,7 @@ export function OceanScreen({
   leaveRef,
   unread = 0,
   onOpenInbox,
+  onOpenAdmin,
   onOpenPassport,
   onWrite,
   onOpenProfile,
@@ -450,6 +453,7 @@ export function OceanScreen({
               ) : null}
             </button>
           ) : null}
+          {onOpenAdmin ? <AdminControl onOpen={onOpenAdmin} /> : null}
           <button
             type="button"
             className="avatar"
@@ -628,6 +632,9 @@ export function OceanScreen({
           justOpened={reading.justOpened}
           provenance={reading.provenance}
           oneTime={reading.letter.bottle.source === 'public'}
+          // A finder may report the letter during their one reading; the sender re-reading
+          // their own may not.
+          reportable={reading.letter.bottle.source === 'public'}
           onClose={closeReader}
         />
       ) : null}
@@ -884,5 +891,53 @@ function UnavailableCard({ why, onClose }: { why: string; onClose: () => void })
             : 'Its letter belongs to whoever found it. The public ocean has other bottles.'}
       </p>
     </div>
+  );
+}
+
+// The admin icon beside the notification icon: drawn only for an admin account (the server
+// refuses every admin request from anyone else). Its menu starts with Reports and Appeals.
+function AdminControl({ onOpen }: { onOpen: (section: 'reports' | 'appeals') => void }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <span className="admin-control">
+      <button
+        type="button"
+        className="glass-control"
+        aria-label="Admin"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        onClick={() => setOpen((o) => !o)}
+      >
+        <Icon name="shield" size={18} />
+      </button>
+      {open ? (
+        <div className="glass-panel admin-menu stack" role="menu" aria-label="Admin">
+          <button
+            type="button"
+            role="menuitem"
+            className="btn-ghost"
+            onClick={() => {
+              setOpen(false);
+              onOpen('reports');
+            }}
+          >
+            <Icon name="report" size={14} />
+            Reports
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            className="btn-ghost"
+            onClick={() => {
+              setOpen(false);
+              onOpen('appeals');
+            }}
+          >
+            <Icon name="archive" size={14} />
+            Appeals
+          </button>
+        </div>
+      ) : null}
+    </span>
   );
 }

@@ -263,7 +263,13 @@ function ReceivedHistory({ tabs }: { tabs: ReactNode }) {
         <ErrorNote error={error ?? received.error} />
       </div>
       {reading ? (
-        <LetterModal letter={reading} justOpened={false} onClose={() => setReading(null)} />
+        <LetterModal
+          letter={reading}
+          justOpened={false}
+          reportable
+          onHidden={() => void received.reload()}
+          onClose={() => setReading(null)}
+        />
       ) : null}
     </DeckScreen>
   );
@@ -352,7 +358,14 @@ function PassportView({ id, onBack }: { id: string; onBack: () => void }) {
             </ol>
           </div>
           <h2 className="section-title">Your letter</h2>
-          <LetterPaper text={b.letter.text} font={b.letter.font} />
+          {b.removed ? (
+            <p className="note amber" role="status">
+              This letter was reported and, after review, removed. It can no longer be read in the
+              app. See Account standing in your profile to appeal the decision.
+            </p>
+          ) : (
+            <LetterPaper text={b.letter.text} font={b.letter.font} />
+          )}
         </>
       )}
       <ErrorNote error={res.error} />

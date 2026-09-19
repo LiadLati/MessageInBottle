@@ -284,6 +284,57 @@ and the new `risk_decisions` table (one row per bottle per storm night, unique o
   opened, and clears when that bottle is opened — never by reading the inbox. The top strip
   remains an *arrival* banner and reacts to unread `received_arrived` events only.
 
+## Reporting, AI review, violations, appeals and admins (spec §16)
+
+Migration `0010_reporting_and_moderation` is additive: `users.role` (+ `role_granted_at/by`),
+`moderation_cases`, `letter_reports`, `violations`, `appeals`. Existing accounts, bottles and
+journeys are untouched; `bottles.moderation_status` (declared since stage 3) is finally written.
+
+- **Reports → one case.** `services/moderation.ts → reportLetter` accepts a report only from a
+  reader who holds the letter (`readerContextOf`: the recipient of a delivered/opened bottle, or
+  the finder who opened it in the public ocean); the sender cannot report their own, and
+  anything else is 404 so reports cannot probe for bottles. The first report opens the case and
+  copies the letter in as protected evidence (`evidence_text/font/characters`); every later
+  report joins it (`letter_reports` is unique per case and reporter, so a repeat is a no-op).
+  `hide` records that the reporter wants the letter gone from their own reads: shore list,
+  received list, rereads and a finder's active reading all consult it, and a finder's session is
+  closed. Nothing is scanned before a report.
+- **AI review queue.** The `ai_*` columns on the case are the queue. `services/ai-review.ts →
+  runAiReviewTick` claims due cases (`queued` → `running` under the single writer), sends the
+  evidence text and report reasons to an Ollama-compatible `POST /api/chat` in JSON mode, and
+  parses the reply through `AiReviewOutputSchema`: `accept` / `reject` / `uncertain`, a reason,
+  optional uncertainty, language and translation. A clear verdict that also states an
+  uncertainty is read as `uncertain`. Unreachable model → back to `queued` with a growing delay
+  (30 s doubling to 10 min, forever); an unparseable answer → retried, then recorded as
+  `uncertain` so a person sees the case. The letter is fenced as untrusted data in the prompt
+  and no id, name or handle travels with it. By default the verdict is a recommendation; with
+  `MIB_AI_AUTO_DECIDE` a clear verdict calls the same `decideCase` an admin's click does —
+  `uncertain` never decides anything. `tools/ai-eval.ts` runs the multilingual sample set
+  (`services/ai-eval-samples.ts`) against the configured model.
+- **Decisions.** `services/admin.ts → decideCase` is one transaction guarded by `status =
+  'pending'`: a replay of the same outcome returns false, the other outcome is 409, so two
+  admins or an admin and the model produce exactly one decision. Accepting inserts the case's
+  single violation (`violations.case_id` unique), sets `bottles.moderation_status = 'removed'`
+  (state, timing, outcome and public listing untouched — a removed letter is withheld from every
+  read, the sender's passport included, while the evidence stays on the case) and enqueues one
+  deduplicated notification. Rejecting closes the case and tells nobody. Resolved cases stay
+  listed under their status.
+- **Standing** (`standingOf`) is derived, never stored, from the violations still in force
+  (`revoked_at IS NULL`), on the real clock: 0 → good, 1 → warned (a one-time warning the
+  sender acknowledges; `acknowledged_at`), 2 → suspended until the second decision + 7 elapsed
+  days, then warned again, 3+ → banned. `requireGoodStanding` sits on chart, friends, bottles,
+  shore and ocean; auth, notifications, `/api/moderation/*` and sign-out stay open, so a
+  suspended or banned account can sign in, read its standing, appeal and sign out.
+- **Appeals.** One per violation (`appeals.violation_id` unique). `decideAppeal` is guarded
+  like `decideCase`; acceptance sets `revoked_at` (the violation stops counting at once, which
+  is what lifts an unjustified suspension or ban) and restores the letter; rejection is final —
+  the unique index refuses a second appeal and the sender is told once.
+- **Admins.** `users.role` is read from the row on every request (`AuthUser.role`) and checked
+  by `requireAdmin` on every `/api/admin/*` route. It is granted only by `tools/grant-admin.ts`,
+  which looks an account up by normalised e-mail, prints its stable id, and writes only when
+  that id is passed back with `--confirm`. Registration never sets it; no request body is read
+  for it. The sender-facing DTOs (`AccountStandingDto`, notifications) carry no reporter.
+
 ## Deliberately not implemented (per task scope)
 
 AI writing/rewriting, random recipients, appended notes, chat, GPS-assisted shore suggestion,

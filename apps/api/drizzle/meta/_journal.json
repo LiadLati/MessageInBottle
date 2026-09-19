@@ -71,6 +71,13 @@
       "when": 1789838615948,
       "tag": "0009_account_time_zone",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "6",
+      "when": 1789845840434,
+      "tag": "0010_reporting_and_moderation",
+      "breakpoints": true
     }
   ]
 }

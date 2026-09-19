@@ -248,6 +248,58 @@ MIB_APP_URL=http://localhost:5173   # base of the link in the message
 You supply the provider and credentials; none are bundled. Restart the API afterwards — its
 startup line reports the active provider, and warns when mail is captured or disabled.
 
+### Reporting, moderation, appeals and admins
+
+Readers can report a letter from inside the reader — the recipient of a letter on their shore,
+and a finder during their one-time reading of a public bottle. A report picks a reason, may add
+an explanation, and by default hides the letter for the reporter at once. Reports about the same
+letter form **one case** with the letter frozen as protected evidence; a case yields at most one
+violation. The writer is never told who reported them.
+
+**Local AI review.** Each case is queued for a locally running model (Ollama; see
+`MIB_AI_*` in `.env.example`). The model reads only the reported text and returns a validated
+`accept` / `reject` / `uncertain` with a short reason, a translation for non-English letters and,
+when unsure, why. It has no database or admin powers: the backend validates its output and makes
+every change. By default its verdict is a recommendation shown to admins; set
+`MIB_AI_AUTO_DECIDE=true` only after `pnpm --filter @mib/api ai:eval` (a fixed set of Hebrew,
+Arabic, Russian, Spanish, mixed-language, slang, irony and prompt-injection samples) shows no
+dangerous disagreements with your model. If Ollama or the computer is offline, reports wait in
+the queue and are retried with a growing delay.
+
+Setting up Ollama on your machine:
+
+```bash
+# https://ollama.com/download, then:
+ollama pull qwen2.5:7b          # or any model you prefer; set MIB_AI_MODEL to match
+ollama serve                    # listens on http://127.0.0.1:11434 by default
+pnpm --filter @mib/api ai:eval  # try the sample set before enabling automatic decisions
+```
+
+**Admins.** An admin icon appears beside the notification icon for admin accounts; its menu opens
+Reports and Appeals. Every admin endpoint (`/api/admin/*`) is enforced server-side from the role
+on the account. The role is granted only by the server-side tool, by stable user id:
+
+```bash
+pnpm --filter @mib/api admin:grant -- --email you@example.com            # prints the account's id
+pnpm --filter @mib/api admin:grant -- --email you@example.com --confirm usr_…   # grants it
+pnpm --filter @mib/api admin:grant -- --revoke usr_…
+```
+
+Registration never sets a role and no request body is ever read for one.
+
+**Violations and account notices.** Only an accepted report creates a violation: the letter is
+withdrawn from every in-app read (the sender's passport included; the case keeps the evidence),
+and the journey's timing, outcome and public listing stay as they were. The first accepted
+violation shows the sender a one-time warning on their next entry; the second suspends the
+account for seven elapsed days (the end time is shown, with a warning that another accepted
+violation means a permanent ban); the third bans it permanently. Only distinct accepted
+violations still in force count — a report or an uncertain case never does. A suspended or
+banned account can still sign in, read its standing, appeal and sign out.
+
+**Appeals.** One appeal per accepted violation, from Account standing (the profile menu, or the
+whole screen while suspended or banned). An accepted appeal revokes the violation, restores the
+letter and recalculates the account's standing at once; a rejected appeal is final.
+
 ### If the app says it cannot reach the server
 
 Sign-in (and every other action) reports `Cannot reach the Message in a Bottle server` when the
@@ -269,6 +321,10 @@ response is `Cache-Control: no-store`), `GET /api/ocean/reading` (the finder's s
 one-time reading, if any, for recovery after a refresh), `POST /api/ocean/public/:id/close`
 (ends that reading for good), `GET /api/bottles/sent/:id/letter` (the sender's own read), `PUT /api/auth/time-zone` (the
 device's IANA zone, which fixes the nights the account's storms and risk are counted in),
+`POST /api/moderation/reports` (report the letter in front of you), `GET /api/moderation/standing`,
+`POST /api/moderation/violations/:id/acknowledge`, `POST /api/moderation/appeals`, and for admins
+`GET /api/admin/reports?status=`, `GET /api/admin/reports/:id`, `POST /api/admin/reports/:id/accept|reject`,
+`GET /api/admin/appeals?status=`, `POST /api/admin/appeals/:id/accept|reject`,
 `POST /api/bottles/sent/:id/seen`, `POST /api/bottles/sent/:id/acknowledge`, and in development
 `POST /api/dev/lose { bottleId, reason: 'adrift' | 'sunk' }`.
 

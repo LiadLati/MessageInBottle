@@ -2509,3 +2509,77 @@ button.avatar {
   min-height: 32px;
   padding: 0 4px;
 }
+
+/* ---------- reporting, moderation, admin ---------- */
+/* Confirmation dialogs and the one-time warning: a real dialog above everything, the app inert. */
+.confirm-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 45;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+}
+.confirm-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(3, 12, 20, 0.62);
+}
+.confirm-dialog {
+  position: relative;
+  width: min(440px, 100%);
+  max-height: calc(100vh - 32px);
+  overflow: auto;
+}
+.confirm-dialog textarea.input {
+  min-height: 72px;
+  resize: vertical;
+}
+/* The report form lives inside the reader's paper-coloured chrome. */
+.letter-modal-report {
+  padding: 12px 16px;
+  border-bottom: 1px solid rgba(90, 76, 51, 0.12);
+  color: var(--paper-ink);
+}
+.letter-modal-report .t-meta,
+.letter-modal-report .t-label,
+.letter-modal-report .t-card-title {
+  color: var(--paper-ink);
+}
+.letter-modal-report .input {
+  background: rgba(255, 255, 255, 0.55);
+  color: var(--paper-ink);
+  border-color: rgba(90, 76, 51, 0.3);
+}
+.letter-modal-report select.input {
+  min-height: 40px;
+}
+.letter-modal-report textarea.input {
+  min-height: 64px;
+  resize: vertical;
+}
+.report-sheet {
+  max-width: 520px;
+}
+.admin-control {
+  position: relative;
+}
+.admin-menu {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  min-width: 180px;
+  z-index: 36;
+  padding: 8px;
+}
+.admin-menu button {
+  width: 100%;
+  justify-content: flex-start;
+}
+.standing-card.standing-suspended {
+  border-color: rgba(226, 178, 92, 0.55);
+}
+.standing-card.standing-banned {
+  border-color: rgba(220, 96, 96, 0.6);
+}
