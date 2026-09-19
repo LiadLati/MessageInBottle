@@ -171,9 +171,9 @@ is additive: `bottles.risk_policy_version`, `bottles.public_deadline_at`,
 `bottles.public_expired_at`, `public_openings.session_expires_at`, `public_openings.closed_at`
 and the new `risk_decisions` table (one row per bottle per storm night, unique on both).
 
-- **Policy v2** (`RISK_POLICY`, `RISK_POLICY_VERSION = 2` in `packages/shared/src/weather.ts`):
-  each night (19:00→07:00, the existing day/night convention, measured at the bottle's own
-  meridian — see *One night rule* below) every at-sea bottle has, independently, a 25 % chance
+- **Policy v3** (`RISK_POLICY`, `RISK_POLICY_VERSION = 3` in `packages/shared/src/weather.ts`):
+  each night (19:00→07:00, the existing day/night convention, in the sender's own time zone —
+  see *One night rule* below) every at-sea bottle has, independently, a 25 % chance
   of a storm of 40–100 minutes; calm nights carry no risk. A storm night yields at most one
   **risk decision**, taken at the midpoint of the storm window (a stable moment after the storm
   has become visible). The decision is *eligible*
@@ -188,35 +188,44 @@ and the new `risk_decisions` table (one row per bottle per storm night, unique o
   id, the night and the policy version alone. Retries, restarts, clock jumps, selection, the sea
   viewer and refreshes cannot reroll anything, and a new policy version reshuffles nothing for
   bottles stamped with an older one.
-- **One night rule** (amended 2026-09-19, policy v2). A bottle's night is *the night where the
-  bottle is*: 19:00–07:00 mean solar time at its own meridian, one hour per 15° of longitude,
-  taken from its persisted route plan (`seaNightWindow` / `seaNightsOverlapping` in the shared
-  module, `journeyNights` in `services/risk.ts` — the one place the rule is chosen, for the
-  worker and the map alike). Each night is anchored at midday UTC of its own date, so a window
-  is a pure function of the plan and the date, never of when the worker happens to run; the
-  route's longitudes are unwrapped first (179°, 181°, 183°…) so crossing the date line does not
-  move a bottle's clock by a day. There is no zone database, no browser clock and no daylight
-  saving at sea, so **every reader anywhere gets the same instants** and the window the map
-  draws is exactly the window a decision can be taken in. Policy v1 measured nights in
-  `MIB_TIME_ZONE` instead; it survives only so journeys already sailing under it keep their
-  schedule, and their windows are published the same way, so they are just as visible.
-  `SentBottleSummaryDto.nightOffsetMinutes` carries the clock a bottle's nights are kept by (its
-  meridian under v2, the configured zone under v1) so the sea view draws the sky *out there*.
+- **One night rule** (policy v3, 2026-09-19). A bottle's night is *its sender's night*: 19:00–
+  07:00 in the account's persisted IANA zone (`users.time_zone`, migration
+  `0009_account_time_zone`) — the phase the account's Ocean map is drawn in, whatever water the
+  bottle is on. The zone is first learned from the device and re-sent on every app start and
+  resume (`PUT /api/auth/time-zone`, a no-op when unchanged); `users.time_zone_since` records
+  the journey-clock instant the current zone took effect, and nights are only ever walked from
+  that instant on (`journeyNights` in `services/risk.ts`, the one place a night is chosen, for
+  the worker and the map alike). So a zone change moves the nights ahead and never the ones
+  behind: past `risk_decisions` rows stand, no decision is taken for a night that began under
+  the old zone, and no loss can appear retroactively. Daylight saving is simply the zone's own:
+  a 13-hour or 11-hour night on a clock-change date is the same night on the map and for the
+  worker. An account no device has spoken for yet has **no nights** — no storms and no risk —
+  until its first sync. Bottles share the account's phase but keep independent storms (the
+  draws are per bottle id). Journey timing is untouched by any of this: duration and arrival
+  are fixed by the route and elapsed server time, and public expiry stays 72 elapsed hours.
 - **Visibility is the same rule.** `apps/web/src/lib/oceanWeather.ts` shows a storm iff the
-  server's window covers the instant: the browser's own day/night phase no longer gates it
-  (it still chooses the map's palette, and My Shore weather stays independent and cosmetic).
-  This is what closes the hole the zone rule left — a storm scheduled at 02:00 UTC could carry a
-  decision while a reader in Tokyo, in the middle of their afternoon, was shown a calm sea.
+  server's window covers the instant, and the map's palette, the Bottle at Sea lighting and My
+  Shore's own cosmetic weather all read the phase from the same account zone
+  (`state/weather.tsx`: the account's zone, the last known one while offline, the device's own
+  before any account). Every window lies inside a night of that zone, so **a daytime map never
+  holds a bottle in a risk-bearing storm**; no second clock gates the glyph.
+- **Legacy journeys.** Two earlier rules shipped on this branch and are removed: v1 counted
+  nights in a server-configured zone (`MIB_TIME_ZONE`, gone), v2 at the bottle's own meridian
+  (mean solar time, gone). Journeys stamped 1 or 2 keep their stamp and every decision row they
+  have (`risk_decisions.policy_version` records the version each decision was taken under);
+  from activation on they walk the account nights like everyone else, from the sender's
+  `time_zone_since`. Nothing is rerolled and nothing is hidden: until the sender's device has
+  reported a zone they have no nights, and afterwards only nights that begin after that moment.
 - **Worker.** `runJourneyTick` runs `processRiskDecisions → arrivals → expirePublicListings`.
-  For each at-sea bottle with a non-null `risk_policy_version` it walks the storm nights between
-  release and now, skips storms that started before release or whose decision is still in the
-  future, and inserts one `risk_decisions` row per night inside a transaction (the unique key
+  For each at-sea bottle with a non-null `risk_policy_version` it walks the account nights that
+  began after release (and after the zone's start) up to now, skips storms whose decision is
+  still in the future, and inserts one `risk_decisions` row per night inside a transaction (the unique key
   makes a concurrent tick a no-op); a losing decision calls `commitLoss(id, reason, decisionAt)`
   — the same transactional service as before, so arrival and loss still race on the optimistic
   `at_sea → X` transition, the reservation is released once and the sender is told once. Decisions
   that fell due while nothing was running are taken deterministically on the next tick, at their
   original decision time (progress and arrival are evaluated at that time, not at catch-up).
-- **Activation.** `MIB_RISK_POLICY_VERSION` (default `2`) is stamped on each bottle at release;
+- **Activation.** `MIB_RISK_POLICY_VERSION` (default `3`) is stamped on each bottle at release;
   `0` stamps `null`. Bottles released before this migration have `risk_policy_version = NULL`
   and are never put at risk, however long they sail; nothing is backfilled, and no schedule that
   has already been given out is recomputed. The client no longer computes bottle storms:

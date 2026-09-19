@@ -1,10 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from 'react';
-import {
-  solarPhaseAt,
-  type OpenedLetterDto,
-  type PublicBottleDto,
-  type SentBottleSummaryDto,
-} from '@mib/shared';
+import type { OpenedLetterDto, PublicBottleDto, SentBottleSummaryDto } from '@mib/shared';
 import { ApiError, api } from '../api/client.js';
 import { LetterModal } from '../components/LetterModal.js';
 import { OceanMap, SeaViewer } from '../components/lazy.js';
@@ -118,7 +113,7 @@ export function OceanScreen({
   onOpenProfile,
 }: Props) {
   const { user } = useSession();
-  const { phase, phaseOverride, nowMs, oceanStormOverride } = useWeather();
+  const { phase, nowMs, oceanStormOverride } = useWeather();
   const [mode, setMode] = useState<OceanMode>(focusPublicId ? 'public' : 'private');
   const bottles = useAsync(() => api.sentBottles(), [], POLL_MS);
   const chart = useAsync(() => api.chart(), []);
@@ -173,8 +168,8 @@ export function OceanScreen({
 
   // Per-bottle simulated weather: the server's own storm windows, for this sender's at-sea
   // bottles — so two bottles on one route can differ, nothing rerolls on refresh, selection or
-  // opening the sea viewer, and a storm is shown whenever it is night where that bottle is,
-  // whatever the hour is here.
+  // opening the sea viewer. Every window lies in one of this account's nights, the same nights
+  // the map's palette follows.
   // Keep the weather map referentially stable while its values are unchanged, so the periodic
   // clock tick does not make the map re-run its marker effect for nothing: the map is rebuilt
   // only when its serialised form changes.
@@ -640,13 +635,8 @@ export function OceanScreen({
         <SeaViewer
           bottle={viewingBottle}
           weather={viewingBottle ? weatherOf(viewingBottle.id) : 'calm'}
-          // The sky out there, not the sky here: the bottle's own solar time decides it.
-          // The development sky switch still previews both lightings.
-          phase={
-            viewingBottle && phaseOverride === 'auto'
-              ? solarPhaseAt(nowMs, viewingBottle.nightOffsetMinutes * 60_000)
-              : phase
-          }
+          // The account's own phase: the same night the map, the storms and the worker use.
+          phase={phase}
           onBack={() => setViewing(null)}
         />
       ) : null}
@@ -657,10 +647,7 @@ export function OceanScreen({
 // "In a storm" states the weather in words, so nothing depends on colour or an icon alone.
 function StormChip() {
   return (
-    <span
-      className="status-chip storm-chip"
-      title="Simulated weather in this bottle's own night at sea"
-    >
+    <span className="status-chip storm-chip" title="Simulated weather, in your own night">
       <span aria-hidden>▲</span>
       In a storm
     </span>

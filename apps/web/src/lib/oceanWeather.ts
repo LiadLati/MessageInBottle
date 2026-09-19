@@ -6,9 +6,9 @@ import type { SentBottleSummaryDto } from '@mib/shared';
 // arrive with each bottle (`storms`, from the server's night schedule), so what the map draws
 // is exactly what the worker can act on — and, after the risk cap or the progress cutoff, what
 // it cannot. Three rules, all enforced here:
-//   1. A storm is drawn for exactly as long as its window lasts. It is the bottle's own night
-//      that schedules it, so the reader's clock, zone and daylight saving never enter into it:
-//      a storm that can carry a decision can never be invisible to anyone watching.
+//   1. A storm is drawn for exactly as long as its window lasts. The server schedules it in the
+//      account's own night — the night this map is drawn in — so a storm that can carry a
+//      decision is never hidden behind a daytime map, and no second clock gates it here.
 //   2. Storms exist only for bottles that are still at sea.
 //   3. Nothing is computed client-side that could differ from the server: a refresh, a
 //      selection change, the sea viewer or a restart draws the same windows.

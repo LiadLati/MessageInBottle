@@ -99,15 +99,13 @@ All variables are optional and documented in `.env.example`. The important ones:
 - `MIB_MS_PER_CHART_UNIT` / `MIB_MIN_JOURNEY_MS`: the provisional travel model (spec decision D01 is
   still open). Defaults give roughly 1–4 days per crossing.
 - `MIB_DEFAULT_SHORE_CAPACITY`: destination slots per shore (spec D06 is open).
-- `MIB_RISK_POLICY_VERSION` (default `2`): the automatic storm-outcome policy new journeys are
-  released under (spec §9.3). `2` is the approved policy — nights are the bottle's own, at the
-  meridian it is sailing on; `0` releases new journeys with no automatic risk at all. The value
-  is stamped on each bottle at release, so changing it never touches a journey already at sea,
-  and journeys released before the policy existed carry no version and are never put at risk.
-- `MIB_TIME_ZONE` (default `UTC`): **legacy.** Policy v1 measured a bottle's nights in this zone;
-  it is read only for journeys still sailing under v1, so that they keep the schedule they were
-  released with. It has no effect on anything released today, and setting it is never needed —
-  a bottle's nights come from its own position, which needs no zone and has no daylight saving.
+- `MIB_RISK_POLICY_VERSION` (default `3`): the automatic storm-outcome policy new journeys are
+  released under (spec §9.3). `3` is the approved policy — a bottle's nights are its sender's
+  nights, in the account's own time zone; `0` releases new journeys with no automatic risk at
+  all. The value is stamped on each bottle at release; journeys released before the policy
+  existed carry no version and are never put at risk. There is no server-side zone setting:
+  each account's zone comes from its own device (`PUT /api/auth/time-zone`, sent on every app
+  start and resume).
 
 ### Map provider
 
@@ -269,7 +267,8 @@ Outcome-related endpoints (all require a session): `GET /api/ocean/public` (each
 its `expiresAt`), `POST /api/ocean/public/:id/open` (the finder's single atomic action; the
 response is `Cache-Control: no-store`), `GET /api/ocean/reading` (the finder's still-open
 one-time reading, if any, for recovery after a refresh), `POST /api/ocean/public/:id/close`
-(ends that reading for good), `GET /api/bottles/sent/:id/letter` (the sender's own read),
+(ends that reading for good), `GET /api/bottles/sent/:id/letter` (the sender's own read), `PUT /api/auth/time-zone` (the
+device's IANA zone, which fixes the nights the account's storms and risk are counted in),
 `POST /api/bottles/sent/:id/seen`, `POST /api/bottles/sent/:id/acknowledge`, and in development
 `POST /api/dev/lose { bottleId, reason: 'adrift' | 'sunk' }`.
 

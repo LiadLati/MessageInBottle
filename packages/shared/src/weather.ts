@@ -159,10 +159,11 @@ export function activeStormAt(
 // a long outage, and no client can influence it. Values are the approved ones; changing any of
 // them means a new POLICY version, never an edit in place.
 //
-//   • Nights follow the same day/night convention as the map (DAYLIGHT_DEFAULTS), measured at
-//     the bottle's own meridian: 19:00–07:00 mean solar time where the bottle is (policy v2,
-//     see "the sea night" below). Policy v1 measured them in the server's configured zone and
-//     is kept only so journeys released under it keep the schedule they were given.
+//   • Nights are the nights on the sender's own Ocean map: 19:00–07:00 (DAYLIGHT_DEFAULTS) in
+//     the account's persisted IANA time zone, whatever water a bottle is on. One phase per
+//     account drives the map's palette, every storm on it, every risk decision and the sea
+//     view's lighting — so a daytime map can never hold a bottle in a risk-bearing storm. A
+//     night is keyed by the local date it starts on.
 //   • Each at-sea bottle has a 25% chance of a storm on each night, independently of every
 //     other bottle. A storm is one window of 40–100 minutes inside the night.
 //   • A storm night carries at most one risk decision, at the storm's midpoint — after the
@@ -171,15 +172,10 @@ export function activeStormAt(
 //     decisions of a journey carry risk (max journey loss 1 − 0.99⁵ ≈ 4.9%); nothing is
 //     decided at or after 80% progress. Lost bottles go adrift 75% / sink 25% of the time.
 
-// v1: nights in the server's configured zone (superseded; kept for journeys already sailing).
-// v2: nights at the bottle's own meridian — the rule every client and the worker share.
-export const RISK_POLICY_VERSION = 2;
-
-export type NightRule = 'zone' | 'sea';
-
-export function nightRuleOf(policyVersion: number): NightRule {
-  return policyVersion >= 2 ? 'sea' : 'zone';
-}
+// v1 counted nights in a zone configured on the server; v2 at the bottle's own meridian. Both
+// are superseded: from v3 every versioned journey walks the nights of its sender's account
+// zone, and a journey's stamp only records the version it was released under.
+export const RISK_POLICY_VERSION = 3;
 
 export const RISK_POLICY = {
   version: RISK_POLICY_VERSION,
@@ -291,84 +287,6 @@ export function nightsOverlapping(
     cursor = shiftDay(cursor.year, cursor.month, cursor.day, 1);
   }
   return out;
-}
-
-// ---------- the sea night (risk policy v2) ----------
-//
-// A bottle's night is the night *where the bottle is*: 19:00–07:00 mean solar time at its own
-// meridian, one hour of solar time per 15° of longitude. Nothing here reads a time zone
-// database, a browser clock or a configured zone, so:
-//
-//   • every viewer, anywhere in the world, gets the same instants for the same bottle — what
-//     the map draws is exactly the window the worker may act in;
-//   • there is no daylight saving at sea, so no night is ever an hour short or twice as long,
-//     and no clock change can move a storm away from the decision it carries.
-//
-// The meridian comes from the bottle's persisted route plan, so it is server-owned and
-// reproducible after any restart.
-
-const HOUR_MS = 60 * 60 * 1000;
-const DAY_MS = 24 * HOUR_MS;
-// One degree of longitude is four minutes of solar time. Exported for callers that follow a
-// route's own unwrapped longitude across the antimeridian, where wrapping into ±180° would jump
-// the bottle's clock by a whole day.
-export const SOLAR_MS_PER_DEGREE = 4 * 60 * 1000;
-
-// Milliseconds to add to UTC to get mean solar time at a longitude; always within ±12 hours.
-export function solarOffsetMs(lng: number): number {
-  const wrapped = ((((lng + 180) % 360) + 360) % 360) - 180;
-  return Math.round(wrapped * SOLAR_MS_PER_DEGREE);
-}
-
-// A sea night is keyed by the UTC date it belongs to, so the key is stable however far the
-// bottle has sailed; the offset then places the window at the bottle's own meridian.
-export function utcDayKey(instantMs: number): NightKey {
-  const d = new Date(instantMs);
-  return nightKeyFor(d.getUTCFullYear(), d.getUTCMonth() + 1, d.getUTCDate());
-}
-
-export function seaNightWindow(
-  key: NightKey,
-  offsetMs: number,
-  config: DaylightConfig = DAYLIGHT_DEFAULTS,
-): NightWindow {
-  const [y, m, d] = key.split('-').map(Number) as [number, number, number];
-  const midnight = Date.UTC(y, m - 1, d);
-  return {
-    key,
-    startsAt: midnight + config.dayEndHour * HOUR_MS - offsetMs,
-    endsAt: midnight + DAY_MS + config.dayStartHour * HOUR_MS - offsetMs,
-  };
-}
-
-export function solarPhaseAt(
-  instantMs: number,
-  offsetMs: number,
-  config: DaylightConfig = DAYLIGHT_DEFAULTS,
-): DayPhase {
-  const local = instantMs + offsetMs;
-  const hour = Math.floor((((local % DAY_MS) + DAY_MS) % DAY_MS) / HOUR_MS);
-  return hourInWindow(hour, config.dayStartHour, config.dayEndHour) ? 'day' : 'night';
-}
-
-// Every sea night overlapping [fromMs, toMs], in order. The meridian is asked for per night, so
-// a bottle that sails west keeps a night per date while its nights drift with it.
-export function seaNightsOverlapping(
-  fromMs: number,
-  toMs: number,
-  offsetForKey: (key: NightKey) => number,
-  config: DaylightConfig = DAYLIGHT_DEFAULTS,
-): NightWindow[] {
-  const out: NightWindow[] = [];
-  // An offset is within ±12 h, so only the two UTC days on each side of the span can produce a
-  // window that touches it.
-  const first = Math.floor(fromMs / DAY_MS) * DAY_MS - 2 * DAY_MS;
-  for (let ms = first, guard = 0; ms <= toMs + 2 * DAY_MS && guard < 4000; ms += DAY_MS, guard++) {
-    const key = utcDayKey(ms);
-    const w = seaNightWindow(key, offsetForKey(key), config);
-    if (w.endsAt > fromMs && w.startsAt <= toMs) out.push(w);
-  }
-  return out.sort((a, b) => a.startsAt - b.startsAt);
 }
 
 export interface StormNight {

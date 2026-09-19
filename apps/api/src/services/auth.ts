@@ -13,7 +13,33 @@ export function toAuthUser(row: typeof t.users.$inferSelect): AuthUser {
     displayName: row.displayName,
     shoreId: row.shoreId,
     email: row.email,
+    timeZone: row.timeZone,
   };
+}
+
+// Is this an IANA zone the runtime knows? Anything else is refused rather than stored.
+export function isKnownTimeZone(zone: string): boolean {
+  try {
+    new Intl.DateTimeFormat('en-US', { timeZone: zone });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+// The account's night zone (spec §9.3): first learned from the device, re-synced on every app
+// start or resume. Recording *when* it took effect is what keeps a change from reaching into
+// the past — nights are only ever walked from that instant on. Unchanged zones are a no-op, so
+// a resume never moves the instant and never shortens the night in progress.
+export function setAccountTimeZone(ctx: AppContext, user: AuthUser, zone: string): AuthUser {
+  if (!isKnownTimeZone(zone)) throw badRequest('unknown_time_zone', 'unknown time zone');
+  if (user.timeZone === zone) return user;
+  ctx.db
+    .update(t.users)
+    .set({ timeZone: zone, timeZoneSince: ctx.clock.now() })
+    .where(eq(t.users.id, user.id))
+    .run();
+  return { ...user, timeZone: zone };
 }
 
 // One generic failure for a missing user, a wrong password and an account that cannot sign in,

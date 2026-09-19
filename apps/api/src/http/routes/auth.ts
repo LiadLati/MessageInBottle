@@ -6,6 +6,7 @@ import {
   LoginRequestSchema,
   RegisterRequestSchema,
   ResetPasswordRequestSchema,
+  TimeZoneRequestSchema,
   normalizeEmail,
   normalizeUsername,
 } from '@mib/shared';
@@ -18,6 +19,7 @@ import {
   register,
   requestPasswordReset,
   resetPassword,
+  setAccountTimeZone,
   usernameTaken,
 } from '../../services/auth.js';
 import type { AppEnv } from '../app.js';
@@ -98,6 +100,10 @@ export function authRoutes(limiter = new RateLimiter()) {
   });
 
   r.get('/me', requireAuth, (c) => c.json(c.get('user')));
+  // The device's zone, sent on every start and resume; the account keeps the last one it heard.
+  r.put('/time-zone', requireAuth, jsonBody(TimeZoneRequestSchema), (c) =>
+    c.json(setAccountTimeZone(c.get('ctx'), c.get('user'), c.req.valid('json').timeZone)),
+  );
   r.post('/logout', requireAuth, (c) => {
     logout(c.get('ctx'), c.get('token'));
     return c.body(null, 204);

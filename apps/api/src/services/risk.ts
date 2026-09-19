@@ -2,136 +2,72 @@ import { and, eq, isNull, lte, sql } from 'drizzle-orm';
 import {
   RISK_POLICY,
   RISK_POLICY_VERSION,
-  SOLAR_MS_PER_DEGREE,
   decideRisk,
-  localParts,
-  nightRuleOf,
   nightsOverlapping,
-  seaNightsOverlapping,
-  solarOffsetMs,
-  utcDayKey,
   stormForNight,
-  type GeoPoint,
-  type NightKey,
   type NightWindow,
   type StormWindowDto,
 } from '@mib/shared';
 import type { DbOrTx } from '../db/client.js';
 import * as t from '../db/schema.js';
-import {
-  geoPointAlongPath,
-  pathGeoPoints,
-  plannedArrivalAt,
-  progressAt,
-  type RouteGraph,
-} from '../domain/routing.js';
+import { plannedArrivalAt, progressAt } from '../domain/routing.js';
 import { newId } from '../lib/ids.js';
 import type { AppContext } from './context.js';
-import { loadGraphVersion } from './chart.js';
 import { activePlan, appendEvent } from './journey.js';
 import { enqueueNotification } from './notifications.js';
 import { commitLoss } from './outcomes.js';
 
-// Automatic journey outcomes (spec §9.3, policy v1). The worker walks every night a bottle has
-// been at sea and takes the night's decision exactly once, in a transaction keyed on
-// (bottle, night). The storm, the decision moment and its draws are pure functions of the
-// policy version, the bottle id and the night, so a retry, a restart, a long outage or a
-// clock change replays the identical decisions — nothing is ever rolled twice. A loss goes
-// through the same transactional service as the development control, so arrival and loss
-// can never both commit and the sender is told exactly once.
+// Automatic journey outcomes (spec §9.3). The worker walks every night a bottle has been at
+// sea and takes the night's decision exactly once, in a transaction keyed on (bottle, night).
+// The storm, the decision moment and its draws are pure functions of the policy version, the
+// bottle id and the night, so a retry, a restart, a long outage or a clock change replays the
+// identical decisions — nothing is ever rolled twice. A loss goes through the same
+// transactional service as the development control, so arrival and loss can never both commit
+// and the sender is told exactly once.
 //
 // Only journeys released under a policy version take part: bottles with a null version
 // (released before activation) are never put at risk.
 //
-// The night is the bottle's own: 19:00–07:00 mean solar time at the meridian it is sailing on
-// (policy v2). It is the single authority — the same function answers "when may this bottle be
-// at risk?" and "when does the map draw a storm on it?", so no viewer's clock, zone or daylight
-// saving can hide a storm that carries a decision. Journeys stamped with policy v1 keep the
-// zone-based nights they were released under; their windows are published the same way, so they
-// are just as visible.
+// The night is the sender's night (policy v3): 19:00–07:00 in the account's persisted zone,
+// the same phase the account's Ocean map is drawn in, whatever water the bottle is on. One
+// phase per account drives the palette, every storm glyph, every risk decision and the sea
+// view's lighting, so a daytime map can never hold a bottle in a risk-bearing storm. Nights
+// are walked only from the instant the account's zone took effect: a zone change moves the
+// nights ahead, never the ones behind, and an account no device has spoken for yet has no
+// nights at all — no storms and no risk until it does. Journeys stamped with policy v1 or v2
+// keep their stamp and their past decisions; from here on they walk these nights too.
 
 const iso = (ms: number) => new Date(ms).toISOString();
 
 type BottleRow = typeof t.bottles.$inferSelect;
 type PlanRow = typeof t.routePlans.$inferSelect;
 
-// A route's longitudes followed continuously: each point is taken on the same side of the world
-// as the one before it, so a path over the antimeridian reads 179°, 181°, 183° instead of
-// jumping to -179°. Without this a bottle crossing the date line would move its own clock by a
-// whole day in one step.
-export function unwrapLongitudes(geo: GeoPoint[]): GeoPoint[] {
-  const out = geo.slice(0, 1);
-  for (let i = 1; i < geo.length; i++) {
-    let lng = geo[i]!.lng;
-    const previous = out[i - 1]!.lng;
-    while (lng - previous > 180) lng -= 360;
-    while (lng - previous < -180) lng += 360;
-    out.push({ lng, lat: geo[i]!.lat });
-  }
-  return out;
+// The zone the sender's nights are counted in and the journey-clock instant it took effect.
+export function accountNightZone(
+  ctx: AppContext,
+  userId: string,
+): { zone: string; since: number } | null {
+  const row = ctx.db
+    .select({ zone: t.users.timeZone, since: t.users.timeZoneSince })
+    .from(t.users)
+    .where(eq(t.users.id, userId))
+    .get();
+  return row?.zone && row.since !== null ? { zone: row.zone, since: row.since } : null;
 }
 
-function unwrappedGeo(graph: RouteGraph, nodeIds: string[]): GeoPoint[] | null {
-  const geo = pathGeoPoints(graph, nodeIds);
-  return geo ? unwrapLongitudes(geo) : null;
-}
-
-// The meridian the bottle's nights are measured at, taken from its persisted route plan: the
-// longitude it is on at `atMs`. A graph without geographic anchors falls back to Greenwich.
-function meridianAt(geo: GeoPoint[] | null, plan: PlanRow, atMs: number): number {
-  if (!geo) return 0;
-  return Math.round(geoPointAlongPath(geo, progressAt(plan, atMs)).lng * SOLAR_MS_PER_DEGREE);
-}
-
-function planGeo(ctx: AppContext, plan: PlanRow): GeoPoint[] | null {
-  return unwrappedGeo(loadGraphVersion(ctx.db, plan.graphVersion), plan.nodeIds);
-}
-
-// Each sea night is anchored at midday UTC of its own date, so a night's window is a pure
-// function of the plan and the date — never of when the worker happens to run. The route is
-// read once per walk, not once per night.
-function nightMeridian(ctx: AppContext, plan: PlanRow): (key: NightKey) => number {
-  const geo = planGeo(ctx, plan);
-  return (key) => {
-    const [y, m, d] = key.split('-').map(Number) as [number, number, number];
-    return meridianAt(geo, plan, Date.UTC(y, m - 1, d, 12));
-  };
-}
-
-// The nights of one journey between two instants, under the policy it sails with. This is the
-// only place the night rule is chosen, for the worker and the map alike.
+// The nights of one journey between two instants: the sender's account nights that began
+// after both the release and the zone's start. This is the only place a night is chosen, for
+// the worker and the map alike.
 export function journeyNights(
   ctx: AppContext,
-  plan: PlanRow,
-  policyVersion: number,
+  bottle: Pick<BottleRow, 'senderId' | 'releasedAt'>,
   fromMs: number,
   toMs: number,
 ): NightWindow[] {
-  return nightRuleOf(policyVersion) === 'sea'
-    ? seaNightsOverlapping(fromMs, toMs, nightMeridian(ctx, plan))
-    : nightsOverlapping(fromMs, toMs, ctx.config.timeZone);
-}
-
-// The clock this bottle's nights are kept by, as minutes from UTC: its own meridian under the
-// sea rule, the server's zone for a journey still sailing under policy v1. The sea view reads
-// it for the sky, so the sky out there always agrees with the storm windows above — a bottle in
-// a storm is a bottle in its own night, whatever the hour is where it is being watched.
-export function nightOffsetMinutesFor(
-  ctx: AppContext,
-  bottle: Pick<BottleRow, 'riskPolicyVersion'>,
-  plan: PlanRow,
-  now: number,
-): number {
-  const version = bottle.riskPolicyVersion ?? RISK_POLICY_VERSION;
-  if (nightRuleOf(version) === 'zone') {
-    const p = localParts(now, ctx.config.timeZone);
-    const asIfUtc = Date.UTC(p.year, p.month - 1, p.day, p.hour, p.minute, p.second);
-    return Math.round((asIfUtc - Math.floor(now / 1000) * 1000) / 60000);
-  }
-  // The meridian tonight's nights were scheduled at, so the sky turns exactly with them.
-  const meridian = nightMeridian(ctx, plan);
-  const key = seaNightsOverlapping(now, now, meridian)[0]?.key ?? utcDayKey(now);
-  return Math.round(solarOffsetMs(meridian(key) / SOLAR_MS_PER_DEGREE) / 60000);
+  const account = accountNightZone(ctx, bottle.senderId);
+  if (!account) return [];
+  const floor = Math.max(fromMs, bottle.releasedAt, account.since);
+  return nightsOverlapping(floor, toMs, account.zone).filter((n) => n.startsAt >= floor);
 }
 
 // Storm windows for the map: the nights around `now` for one bottle. Presentation reads this;
@@ -141,16 +77,14 @@ export function nightOffsetMinutesFor(
 // decision is ever taken for it.
 export function stormWindowsFor(
   ctx: AppContext,
-  bottle: Pick<BottleRow, 'id' | 'state' | 'releasedAt' | 'riskPolicyVersion'>,
-  plan: PlanRow,
+  bottle: Pick<BottleRow, 'id' | 'state' | 'senderId' | 'releasedAt'>,
   now: number,
 ): StormWindowDto[] {
   if (bottle.state !== 'at_sea') return [];
-  const version = bottle.riskPolicyVersion ?? RISK_POLICY_VERSION;
   const dayMs = 24 * 60 * 60 * 1000;
-  return journeyNights(ctx, plan, version, now - dayMs, now + dayMs)
-    .map((night) => stormForNight(bottle.id, night, version))
-    .filter((s): s is NonNullable<typeof s> => s !== null && s.endsAt > bottle.releasedAt)
+  return journeyNights(ctx, bottle, now - dayMs, now + dayMs)
+    .map((night) => stormForNight(bottle.id, night, RISK_POLICY_VERSION))
+    .filter((s): s is NonNullable<typeof s> => s !== null)
     .map((s) => ({ startsAt: iso(s.startsAt), endsAt: iso(s.endsAt) }));
 }
 
@@ -191,12 +125,14 @@ function processBottle(
   now: number,
 ): RiskTickResult {
   const result: RiskTickResult = { decided: 0, lost: 0 };
-  const version = bottle.riskPolicyVersion!;
-  const nights = journeyNights(ctx, plan, version, bottle.releasedAt, now);
+  // Every versioned journey walks the current rule's nights; the stamp records the version it
+  // was released under and each decision row records the version it was taken under.
+  const version = RISK_POLICY_VERSION;
+  const nights = journeyNights(ctx, bottle, bottle.releasedAt, now);
   for (const night of nights) {
     const storm = stormForNight(bottle.id, night, version);
-    // A storm the bottle was not at sea for cannot touch it; a decision in the future waits.
-    if (!storm || storm.startsAt < bottle.releasedAt || storm.decisionAt > now) continue;
+    // A decision in the future waits for its moment.
+    if (!storm || storm.decisionAt > now) continue;
     const taken = ctx.db.transaction((tx) => {
       const already = tx
         .select({ id: t.riskDecisions.id })

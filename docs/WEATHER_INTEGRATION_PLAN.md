@@ -111,7 +111,7 @@ and a bottle landing while the viewer is open.
 One policy, used for **both** weather scheduling and weather display:
 
 - **Instant**: the journey clock — real `Date.now()` in production; in development the same value shifted by the persisted dev-clock offset, so time travel moves weather with journeys.
-- **Zone**: the browser's own IANA zone, `Intl.DateTimeFormat().resolvedOptions().timeZone`. No GPS, no coordinates, no server-side location.
+- **Zone**: the account's persisted IANA zone (spec §9.3), first learned from the device's `Intl.DateTimeFormat().resolvedOptions().timeZone` and re-sent on every app start and resume; offline, the last known one. No GPS, no coordinates, no server-side location. The server counts a bottle's nights — its storms and its risk — in that same zone.
 - **Day/night**: local hour in that zone. Default day `07:00–19:00`, night `19:00–07:00`; both ends configurable, and a window that wraps midnight is supported.
 - **Authentication is never on this clock.** Sessions, session expiry, password-reset tokens and rate limiting run on real wall-clock time (`ctx.realClock`), so advancing the development clock can land a journey but can never sign a user out.
 

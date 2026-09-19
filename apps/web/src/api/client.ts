@@ -143,6 +143,8 @@ export const api = {
   readLetter: (id: string) => request<OpenedLetterDto>('GET', `/shore/bottles/${id}/letter`),
   notifications: () => request<{ notifications: NotificationDto[] }>('GET', '/notifications'),
   markNotificationsRead: () => request<void>('POST', '/notifications/read-all'),
+  // The device's zone, reported on every start and resume; the account keeps the last one.
+  syncTimeZone: (timeZone: string) => request<MeResponse>('PUT', '/auth/time-zone', { timeZone }),
   devStatus: () => request<DevStatus>('GET', '/dev/status'),
   devAdvance: (ms: number) => request<DevStatus>('POST', '/dev/advance', { ms }),
   devArrive: (bottleId: string) => request<DevStatus>('POST', '/dev/arrive', { bottleId }),

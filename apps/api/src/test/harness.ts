@@ -44,7 +44,6 @@ export function testConfig(overrides: Partial<AppConfig> = {}): AppConfig {
       from: 'test <no-reply@test>',
       smtp: { host: '', port: 587, secure: false, user: '', pass: '' },
     },
-    timeZone: 'UTC',
     riskPolicyVersion: RISK_POLICY_VERSION,
     ...overrides,
   };
@@ -86,6 +85,7 @@ export function createTestWorld(overrides: Partial<AppConfig> = {}): TestWorld {
         displayName: row.displayName,
         shoreId: row.shoreId,
         email: row.email,
+        timeZone: row.timeZone,
       };
     },
   };

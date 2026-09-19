@@ -21,6 +21,8 @@ interface SessionState {
   register: (username: string, email: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
   refresh: () => Promise<void>;
+  /** Replace the signed-in user with a fresher copy from the server (e.g. after a zone sync). */
+  setUser: (user: MeResponse) => void;
 }
 
 const SessionContext = createContext<SessionState | null>(null);
@@ -103,7 +105,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const value = useMemo(
-    () => ({ user, loading, login, register, logout, refresh }),
+    () => ({ user, loading, login, register, logout, refresh, setUser }),
     [user, loading, login, register, logout, refresh],
   );
   return <SessionContext.Provider value={value}>{children}</SessionContext.Provider>;

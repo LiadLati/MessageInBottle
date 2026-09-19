@@ -1,12 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import {
-  DAYLIGHT_DEFAULTS,
-  OCEAN_SCHEDULE,
-  SHORE_SCHEDULE,
-  activeStormAt,
-  phaseAt,
-  solarPhaseAt,
-} from '@mib/shared';
+import { OCEAN_SCHEDULE, SHORE_SCHEDULE, activeStormAt, phaseAt } from '@mib/shared';
 import { bottleWeatherAt, oceanWeatherMap } from './oceanWeather.js';
 import { shoreWeatherAt } from './shoreWeather.js';
 
@@ -30,9 +23,9 @@ describe("per-bottle weather from the server's storm windows", () => {
     expect(bottleWeatherAt(bottle('btl_b', []), T)).toBe('calm');
   });
 
-  it('shows a storm whatever hour it is where the reader is standing', () => {
-    // The whole point of the server's windows: a storm that can carry a risk decision is never
-    // hidden by the reader's own clock. Midday in Tokyo is still a storm at sea.
+  it('draws exactly the server window, with no second clock gating it here', () => {
+    // The server schedules every window inside one of the account's own nights — the nights
+    // this map is drawn in — so nothing here needs to (or may) hide a storm by the hour.
     const b = bottle('btl_zones', [win(T - 60_000, T + 60_000)]);
     for (const zone of ['Asia/Tokyo', 'America/Los_Angeles', 'Europe/Berlin', 'UTC']) {
       expect(bottleWeatherAt(b, T)).toBe('storm');
@@ -44,13 +37,6 @@ describe("per-bottle weather from the server's storm windows", () => {
         (z) => phaseAt(T, z) === 'day',
       ),
     ).toBe(true);
-  });
-
-  it("reads the sky at the bottle's own meridian, not the reader's", () => {
-    // 22:00 UTC is night at Greenwich and mid-afternoon 150° west.
-    expect(solarPhaseAt(T, 0)).toBe('night');
-    expect(solarPhaseAt(T, -10 * 3600_000)).toBe('day');
-    expect(DAYLIGHT_DEFAULTS).toEqual({ dayStartHour: 7, dayEndHour: 19 });
   });
 
   it('is calm for anything not at sea, so no storm is ever invented for a landed bottle', () => {

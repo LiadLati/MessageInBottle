@@ -45,8 +45,14 @@ export const SessionResponseSchema = z.object({
     shoreId: IdSchema.nullable(),
     // Only ever returned to the account owner; null for accounts created before e-mail existed.
     email: z.string().nullable(),
+    // The IANA zone the account's nights are counted in (spec §9.3): first learned from the
+    // device and re-synced whenever the app starts or resumes. Null until a device has said.
+    timeZone: z.string().nullable(),
   }),
 });
+
+export const TimeZoneRequestSchema = z.object({ timeZone: z.string().min(1).max(64) });
+export type TimeZoneRequest = z.infer<typeof TimeZoneRequestSchema>;
 export type SessionResponse = z.infer<typeof SessionResponseSchema>;
 
 export const MeResponseSchema = SessionResponseSchema.shape.user;
@@ -234,12 +240,9 @@ export const SentBottleSchema = z.object({
   // Null until the sea ends the journey; then the persisted loss/sinking record.
   outcome: OutcomeSchema.nullable(),
   visibility: OutcomeVisibilitySchema.nullable(),
-  // Storm windows around now, in the bottle's own night at sea, only while at sea; empty
-  // otherwise. They are absolute instants: every reader, in every zone, draws the same storm.
+  // Storm windows around now, in the sender's account nights, only while at sea; empty
+  // otherwise. Absolute instants, always inside a night of the account's own zone.
   storms: z.array(StormWindowSchema),
-  // Minutes from UTC to the clock this bottle's nights are kept by (its own meridian at sea):
-  // the sea view shows the sky where the bottle is, not the sky where the reader is standing.
-  nightOffsetMinutes: z.number().int(),
   publicListing: PublicListingSchema.nullable(),
   letter: z.object({ text: z.string(), font: LetterFontSchema, characters: z.number().int() }),
   events: z.array(JourneyEventSchema),

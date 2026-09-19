@@ -84,8 +84,8 @@ interface Props {
   // sources, routes, markers and any open selection are untouched.
   phase?: MapPhase;
   // Per-bottle weather (handoff v2.0): a storm belongs to a bottle, never to the map. The
-  // glyph shows above a marker for exactly as long as that bottle's own storm window lasts —
-  // the map's palette follows the reader's clock and never gates it.
+  // glyph shows above a marker for exactly as long as that bottle's storm window lasts; the
+  // window is scheduled in the account's own night, so it always falls on a night-mode map.
   weather?: Record<string, BottleWeather>;
   // While the sea viewer covers the map, the position ticker and pin layout stop; the map keeps
   // its instance, camera and selection so returning restores them exactly.
@@ -734,8 +734,8 @@ export function OceanMap({
         marker.setLngLat([point.lng, point.lat]);
       }
       const el = marker.getElement();
-      // A storm belongs to the bottle's own night at sea, so it is drawn for as long as the
-      // server's window lasts — the reader's own daylight never hides it.
+      // A storm is drawn for as long as the server's window lasts; the server schedules it in
+      // this account's own night, the same night the palette follows.
       const stormy = weather[r.id] === 'storm' && r.live;
       el.classList.toggle('selected', selected);
       el.classList.toggle('static', !r.live || reduced);

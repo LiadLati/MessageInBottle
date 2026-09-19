@@ -27,6 +27,11 @@ export const users = sqliteTable('users', {
   passwordUpdatedAt: integer('password_updated_at'),
   // Normalized (trimmed, lower-case) and unique; null for accounts that predate e-mail.
   email: text('email').unique(),
+  // The IANA zone this account's nights are counted in (spec §9.3), first learned from the
+  // device and re-synced on every app start or resume, and the journey-clock instant it took
+  // effect. Nights are walked from that instant only, so a change never reaches into the past.
+  timeZone: text('time_zone'),
+  timeZoneSince: integer('time_zone_since'),
 });
 
 // Password-reset tokens: only the SHA-256 of the token is stored, each token is single-use and
