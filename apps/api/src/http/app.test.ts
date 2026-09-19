@@ -109,6 +109,7 @@ describe('HTTP surface', () => {
       const body = (await res.json()) as { bottles: Array<Record<string, unknown>> };
       expect(body.bottles).toHaveLength(1);
       expect(Object.keys(body.bottles[0]!).sort()).toEqual([
+        'expiresAt',
         'id',
         'lostAt',
         'mine',
@@ -166,6 +167,33 @@ describe('HTTP surface', () => {
       bottles: unknown[];
     };
     expect(shore.bottles).toEqual([]);
+  });
+
+  it("time zone: the device's zone is kept per account, refused when unknown, shown by /me", async () => {
+    const w = createTestWorld();
+    const app = createApp(w.ctx);
+    const { token } = await login(app, 'ada');
+    const auth = { authorization: `Bearer ${token}`, 'content-type': 'application/json' };
+    const me0 = (await (await app.request('/api/auth/me', { headers: auth })).json()) as {
+      timeZone: string | null;
+    };
+    expect(me0.timeZone).toBeNull();
+    const put = (timeZone: string) =>
+      app.request('/api/auth/time-zone', {
+        method: 'PUT',
+        headers: auth,
+        body: JSON.stringify({ timeZone }),
+      });
+    const ok = await put('Asia/Tokyo');
+    expect(ok.status).toBe(200);
+    expect(((await ok.json()) as { timeZone: string }).timeZone).toBe('Asia/Tokyo');
+    expect((await put('Mars/Olympus_Mons')).status).toBe(400);
+    expect((await put('')).status).toBe(400);
+    const me1 = (await (await app.request('/api/auth/me', { headers: auth })).json()) as {
+      timeZone: string | null;
+    };
+    expect(me1.timeZone).toBe('Asia/Tokyo');
+    expect((await app.request('/api/auth/time-zone', { method: 'PUT' })).status).toBe(401);
   });
 
   it('rejects malformed release bodies without creating anything', async () => {

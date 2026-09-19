@@ -7,6 +7,7 @@ import { plannedArrivalAt } from '../domain/routing.js';
 import { newId } from '../lib/ids.js';
 import type { AppContext } from './context.js';
 import { enqueueNotification } from './notifications.js';
+import { expirePublicListings, processRiskDecisions } from './risk.js';
 
 export function activePlan(db: DbOrTx, bottleId: string) {
   return db
@@ -68,64 +69,76 @@ export function commitArrivalIfDue(ctx: AppContext, bottleId: string, now: numbe
     if (!plan) return false;
     const arrivalAt = plannedArrivalAt(plan);
     if (arrivalAt > now) return false;
-    // Re-check eligibility transactionally before arrival (spec §11 invariant 4).
-    const blocked = tx
-      .select({ blockerId: t.blocks.blockerId })
-      .from(t.blocks)
-      .where(
-        and(eq(t.blocks.blockerId, bottle.recipientId), eq(t.blocks.blockedId, bottle.senderId)),
-      )
-      .get();
-    if (blocked) {
-      const moved = transitionBottle(tx, bottle, 'cancelled', { completedAt: now });
-      if (!moved) return false;
-      releaseCapacityOnce(tx, bottleId, now);
-      appendEvent(tx, bottleId, 'cancelled', now, { reason: 'delivery_unavailable' });
-      enqueueNotification(tx, {
-        userId: bottle.senderId,
-        type: 'journey_event',
-        kind: 'sent_cancelled',
-        bottleId,
-        dedupeKey: `cancelled:${bottleId}`,
-        message: 'Delivery unavailable. The journey has ended.',
-        now,
-      });
-      return true;
-    }
-    const aging = deriveAgingProfile({
-      bottleId,
-      releasedAt: bottle.releasedAt,
-      deliveredAt: arrivalAt,
-      plannedDurationMs: plan.plannedDurationMs,
-    });
-    const moved = transitionBottle(tx, bottle, 'delivered', {
-      deliveredAt: arrivalAt,
-      agingProfile: aging,
-    });
+    return commitArrival(tx, bottle, plan, arrivalAt, now);
+  });
+}
+
+// The arrival transaction proper. Used by the worker when a journey's time is up and by the
+// release of a same-harbour bottle, which arrives the moment it is released (spec §6.3 as
+// amended): the same state change, slot handling, history and the same two notifications.
+export function commitArrival(
+  tx: DbOrTx,
+  bottle: typeof t.bottles.$inferSelect,
+  plan: { plannedDurationMs: number },
+  arrivalAt: number,
+  now: number,
+): boolean {
+  const bottleId = bottle.id;
+  // Re-check eligibility transactionally before arrival (spec §11 invariant 4).
+  const blocked = tx
+    .select({ blockerId: t.blocks.blockerId })
+    .from(t.blocks)
+    .where(and(eq(t.blocks.blockerId, bottle.recipientId), eq(t.blocks.blockedId, bottle.senderId)))
+    .get();
+  if (blocked) {
+    const moved = transitionBottle(tx, bottle, 'cancelled', { completedAt: now });
     if (!moved) return false;
-    appendEvent(tx, bottleId, 'delivered', arrivalAt, { shoreId: bottle.destinationShoreId });
-    // The recipient learns about the bottle only now, after the committed arrival (spec §14);
-    // the sender is told separately. Two events, two accounts, one row each.
-    enqueueNotification(tx, {
-      userId: bottle.recipientId,
-      type: 'bottle_arrived',
-      kind: 'received_arrived',
-      bottleId,
-      dedupeKey: `arrived:${bottleId}`,
-      message: 'A new bottle has arrived at your shore.',
-      now,
-    });
+    releaseCapacityOnce(tx, bottleId, now);
+    appendEvent(tx, bottleId, 'cancelled', now, { reason: 'delivery_unavailable' });
     enqueueNotification(tx, {
       userId: bottle.senderId,
       type: 'journey_event',
-      kind: 'sent_arrived',
+      kind: 'sent_cancelled',
       bottleId,
-      dedupeKey: `sent_arrived:${bottleId}`,
-      message: `The bottle you sent to ${recipientName(bottle)} reached its destination.`,
+      dedupeKey: `cancelled:${bottleId}`,
+      message: 'Delivery unavailable. The journey has ended.',
       now,
     });
     return true;
+  }
+  const aging = deriveAgingProfile({
+    bottleId,
+    releasedAt: bottle.releasedAt,
+    deliveredAt: arrivalAt,
+    plannedDurationMs: plan.plannedDurationMs,
   });
+  const moved = transitionBottle(tx, bottle, 'delivered', {
+    deliveredAt: arrivalAt,
+    agingProfile: aging,
+  });
+  if (!moved) return false;
+  appendEvent(tx, bottleId, 'delivered', arrivalAt, { shoreId: bottle.destinationShoreId });
+  // The recipient learns about the bottle only now, after the committed arrival (spec §14);
+  // the sender is told separately. Two events, two accounts, one row each.
+  enqueueNotification(tx, {
+    userId: bottle.recipientId,
+    type: 'bottle_arrived',
+    kind: 'received_arrived',
+    bottleId,
+    dedupeKey: `arrived:${bottleId}`,
+    message: 'A new bottle has arrived at your shore.',
+    now,
+  });
+  enqueueNotification(tx, {
+    userId: bottle.senderId,
+    type: 'journey_event',
+    kind: 'sent_arrived',
+    bottleId,
+    dedupeKey: `sent_arrived:${bottleId}`,
+    message: `The bottle you sent to ${recipientName(bottle)} reached its destination.`,
+    now,
+  });
+  return true;
 }
 
 // The recipient's name as the sender already knows it; a natural fallback if it is missing.
@@ -144,9 +157,16 @@ export function releaseCapacityOnce(db: DbOrTx, bottleId: string, now: number): 
   return res.changes === 1;
 }
 
-// Worker tick: deterministic catch-up from persisted plans; safe to run repeatedly or after downtime.
-export function runJourneyTick(ctx: AppContext): { delivered: number } {
+// Worker tick: deterministic catch-up from persisted plans; safe to run repeatedly or after
+// downtime. Order matters and is fixed: risk decisions first (a storm that struck before an
+// arrival that is also due must be applied first), then arrivals, then public-listing expiry.
+export function runJourneyTick(ctx: AppContext): {
+  delivered: number;
+  risk: { decided: number; lost: number };
+  expired: number;
+} {
   const now = ctx.clock.now();
+  const risk = processRiskDecisions(ctx, now);
   const due = ctx.db
     .select({ bottleId: t.routePlans.bottleId })
     .from(t.routePlans)
@@ -161,5 +181,6 @@ export function runJourneyTick(ctx: AppContext): { delivered: number } {
     .all();
   let delivered = 0;
   for (const { bottleId } of due) if (commitArrivalIfDue(ctx, bottleId, now)) delivered++;
-  return { delivered };
+  const expired = expirePublicListings(ctx, now);
+  return { delivered, risk, expired };
 }

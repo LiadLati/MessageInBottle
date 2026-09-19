@@ -2503,3 +2503,9 @@ button.avatar {
 .inbox-icon.tone-muted {
   color: var(--text-secondary);
 }
+.listing-status {
+  display: inline-flex;
+  align-items: center;
+  min-height: 32px;
+  padding: 0 4px;
+}

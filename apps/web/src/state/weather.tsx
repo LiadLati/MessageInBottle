@@ -8,8 +8,14 @@ import { useSession } from './session.js';
 //
 //   instant = real time, shifted by the persisted development-clock offset when the API reports
 //             one, so dev time travel moves weather together with journeys;
-//   zone    = the browser's own IANA zone, never GPS and never coordinates;
+//   zone    = the account's persisted IANA zone (spec §9.3): learned from the device, never GPS
+//             and never coordinates, and re-sent to the server whenever the app starts or
+//             resumes so the server counts the same nights this map is drawn in. Offline, the
+//             last zone the account was known to have; before any account, the device's own;
 //   phase   = the local hour in that zone against a configurable day window (07:00–19:00).
+//
+// The server schedules every storm and every risk decision in that same zone, so a daytime map
+// never holds a bottle in a risk-bearing storm.
 //
 // Authentication never uses this clock: sessions and reset tokens run on real wall-clock time
 // on the server, so a development clock jump can land a bottle but never sign anyone out.
@@ -44,8 +50,27 @@ function browserTimeZone(): string {
   }
 }
 
+// The last zone the account was known to have, so an offline start keeps yesterday's nights
+// rather than silently switching to the device's. A convenience, never an authority.
+const ZONE_KEY = 'mib.accountTimeZone';
+function readStoredZone(): string | null {
+  try {
+    return localStorage.getItem(ZONE_KEY);
+  } catch {
+    return null;
+  }
+}
+function storeZone(zone: string | null) {
+  try {
+    if (zone) localStorage.setItem(ZONE_KEY, zone);
+    else localStorage.removeItem(ZONE_KEY);
+  } catch {
+    /* storage unavailable */
+  }
+}
+
 export function WeatherProvider({ children }: { children: ReactNode }) {
-  const timeZone = useMemo(() => browserTimeZone(), []);
+  const deviceZone = useMemo(() => browserTimeZone(), []);
   // Development clock offset, learned once and refreshed with the dev panel's own polling.
   const [offsetMs, setOffsetMs] = useState(0);
   const [nowMs, setNowMs] = useState(() => Date.now());
@@ -55,8 +80,40 @@ export function WeatherProvider({ children }: { children: ReactNode }) {
 
   // The status endpoint needs a session, so the offset is re-read whenever the signed-in user
   // changes: a fresh sign-in must not spend its first tick on the real clock.
-  const { user } = useSession();
+  const { user, setUser } = useSession();
   const userId = user?.id ?? null;
+  // The account's zone is the authority for its nights. Until the server has heard from a
+  // device, or while it cannot be reached, the last known zone stands in; before any account
+  // at all, the device's own.
+  const accountZone = user?.timeZone ?? null;
+  const timeZone = accountZone ?? readStoredZone() ?? deviceZone;
+  useEffect(() => {
+    if (accountZone) storeZone(accountZone);
+  }, [accountZone]);
+
+  // Tell the server the device's zone on every start and resume. A changed zone moves the
+  // account's nights from now on — never the ones already sailed — and is a no-op otherwise.
+  useEffect(() => {
+    if (!userId) return;
+    let alive = true;
+    const sync = () => {
+      if (document.hidden || deviceZone === accountZone) return;
+      void api
+        .syncTimeZone(deviceZone)
+        .then((me) => {
+          if (alive) setUser(me);
+        })
+        .catch(() => {});
+    };
+    sync();
+    document.addEventListener('visibilitychange', sync);
+    window.addEventListener('focus', sync);
+    return () => {
+      alive = false;
+      document.removeEventListener('visibilitychange', sync);
+      window.removeEventListener('focus', sync);
+    };
+  }, [userId, deviceZone, accountZone, setUser]);
   useEffect(() => {
     if (!import.meta.env.DEV || !userId) return;
     let alive = true;

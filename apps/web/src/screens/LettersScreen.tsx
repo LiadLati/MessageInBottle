@@ -164,7 +164,7 @@ function LostHistory({
                       <Icon name="passport" size={14} />
                       Passport
                     </button>
-                    {b.outcome.reason === 'adrift' ? (
+                    {b.outcome.reason === 'adrift' && b.publicListing?.status === 'listed' ? (
                       <button
                         type="button"
                         className="btn-ghost small"
@@ -173,6 +173,12 @@ function LostHistory({
                         <Icon name="ocean" size={14} />
                         Show on public map
                       </button>
+                    ) : b.outcome.reason === 'adrift' && b.publicListing?.status === 'opened' ? (
+                      <span className="t-meta listing-status">Opened by a finder</span>
+                    ) : b.outcome.reason === 'adrift' && b.publicListing?.status === 'expired' ? (
+                      <span className="t-meta listing-status">
+                        Removed from the public map after 72 hours
+                      </span>
                     ) : null}
                   </span>
                 </span>

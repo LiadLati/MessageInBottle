@@ -21,4 +21,6 @@ export interface AuthUser {
   displayName: string;
   shoreId: string | null;
   email: string | null;
+  // The zone the account's nights are counted in; null until a device has reported one.
+  timeZone: string | null;
 }

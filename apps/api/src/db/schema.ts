@@ -27,6 +27,11 @@ export const users = sqliteTable('users', {
   passwordUpdatedAt: integer('password_updated_at'),
   // Normalized (trimmed, lower-case) and unique; null for accounts that predate e-mail.
   email: text('email').unique(),
+  // The IANA zone this account's nights are counted in (spec §9.3), first learned from the
+  // device and re-synced on every app start or resume, and the journey-clock instant it took
+  // effect. Nights are walked from that instant only, so a change never reaches into the past.
+  timeZone: text('time_zone'),
+  timeZoneSince: integer('time_zone_since'),
 });
 
 // Password-reset tokens: only the SHA-256 of the token is stored, each token is single-use and
@@ -195,6 +200,13 @@ export const bottles = sqliteTable(
     outcomeChartY: integer('outcome_chart_y'),
     outcomeLng: real('outcome_lng'),
     outcomeLat: real('outcome_lat'),
+    // The risk policy this journey sails under (RISK_POLICY_VERSION at release). Null for
+    // journeys released before automatic outcomes were enabled: they are never put at risk.
+    riskPolicyVersion: integer('risk_policy_version'),
+    // Public listing of an adrift bottle: listed until the deadline; `public_expired_at` is set
+    // once by the worker when the deadline passed with nobody having opened it.
+    publicDeadlineAt: integer('public_deadline_at'),
+    publicExpiredAt: integer('public_expired_at'),
   },
   (t) => [
     index('bottles_sender_idx').on(t.senderId),
@@ -327,8 +339,35 @@ export const publicOpenings = sqliteTable(
       .notNull()
       .references(() => users.id),
     openedAt: integer('opened_at').notNull(),
+    // The finder's one reading session: served again only until this moment, and never after
+    // an explicit close. Legacy rows (both null) grant no reread.
+    sessionExpiresAt: integer('session_expires_at'),
+    closedAt: integer('closed_at'),
   },
   (t) => [index('public_openings_opener_idx').on(t.openedById, t.openedAt)],
+);
+
+// One row per (bottle, night) once the night's risk decision has been taken, storm night or
+// not — so a retry, a restart or a clock change can never take it again. `eligible` counts
+// towards the five-decision cap; `lost` records that this decision ended the journey.
+export const riskDecisions = sqliteTable(
+  'risk_decisions',
+  {
+    id: text('id').primaryKey(),
+    bottleId: text('bottle_id')
+      .notNull()
+      .references(() => bottles.id),
+    nightKey: text('night_key').notNull(),
+    policyVersion: integer('policy_version').notNull(),
+    stormStartsAt: integer('storm_starts_at'),
+    stormEndsAt: integer('storm_ends_at'),
+    decisionAt: integer('decision_at').notNull(),
+    eligible: integer('eligible', { mode: 'boolean' }).notNull(),
+    lost: integer('lost', { mode: 'boolean' }).notNull(),
+    reason: text('reason'),
+    createdAt: integer('created_at').notNull(),
+  },
+  (t) => [uniqueIndex('risk_decisions_bottle_night_idx').on(t.bottleId, t.nightKey)],
 );
 
 export const devClock = sqliteTable('dev_clock', {

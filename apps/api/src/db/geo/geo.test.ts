@@ -84,6 +84,7 @@ describe('additive chart upgrade', () => {
         displayName: row.displayName,
         shoreId: row.shoreId,
         email: null,
+        timeZone: null,
       };
     };
     const ada = user('ada');

@@ -77,23 +77,35 @@ export function SeaViewer({ bottle, weather, phase, onBack }: Props) {
     }
   };
 
+  // An outcome that commits while the viewer is open is shown as the saved state: the viewer
+  // reconciles to what the server decided and never invents a landing for a lost bottle.
+  const lost = bottle?.state === 'lost' ? (bottle.outcome?.reason ?? 'adrift') : null;
   const status = !bottle
     ? 'no longer at sea'
-    : !atSea
-      ? 'has landed'
-      : sceneWeather === 'storm'
-        ? 'in a storm'
-        : 'calm';
+    : lost
+      ? lost === 'sunk'
+        ? 'has sunk'
+        : 'is adrift'
+      : !atSea
+        ? 'has landed'
+        : sceneWeather === 'storm'
+          ? 'in a storm'
+          : 'calm';
   const meta = !bottle
     ? 'This bottle is no longer at sea.'
-    : !atSea
-      ? `Arrived at ${bottle.destinationShore.name}. Its journey is complete.`
-      : `${formatDuration(bottle.elapsedMs)} at sea · ${sceneWeather === 'storm' ? 'rough water' : 'calm water'} · watching does not change the weather`;
+    : lost
+      ? lost === 'sunk'
+        ? 'Lost at sea. Its journey has ended.'
+        : 'Swept off course. It drifts in the public ocean, sealed.'
+      : !atSea
+        ? `Arrived at ${bottle.destinationShore.name}. Its journey is complete.`
+        : `${formatDuration(bottle.elapsedMs)} at sea · ${sceneWeather === 'storm' ? 'rough water' : 'calm water'} · watching does not change the weather`;
 
   return createPortal(
     <div
       className={`sea-viewer ${sceneWeather}${closing ? ' closing' : ''}`}
       data-weather={sceneWeather}
+      data-phase={phase}
       onKeyDown={onKeyDown}
     >
       <div

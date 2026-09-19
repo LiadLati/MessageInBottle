@@ -120,6 +120,9 @@ export const api = {
   // One server-owned action: it grants the caller the letter and takes the bottle off the
   // public map for everyone. 409 `already_opened` means somebody else was first.
   openPublicBottle: (id: string) => request<OpenedLetterDto>('POST', `/ocean/public/${id}/open`),
+  // The finder's still-open one-time reading (recovers a refresh); ending it is immediate.
+  activeReading: () => request<{ reading: OpenedLetterDto | null }>('GET', '/ocean/reading'),
+  closeReading: (id: string) => request<void>('POST', `/ocean/public/${id}/close`),
   // The sender reading their own letter: a pure read that never claims the bottle.
   ownLetter: (id: string) => request<OpenedLetterDto>('GET', `/bottles/sent/${id}/letter`),
   previewRelease: (recipientId: string) =>
@@ -140,6 +143,8 @@ export const api = {
   readLetter: (id: string) => request<OpenedLetterDto>('GET', `/shore/bottles/${id}/letter`),
   notifications: () => request<{ notifications: NotificationDto[] }>('GET', '/notifications'),
   markNotificationsRead: () => request<void>('POST', '/notifications/read-all'),
+  // The device's zone, reported on every start and resume; the account keeps the last one.
+  syncTimeZone: (timeZone: string) => request<MeResponse>('PUT', '/auth/time-zone', { timeZone }),
   devStatus: () => request<DevStatus>('GET', '/dev/status'),
   devAdvance: (ms: number) => request<DevStatus>('POST', '/dev/advance', { ms }),
   devArrive: (bottleId: string) => request<DevStatus>('POST', '/dev/arrive', { bottleId }),

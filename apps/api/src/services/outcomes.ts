@@ -1,5 +1,10 @@
-import { and, desc, eq, isNull } from 'drizzle-orm';
-import type { OpenedLetterDto, OutcomeVisibilityDto, PublicBottleDto } from '@mib/shared';
+import { and, desc, eq, gt, isNull } from 'drizzle-orm';
+import {
+  RISK_POLICY,
+  type OpenedLetterDto,
+  type OutcomeVisibilityDto,
+  type PublicBottleDto,
+} from '@mib/shared';
 import type { DbOrTx } from '../db/client.js';
 import * as t from '../db/schema.js';
 import {
@@ -80,6 +85,8 @@ export function commitLoss(
       completedAt: at,
       lossReason: reason,
       outcomeAt: at,
+      // An adrift bottle is listed publicly for exactly 72 hours from this moment.
+      publicDeadlineAt: reason === 'adrift' ? at + RISK_POLICY.publicListingMs : null,
       outcomeProgress: progress,
       outcomeChartX: Math.round(point.x),
       outcomeChartY: Math.round(point.y),
@@ -140,6 +147,7 @@ export function publicOpeningOf(db: DbOrTx, bottleId: string) {
 // through here. Bottles between blocked accounts are hidden in both directions, moderation
 // applies as everywhere else, and a bottle someone has opened is gone from the map for everyone.
 export function listPublicOcean(ctx: AppContext, viewer: AuthUser): PublicBottleDto[] {
+  const now = ctx.clock.now();
   const rows = ctx.db
     .select()
     .from(t.bottles)
@@ -150,6 +158,9 @@ export function listPublicOcean(ctx: AppContext, viewer: AuthUser): PublicBottle
         eq(t.bottles.lossReason, 'adrift'),
         eq(t.bottles.moderationStatus, 'clear'),
         isNull(t.publicOpenings.bottleId),
+        isNull(t.bottles.publicExpiredAt),
+        // The deadline is enforced here even before the worker has recorded the expiry.
+        gt(t.bottles.publicDeadlineAt, now),
       ),
     )
     .orderBy(desc(t.bottles.outcomeAt))
@@ -158,6 +169,7 @@ export function listPublicOcean(ctx: AppContext, viewer: AuthUser): PublicBottle
   const out: PublicBottleDto[] = [];
   for (const b of rows) {
     if (b.outcomeLng === null || b.outcomeLat === null || b.outcomeAt === null) continue;
+    if (b.publicDeadlineAt === null) continue;
     if (b.senderId !== viewer.id && isBlockedEitherWay(ctx.db, viewer.id, b.senderId)) continue;
     out.push({
       id: b.id,
@@ -165,10 +177,15 @@ export function listPublicOcean(ctx: AppContext, viewer: AuthUser): PublicBottle
       lostAt: new Date(b.outcomeAt).toISOString(),
       position: { geo: { lng: b.outcomeLng, lat: b.outcomeLat } },
       mine: b.senderId === viewer.id,
+      expiresAt: new Date(b.publicDeadlineAt).toISOString(),
     });
   }
   return out;
 }
+
+// How long a finder may come back to the letter after opening it: a short, server-enforced
+// window for a refresh or a dropped connection, not an archive.
+export const READING_SESSION_MS = 15 * 60 * 1000;
 
 // Opening a bottle found adrift. One server-owned action, one transaction: the opening row is
 // inserted (its primary key is the bottle id, so the insert itself picks the single winner of a
@@ -210,10 +227,28 @@ export function openPublicBottle(
       if (existing.openedById !== user.id) {
         throw conflict('already_opened', 'Another traveller opened this bottle first.');
       }
-      return { bottle, openedAt: existing.openedAt };
+      // The finder's own reading session: recoverable only while it is open and unexpired.
+      if (existing.closedAt !== null || (existing.sessionExpiresAt ?? 0) <= now) {
+        throw conflict('reading_closed', 'You have already read this letter.');
+      }
+      return { bottle, openedAt: existing.openedAt, until: existing.sessionExpiresAt! };
+    }
+    // Opening and expiry resolve under the same writer: at the deadline the bottle is gone.
+    if (
+      bottle.publicExpiredAt !== null ||
+      bottle.publicDeadlineAt === null ||
+      bottle.publicDeadlineAt <= now
+    ) {
+      throw conflict('listing_expired', 'This bottle is no longer on the public map.');
     }
     tx.insert(t.publicOpenings)
-      .values({ bottleId, openedById: user.id, openedAt: now })
+      .values({
+        bottleId,
+        openedById: user.id,
+        openedAt: now,
+        sessionExpiresAt: now + READING_SESSION_MS,
+        closedAt: null,
+      })
       .onConflictDoNothing()
       .run();
     const winner = publicOpeningOf(tx, bottleId)!;
@@ -249,9 +284,54 @@ export function openPublicBottle(
     return {
       bottle: tx.select().from(t.bottles).where(eq(t.bottles.id, bottleId)).get()!,
       openedAt: now,
+      until: now + READING_SESSION_MS,
     };
   });
-  return openedLetter(ctx, opened.bottle, 'public', opened.openedAt);
+  return {
+    ...openedLetter(ctx, opened.bottle, 'public', opened.openedAt),
+    readingExpiresAt: new Date(opened.until).toISOString(),
+  };
+}
+
+// The finder's still-open reading, if any — what a refresh or a dropped connection recovers.
+// Bound to the account that opened the bottle; nothing here can start a new reading.
+export function activeReading(ctx: AppContext, user: AuthUser): OpenedLetterDto | null {
+  const now = ctx.clock.now();
+  const row = ctx.db
+    .select({ opening: t.publicOpenings, bottle: t.bottles })
+    .from(t.publicOpenings)
+    .innerJoin(t.bottles, eq(t.bottles.id, t.publicOpenings.bottleId))
+    .where(
+      and(
+        eq(t.publicOpenings.openedById, user.id),
+        isNull(t.publicOpenings.closedAt),
+        gt(t.publicOpenings.sessionExpiresAt, now),
+        eq(t.bottles.moderationStatus, 'clear'),
+      ),
+    )
+    .orderBy(desc(t.publicOpenings.openedAt))
+    .get();
+  if (!row) return null;
+  return {
+    ...openedLetter(ctx, row.bottle, 'public', row.opening.openedAt),
+    readingExpiresAt: new Date(row.opening.sessionExpiresAt!).toISOString(),
+  };
+}
+
+// Closing the reader ends the finder's access at once. Idempotent; the opening row (who, when)
+// is kept for the journey's integrity, only the reading window closes.
+export function closeReading(ctx: AppContext, user: AuthUser, bottleId: string): void {
+  ctx.db
+    .update(t.publicOpenings)
+    .set({ closedAt: ctx.clock.now() })
+    .where(
+      and(
+        eq(t.publicOpenings.bottleId, bottleId),
+        eq(t.publicOpenings.openedById, user.id),
+        isNull(t.publicOpenings.closedAt),
+      ),
+    )
+    .run();
 }
 
 // ---------- private marker visibility ----------

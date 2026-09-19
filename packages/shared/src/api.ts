@@ -45,8 +45,14 @@ export const SessionResponseSchema = z.object({
     shoreId: IdSchema.nullable(),
     // Only ever returned to the account owner; null for accounts created before e-mail existed.
     email: z.string().nullable(),
+    // The IANA zone the account's nights are counted in (spec §9.3): first learned from the
+    // device and re-synced whenever the app starts or resumes. Null until a device has said.
+    timeZone: z.string().nullable(),
   }),
 });
+
+export const TimeZoneRequestSchema = z.object({ timeZone: z.string().min(1).max(64) });
+export type TimeZoneRequest = z.infer<typeof TimeZoneRequestSchema>;
 export type SessionResponse = z.infer<typeof SessionResponseSchema>;
 
 export const MeResponseSchema = SessionResponseSchema.shape.user;
@@ -200,6 +206,22 @@ export const OutcomeVisibilitySchema = z.object({
 });
 export type OutcomeVisibilityDto = z.infer<typeof OutcomeVisibilitySchema>;
 
+// A storm window of the server's risk schedule, sent so the map draws exactly the storms that
+// can matter (and the ones that cannot: after the risk cap, they are scenery).
+export const StormWindowSchema = z.object({
+  startsAt: z.string(),
+  endsAt: z.string(),
+});
+export type StormWindowDto = z.infer<typeof StormWindowSchema>;
+
+// Where an adrift bottle stands on the public map: listed until its deadline, opened by a
+// finder, or removed unopened after 72 hours.
+export const PublicListingSchema = z.object({
+  deadlineAt: z.string(),
+  status: z.enum(['listed', 'opened', 'expired']),
+});
+export type PublicListingDto = z.infer<typeof PublicListingSchema>;
+
 export const SentBottleSchema = z.object({
   id: IdSchema,
   state: BottleStateSchema,
@@ -218,6 +240,10 @@ export const SentBottleSchema = z.object({
   // Null until the sea ends the journey; then the persisted loss/sinking record.
   outcome: OutcomeSchema.nullable(),
   visibility: OutcomeVisibilitySchema.nullable(),
+  // Storm windows around now, in the sender's account nights, only while at sea; empty
+  // otherwise. Absolute instants, always inside a night of the account's own zone.
+  storms: z.array(StormWindowSchema),
+  publicListing: PublicListingSchema.nullable(),
   letter: z.object({ text: z.string(), font: LetterFontSchema, characters: z.number().int() }),
   events: z.array(JourneyEventSchema),
   serverTime: z.string(),
@@ -277,6 +303,9 @@ export const OpenedLetterSchema = z.object({
   bottle: ReceivedLetterSchema,
   letter: z.object({ text: z.string(), font: LetterFontSchema, characters: z.number().int() }),
   aging: AgingProfileSchema,
+  // A finder's one-time reading: when the server stops serving it again (null for any other
+  // reader — recipients and senders keep their letters).
+  readingExpiresAt: z.string().nullable().optional(),
 });
 export type OpenedLetterDto = z.infer<typeof OpenedLetterSchema>;
 
@@ -292,6 +321,8 @@ export const PublicBottleSchema = z
     lostAt: z.string(),
     position: z.object({ geo: GeoPointSchema }),
     mine: z.boolean(),
+    // Listed until this moment (72 hours from the loss); opening is refused from then on.
+    expiresAt: z.string(),
   })
   .strict();
 export type PublicBottleDto = z.infer<typeof PublicBottleSchema>;
@@ -317,6 +348,7 @@ export const NOTIFICATION_KINDS = [
   'sent_adrift',
   'sent_sunk',
   'sent_found',
+  'sent_expired',
   'sent_cancelled',
   'other',
 ] as const;

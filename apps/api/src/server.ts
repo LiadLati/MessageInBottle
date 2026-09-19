@@ -18,6 +18,7 @@ async function main(): Promise<void> {
   const { DevClock, SystemClock } = await import('./lib/clock.js');
   const { createMailer } = await import('./lib/mail.js');
   const { runJourneyTick } = await import('./services/journey.js');
+  const { activatePublicListings } = await import('./services/risk.js');
   const { serve } = await import('@hono/node-server');
 
   const config = loadConfig();
@@ -33,6 +34,9 @@ async function main(): Promise<void> {
     config,
     mailer: createMailer(config.mail),
   };
+  // Adrift bottles listed before the 72-hour rule existed get a full 72 hours from now.
+  const activated = activatePublicListings(ctx);
+  if (activated > 0) console.log(`Public listing deadline set for ${activated} legacy bottle(s).`);
   const app = createApp(ctx);
 
   // In-process journey worker. Deterministic catch-up means a missed tick is harmless.

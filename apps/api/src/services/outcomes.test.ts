@@ -19,6 +19,7 @@ import {
   commitLoss,
   devLoseBottle,
   listPublicOcean,
+  activeReading,
   markOutcomeSeen,
   openPublicBottle,
 } from './outcomes.js';
@@ -146,7 +147,14 @@ describe('journey outcomes: loss is server-owned, persisted once, and cannot rac
         expect(list.map((b) => b.id)).toEqual([bottleId]); // sunk bottles are never public
         const b = list[0]!;
         expect(PublicBottleSchema.parse(b)).toEqual(b);
-        expect(Object.keys(b).sort()).toEqual(['id', 'lostAt', 'mine', 'position', 'reason']);
+        expect(Object.keys(b).sort()).toEqual([
+          'expiresAt',
+          'id',
+          'lostAt',
+          'mine',
+          'position',
+          'reason',
+        ]);
         expect(b.mine).toBe(viewer.id === ada().id);
         const json = JSON.stringify(b);
         for (const secret of ['Ada', 'Bo', 'driftmoor', 'lantern', 'nodeIds', 'tide was gentle']) {
@@ -183,9 +191,11 @@ describe('journey outcomes: loss is server-owned, persisted once, and cannot rac
       expect(opened.bottle.openedAt).toBe(new Date(at).toISOString());
       // Gone from the map for every viewer, including its sender.
       for (const viewer of [ada(), bo(), cy()]) expect(listPublicOcean(w.ctx, viewer)).toEqual([]);
-      // The finder keeps it in their own archive and can read it again.
-      expect(listReceivedLetters(w.ctx, cy()).map((l) => l.id)).toEqual([bottleId]);
-      expect(readOpenedLetter(w.ctx, cy(), bottleId).letter.text).toBe(opened.letter.text);
+      // A one-time reading: no archive entry and no reread through the received endpoint; the
+      // open reading session itself is recoverable for a short while (see reading tests).
+      expect(listReceivedLetters(w.ctx, cy())).toEqual([]);
+      expect(() => readOpenedLetter(w.ctx, cy(), bottleId)).toThrowError(AppError);
+      expect(activeReading(w.ctx, cy())?.letter.text).toBe(opened.letter.text);
       // The journey outcome is untouched: the sender keeps letter, passport and Lost entry.
       const senders = getSentBottle(w.ctx, ada(), bottleId);
       expect(senders.state).toBe('lost');

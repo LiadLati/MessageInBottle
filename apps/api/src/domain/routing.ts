@@ -129,8 +129,10 @@ function dijkstra(graph: RouteGraph, from: string, to: string): PlannedPath | nu
   return { nodeIds, totalLength: dist.get(to)! };
 }
 
-// Same-shore sends use the shortest local sea loop out to a neighbouring waypoint and back so
-// arrival is never instantaneous (spec §6.3). Returns null if the shore has no water neighbour.
+// Same-shore sends keep a local sea loop out to a neighbouring waypoint and back as the route
+// snapshot, but the journey itself is immediate: release delivers the bottle at once (spec §6.3,
+// decided 2026-09-19), with a planned duration of 0. Returns null if the shore has no water
+// neighbour.
 function localLoop(graph: RouteGraph, shoreNode: string): PlannedPath | null {
   let best: PlannedPath | null = null;
   for (const edge of graph.adjacency.get(shoreNode) ?? []) {

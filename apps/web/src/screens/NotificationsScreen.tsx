@@ -19,6 +19,7 @@ const KIND_ICON: Record<NotificationKind, { icon: IconName; tone: string; label:
   sent_arrived: { icon: 'anchorCheck', tone: 'green', label: 'Reached its destination' },
   received_arrived: { icon: 'bottleIn', tone: 'foam', label: 'A bottle arrived at your shore' },
   sent_found: { icon: 'letters', tone: 'gold', label: 'Read by a finder' },
+  sent_expired: { icon: 'clock', tone: 'muted', label: 'Removed from the public map' },
   sent_cancelled: { icon: 'lost', tone: 'muted', label: 'Delivery unavailable' },
   other: { icon: 'info', tone: 'muted', label: 'Notice' },
 };

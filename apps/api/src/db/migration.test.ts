@@ -16,7 +16,8 @@ import { getMyShore, getSentBottle, openBottle } from '../services/bottles.js';
 import { ManualClock, T0, createTestWorld, releaseInput, testConfig } from '../test/harness.js';
 
 type Row = Record<string, unknown>;
-const NEWEST = '0007_notification_kinds';
+// The migrations an older installation does not have yet: everything from this branch.
+const NEWEST = new Set(['0008_journey_rules', '0009_account_time_zone']);
 
 function tableNames(sqlite: Database.Database): string[] {
   return sqlite
@@ -46,8 +47,8 @@ function legacyMigrationsFolder(): string {
   const journal = JSON.parse(
     fs.readFileSync(path.join(MIGRATIONS_FOLDER, 'meta', '_journal.json'), 'utf8'),
   ) as { entries: Array<{ tag: string }> };
-  const entries = journal.entries.filter((e) => e.tag !== NEWEST);
-  expect(entries).toHaveLength(journal.entries.length - 1);
+  const entries = journal.entries.filter((e) => !NEWEST.has(e.tag));
+  expect(entries).toHaveLength(journal.entries.length - NEWEST.size);
   fs.mkdirSync(path.join(dir, 'meta'));
   fs.writeFileSync(
     path.join(dir, 'meta', '_journal.json'),
@@ -81,12 +82,14 @@ describe('migrating a populated database', () => {
     expect(midway.position.progress).toBeCloseTo(0.5, 3);
     const sourceSqlite = (source.db as unknown as { $client: Database.Database }).$client;
 
-    // 2. … and replay those rows into a database at the previous schema (no notifications.kind column, no public_openings
-    //    table), exactly what an older installation holds on disk.
+    // 2. … and replay those rows into a database at the previous schema (no risk_decisions table,
+    //    no public-listing columns), exactly what an older installation holds on disk.
     const legacyDir = legacyMigrationsFolder();
     const { db, sqlite } = createDb(':memory:');
     runMigrations(db, legacyDir);
-    expect(columnsOf(sqlite, 'notifications')).not.toContain('kind');
+    expect(tableNames(sqlite)).not.toContain('risk_decisions');
+    expect(columnsOf(sqlite, 'bottles')).not.toContain('risk_policy_version');
+    expect(columnsOf(sqlite, 'users')).not.toContain('time_zone');
     sqlite.pragma('foreign_keys = OFF');
     for (const [table, rows] of Object.entries(dump(sourceSqlite))) {
       if (!tableNames(sqlite).includes(table)) continue;
@@ -105,7 +108,10 @@ describe('migrating a populated database', () => {
 
     // 3. Upgrade in place, then run the additive seed the server runs at boot.
     runMigrations(db);
-    expect(columnsOf(sqlite, 'notifications')).toContain('kind');
+    expect(tableNames(sqlite)).toContain('risk_decisions');
+    expect(columnsOf(sqlite, 'bottles')).toContain('public_deadline_at');
+    expect(columnsOf(sqlite, 'public_openings')).toContain('session_expires_at');
+    expect(columnsOf(sqlite, 'users')).toContain('time_zone_since');
     expect(columnsOf(sqlite, 'bottles')).toContain('outcome_at');
     seedChart(db, testConfig().defaultShoreCapacity, T0);
 
