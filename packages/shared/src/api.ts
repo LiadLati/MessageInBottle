@@ -234,8 +234,12 @@ export const SentBottleSchema = z.object({
   // Null until the sea ends the journey; then the persisted loss/sinking record.
   outcome: OutcomeSchema.nullable(),
   visibility: OutcomeVisibilitySchema.nullable(),
-  // Storm windows around now (server zone), only while at sea; empty otherwise.
+  // Storm windows around now, in the bottle's own night at sea, only while at sea; empty
+  // otherwise. They are absolute instants: every reader, in every zone, draws the same storm.
   storms: z.array(StormWindowSchema),
+  // Minutes from UTC to the clock this bottle's nights are kept by (its own meridian at sea):
+  // the sea view shows the sky where the bottle is, not the sky where the reader is standing.
+  nightOffsetMinutes: z.number().int(),
   publicListing: PublicListingSchema.nullable(),
   letter: z.object({ text: z.string(), font: LetterFontSchema, characters: z.number().int() }),
   events: z.array(JourneyEventSchema),

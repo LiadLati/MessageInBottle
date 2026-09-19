@@ -223,11 +223,13 @@ The weather that ships today is **presentation only**. It is deliberately not th
 | --- | --- | --- |
 | What it does | Changes what the Ocean map, the sea view and the My Shore scene draw: palette, a per-bottle storm glyph and chip, waves, rain, foam, wetness | Would change journey outcomes: stranding, sinking, destruction, drift, rescue |
 | Effect on a journey | **None.** It never alters a route, a duration, an arrival time, a progress value, a capacity or a risk | Would alter state and timing |
-| Where it lives | Client presentation over a deterministic, versioned schedule (`packages/shared/src/weather.ts`) | Server-owned weather records and resolved exposure events |
+| Where it lives | Client presentation over a deterministic, versioned schedule (`packages/shared/src/weather.ts`); a bottle's own storms come from the server (§9.3) | Server-owned weather records and resolved exposure events |
 | Persistence | None needed: the schedule is reproducible from the bottle or user id, the schedule version and the time window | Persisted events, so fate is never rerolled |
 | Copy rule | Weather is always labelled *simulated* and stated in words; it may never claim to delay or endanger a bottle | Would carry real consequences and must say so |
 
 Until the numerical probabilities in this section are approved, no sinking, drift, public-claim or other destructive transition may be driven by weather. The presentation layer is built so the schedule can move behind a server endpoint without changing any displayed value.
+
+Amended 2026-09-19 (§9.3): the probabilities are approved, and a bottle's own storms are now scheduled by the server and sent to the client, so the storm drawn on a bottle is exactly the window in which its fate can be decided. Everything else in this table still holds — the palette, the sea and the shore remain presentation, and My Shore weather is cosmetic and independent.
 
 **Weather is per bottle.** On the Ocean map a storm belongs to one bottle, not to a region: two bottles on the same route may be in different weather, the map draws no storm areas, fog patches or map-wide rain, and a storm-affected bottle is marked only by a small glyph above its own marker and an `In a storm` chip on its card. The card's `View at sea` action — never a marker tap — opens a dedicated real-time view of that bottle on open water, which shows the same weather state and can neither change it nor anything about the journey. The view never exposes letter content and is offered only while the bottle is at sea.
 
@@ -245,7 +247,7 @@ D08 is resolved for journeys released from this version on. The policy is server
 
 | Rule | Value (policy v1) |
 | --- | --- |
-| Storm chance | 25 % per night per bottle, independent per bottle, on the existing day/night convention (nights 19:00–07:00 local in the server's configured zone); calm nights carry no risk |
+| Storm chance | 25 % per night per bottle, independent per bottle, on the existing day/night convention (nights 19:00–07:00 in the bottle's own night at sea — see below); calm nights carry no risk |
 | Storm length | 40–100 minutes within the night |
 | Risk decisions | at most one per storm night, taken at the midpoint of the storm window (a stable point after the storm has become visible) |
 | Eligibility | the bottle is still at sea at the decision time and its progress is below the internal protection threshold |
@@ -253,6 +255,8 @@ D08 is resolved for journeys released from this version on. The policy is server
 | Cap | only the first five eligible decisions of a journey carry risk — a maximum of about 4.9 % per journey |
 | Outcome on loss | 75 % adrift (public ocean), 25 % sunk |
 | Same harbour | no exposure — the journey never sails |
+
+**Whose night it is (amended 2026-09-19, policy v2).** A bottle's night is the night where the bottle is: 19:00–07:00 mean solar time at the meridian it is sailing on, taken from its own route. One rule serves the schedule, the storm shown on the map and the decision, so a storm that can cost a bottle is visible to whoever is watching, wherever they are — the hour on the reader's clock never hides it, and the map's palette, which does follow the reader's local day and night, no longer decides what weather a bottle is in. Being a position rather than a zone, the rule needs no configuration, works for readers in every time zone at once, and has no daylight saving: every night at sea is twelve hours. Journeys released under the earlier version, which measured nights in a single configured zone, keep the schedule they were given.
 
 The scheduling and every decision are deterministic from the bottle, the night and the policy version and are persisted, so refreshes, retries, restarts, clock changes, selection and the sea viewer never reroll fate; decisions that fell due while nothing was running are taken later at their original moment. A loss commits through the same transactional service as before: arrival and loss can never both commit, the destination slot is released once and the sender receives the existing loss notification exactly once. Storms may still be shown after the cap or the protection threshold as weather only. The protection threshold itself is internal and never appears in user-facing copy. The My Shore weather stays independent and cosmetic. If the sea viewer is open when an outcome commits, it reconciles to the saved state.
 

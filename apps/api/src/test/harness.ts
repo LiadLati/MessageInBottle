@@ -1,4 +1,5 @@
 import { eq } from 'drizzle-orm';
+import { RISK_POLICY_VERSION } from '@mib/shared';
 import type { AppConfig } from '../config.js';
 import { createDb, runMigrations, type Db } from '../db/client.js';
 import * as t from '../db/schema.js';
@@ -44,7 +45,7 @@ export function testConfig(overrides: Partial<AppConfig> = {}): AppConfig {
       smtp: { host: '', port: 587, secure: false, user: '', pass: '' },
     },
     timeZone: 'UTC',
-    riskPolicyVersion: 1,
+    riskPolicyVersion: RISK_POLICY_VERSION,
     ...overrides,
   };
 }

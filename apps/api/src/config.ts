@@ -32,11 +32,12 @@ export interface AppConfig {
   // Public URL of the web app, used to build links in e-mails.
   appUrl: string;
   mail: MailConfig;
-  // The IANA zone in which nights are counted for the journey risk policy (spec §9.3). Set it
-  // to the audience's zone so the storms that can matter are the ones people see at night.
+  // Legacy: the IANA zone policy v1 counted nights in (spec §9.3). Read only for journeys still
+  // sailing under v1, so their schedule is the one they were released with. From v2 a bottle's
+  // nights come from its own meridian, which needs no zone and never changes with the clocks.
   timeZone: string;
   // Journey risk policy version applied to *new* journeys: 0 disables automatic outcomes,
-  // RISK_POLICY_VERSION (1) enables the approved policy. Existing journeys keep the version
+  // RISK_POLICY_VERSION (2) enables the approved policy. Existing journeys keep the version
   // they were released under.
   riskPolicyVersion: number;
 }

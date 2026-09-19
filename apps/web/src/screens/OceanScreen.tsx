@@ -1,5 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from 'react';
-import type { OpenedLetterDto, PublicBottleDto, SentBottleSummaryDto } from '@mib/shared';
+import {
+  solarPhaseAt,
+  type OpenedLetterDto,
+  type PublicBottleDto,
+  type SentBottleSummaryDto,
+} from '@mib/shared';
 import { ApiError, api } from '../api/client.js';
 import { LetterModal } from '../components/LetterModal.js';
 import { OceanMap, SeaViewer } from '../components/lazy.js';
@@ -113,7 +118,7 @@ export function OceanScreen({
   onOpenProfile,
 }: Props) {
   const { user } = useSession();
-  const { phase, nowMs, oceanStormOverride } = useWeather();
+  const { phase, phaseOverride, nowMs, oceanStormOverride } = useWeather();
   const [mode, setMode] = useState<OceanMode>(focusPublicId ? 'public' : 'private');
   const bottles = useAsync(() => api.sentBottles(), [], POLL_MS);
   const chart = useAsync(() => api.chart(), []);
@@ -166,14 +171,15 @@ export function OceanScreen({
   const publicRoutes = useMemo(() => publicList.map(publicRoute), [publicList]);
   const routes = isPublic ? publicRoutes : privateRoutes;
 
-  // Per-bottle simulated weather: night only, only for this sender's own at-sea bottles, and a
-  // deterministic schedule per bottle id — so two bottles on one route can differ, and nothing
-  // rerolls on refresh, selection or opening the sea viewer.
+  // Per-bottle simulated weather: the server's own storm windows, for this sender's at-sea
+  // bottles — so two bottles on one route can differ, nothing rerolls on refresh, selection or
+  // opening the sea viewer, and a storm is shown whenever it is night where that bottle is,
+  // whatever the hour is here.
   // Keep the weather map referentially stable while its values are unchanged, so the periodic
   // clock tick does not make the map re-run its marker effect for nothing: the map is rebuilt
   // only when its serialised form changes.
   const weatherKey = Object.entries(
-    oceanWeatherMap(list, nowMs, { phase, force: overrideToForce(oceanStormOverride) }),
+    oceanWeatherMap(list, nowMs, { force: overrideToForce(oceanStormOverride) }),
   )
     .map(([id, w]) => `${id}=${w}`)
     .join(',');
@@ -187,7 +193,7 @@ export function OceanScreen({
       ),
     [weatherKey],
   );
-  const weatherOf = (id: string) => (phase === 'night' ? (weather[id] ?? 'calm') : 'calm');
+  const weatherOf = (id: string) => weather[id] ?? 'calm';
   // Reading a letter from the public ocean: the sender re-reading their own (a pure read), or a
   // finder reading the bottle they have just opened. Both use the ordinary letter reader.
   const [reading, setReading] = useState<{
@@ -634,7 +640,13 @@ export function OceanScreen({
         <SeaViewer
           bottle={viewingBottle}
           weather={viewingBottle ? weatherOf(viewingBottle.id) : 'calm'}
-          phase={phase}
+          // The sky out there, not the sky here: the bottle's own solar time decides it.
+          // The development sky switch still previews both lightings.
+          phase={
+            viewingBottle && phaseOverride === 'auto'
+              ? solarPhaseAt(nowMs, viewingBottle.nightOffsetMinutes * 60_000)
+              : phase
+          }
           onBack={() => setViewing(null)}
         />
       ) : null}
@@ -647,7 +659,7 @@ function StormChip() {
   return (
     <span
       className="status-chip storm-chip"
-      title="Simulated weather — it does not affect the journey"
+      title="Simulated weather in this bottle's own night at sea"
     >
       <span aria-hidden>▲</span>
       In a storm

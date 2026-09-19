@@ -105,6 +105,7 @@ export function SeaViewer({ bottle, weather, phase, onBack }: Props) {
     <div
       className={`sea-viewer ${sceneWeather}${closing ? ' closing' : ''}`}
       data-weather={sceneWeather}
+      data-phase={phase}
       onKeyDown={onKeyDown}
     >
       <div

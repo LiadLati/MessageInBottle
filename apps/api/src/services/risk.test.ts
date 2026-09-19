@@ -1,12 +1,22 @@
 import type Database from 'better-sqlite3';
 import { eq } from 'drizzle-orm';
 import { beforeEach, describe, expect, it } from 'vitest';
-import { RISK_POLICY, nightsOverlapping, stormForNight, type StormNight } from '@mib/shared';
+import {
+  RISK_POLICY,
+  RISK_POLICY_VERSION,
+  nightRuleOf,
+  nightsOverlapping,
+  solarOffsetMs,
+  solarPhaseAt,
+  stormForNight,
+  type NightWindow,
+  type StormNight,
+} from '@mib/shared';
 import * as t from '../db/schema.js';
 import { AppError } from '../lib/errors.js';
 import { getMyShore, getSentBottle, listReceivedLetters, readOwnLetter } from './bottles.js';
 import type { AppContext } from './context.js';
-import { commitArrivalIfDue, runJourneyTick } from './journey.js';
+import { activePlan, commitArrivalIfDue, runJourneyTick } from './journey.js';
 import { listNotifications } from './notifications.js';
 import {
   READING_SESSION_MS,
@@ -16,8 +26,18 @@ import {
   listPublicOcean,
   openPublicBottle,
 } from './outcomes.js';
+import { loadGraphVersion } from './chart.js';
+import { pathGeoPoints } from '../domain/routing.js';
 import { heldReservations, releaseBottle } from './release.js';
-import { activatePublicListings, expirePublicListings, processRiskDecisions } from './risk.js';
+import {
+  activatePublicListings,
+  expirePublicListings,
+  journeyNights,
+  nightOffsetMinutesFor,
+  processRiskDecisions,
+  stormWindowsFor,
+  unwrapLongitudes,
+} from './risk.js';
 import { T0, createTestWorld, releaseInput, type TestWorld } from '../test/harness.js';
 
 const HOUR = 60 * 60 * 1000;
@@ -29,16 +49,32 @@ function slowWorld(overrides = {}) {
   return createTestWorld({ msPerChartUnit: 24 * HOUR, minJourneyMs: 20 * DAY, ...overrides });
 }
 
-// The first night on which this bottle has a storm whose decision falls inside its journey.
-function firstStorm(w: TestWorld, bottleId: string, releasedAt: number, span = 60 * DAY) {
-  for (const night of nightsOverlapping(releasedAt, releasedAt + span, w.ctx.config.timeZone)) {
-    const s = stormForNight(bottleId, night);
+// The nights a released journey sails through, under the policy it carries: exactly what the
+// worker walks and what the map publishes.
+function nightsOf(w: TestWorld, bottleId: string, from: number, to: number): NightWindow[] {
+  const bottle = w.db.select().from(t.bottles).where(eq(t.bottles.id, bottleId)).get()!;
+  const plan = activePlan(w.db, bottleId)!;
+  return journeyNights(w.ctx, plan, bottle.riskPolicyVersion ?? RISK_POLICY_VERSION, from, to);
+}
+
+// The first night on which `stormId` has a storm whose decision falls inside the journey. The
+// nights come from `routeOf`'s journey, so a searched-for id is scheduled on the same route it
+// will be given.
+function firstStorm(
+  w: TestWorld,
+  routeOf: string,
+  stormId: string,
+  releasedAt: number,
+  span = 60 * DAY,
+) {
+  for (const night of nightsOf(w, routeOf, releasedAt, releasedAt + span)) {
+    const s = stormForNight(stormId, night, RISK_POLICY_VERSION);
     if (s && s.startsAt >= releasedAt) return s;
   }
   throw new Error('no storm night found');
 }
 
-describe('automatic storm outcomes (policy v1)', () => {
+describe(`automatic storm outcomes (policy v${RISK_POLICY_VERSION})`, () => {
   let w: TestWorld;
   const ada = () => w.user('ada');
   const bo = () => w.user('bo');
@@ -53,7 +89,7 @@ describe('automatic storm outcomes (policy v1)', () => {
     const fresh = releaseBottle(w.ctx, ada(), releaseInput(bo().id, 'key-0000000001')).bottleId;
     expect(
       w.db.select().from(t.bottles).where(eq(t.bottles.id, fresh)).get()!.riskPolicyVersion,
-    ).toBe(1);
+    ).toBe(RISK_POLICY_VERSION);
     // A journey released before activation (null version): a year of nights, never a decision.
     w.db.update(t.bottles).set({ riskPolicyVersion: null }).where(eq(t.bottles.id, fresh)).run();
     w.clock.advance(30 * DAY);
@@ -69,7 +105,7 @@ describe('automatic storm outcomes (policy v1)', () => {
 
   it("takes each storm night's decision exactly once, at the storm midpoint, and never again", () => {
     const id = releaseBottle(w.ctx, ada(), releaseInput(bo().id, 'key-0000000002')).bottleId;
-    const storm = firstStorm(w, id, T0);
+    const storm = firstStorm(w, id, id, T0);
     // Just before the decision moment: nothing yet, even though the storm is visible.
     w.clock.set(storm.decisionAt - 1);
     expect(processRiskDecisions(w.ctx, w.clock.now()).decided).toBe(0);
@@ -79,7 +115,7 @@ describe('automatic storm outcomes (policy v1)', () => {
     const row = decisions(id)[0]!;
     expect(row).toMatchObject({
       nightKey: storm.key,
-      policyVersion: 1,
+      policyVersion: RISK_POLICY_VERSION,
       stormStartsAt: storm.startsAt,
       stormEndsAt: storm.endsAt,
       decisionAt: storm.decisionAt,
@@ -123,15 +159,15 @@ describe('automatic storm outcomes (policy v1)', () => {
       .where(eq(t.riskDecisions.bottleId, b))
       .all();
     // Every storm night up to now has exactly one row in both worlds, in night order.
-    const expectedNights = (id: string, from: number) =>
-      nightsOverlapping(from, T0 + 9 * DAY, 'UTC')
-        .map((n) => stormForNight(id, n))
+    const expectedNights = (world: TestWorld, id: string, from: number) =>
+      nightsOf(world, id, from, T0 + 9 * DAY)
+        .map((n) => stormForNight(id, n, RISK_POLICY_VERSION))
         .filter(
           (s): s is StormNight => s !== null && s.startsAt >= from && s.decisionAt <= T0 + 9 * DAY,
         )
         .map((s) => s.key);
-    expect(caughtUp.map((r) => r.nightKey)).toEqual(expectedNights(b, T0));
-    expect(decisions(a).map((r) => r.nightKey)).toEqual(expectedNights(a, T0));
+    expect(caughtUp.map((r) => r.nightKey)).toEqual(expectedNights(off, b, T0));
+    expect(decisions(a).map((r) => r.nightKey)).toEqual(expectedNights(w, a, T0));
     expect(nightly[9]).toBe(
       decisions(a)
         .map((r) => `${r.nightKey}:${r.eligible}:${r.lost}`)
@@ -185,18 +221,18 @@ describe('automatic storm outcomes (policy v1)', () => {
     // Pick, by pure search, an id whose first storm decision loses; then give a released bottle
     // that id (rows rewired with foreign keys off — a test device, the schedule is what is
     // under test). Deterministic, no rolling.
+    const released = releaseBottle(w.ctx, ada(), releaseInput(bo().id, 'key-0000000006')).bottleId;
     let chosen = '';
     let storm: StormNight | null = null;
     for (let i = 0; i < 5000 && !storm; i++) {
       const candidate = `btl_test_loss_${i}`;
-      const s = firstStorm(w, candidate, T0, 30 * DAY);
+      const s = firstStorm(w, released, candidate, T0, 30 * DAY);
       if (s.lossDraw < RISK_POLICY.lossChance) {
         chosen = candidate;
         storm = s;
       }
     }
     expect(storm).not.toBeNull();
-    const released = releaseBottle(w.ctx, ada(), releaseInput(bo().id, 'key-0000000006')).bottleId;
     const sqlite = (w.db as unknown as { $client: Database.Database }).$client;
     sqlite.pragma('foreign_keys = OFF');
     for (const table of ['bottles', 'route_plans', 'capacity_reservations', 'journey_events']) {
@@ -419,5 +455,182 @@ describe('immediate arrival at the same harbour', () => {
     const sailing = releaseBottle(w.ctx, ada, releaseInput(cy.id, 'key-diff-0000001')).bottleId;
     expect(getSentBottle(w.ctx, ada, sailing).state).toBe('at_sea');
     expect(getMyShore(w.ctx, cy).bottles).toEqual([]);
+  });
+});
+
+// One rule decides when a bottle may be at risk, when a storm is drawn on it and what sky the
+// sea view shows: the bottle's own night, 19:00–07:00 mean solar time at the meridian it is
+// sailing on. It is the same instants for every reader in the world, so a storm that carries a
+// decision cannot be hidden behind anybody's daylight, and there is no daylight saving at sea.
+describe('one night rule for the schedule, the map and the decision', () => {
+  let w: TestWorld;
+  const ada = () => w.user('ada');
+  const bo = () => w.user('bo');
+  const bottleRow = (id: string) =>
+    w.db.select().from(t.bottles).where(eq(t.bottles.id, id)).get()!;
+
+  beforeEach(() => {
+    w = slowWorld();
+  });
+
+  it('never decides outside a storm the map is publishing at that very moment', () => {
+    const ids = ['a', 'b', 'c', 'd'].map(
+      (k) => releaseBottle(w.ctx, ada(), releaseInput(bo().id, `key-000000010${k}`)).bottleId,
+    );
+    w.clock.set(T0 + 18 * DAY);
+    processRiskDecisions(w.ctx, w.clock.now());
+    let checked = 0;
+    for (const id of ids) {
+      const rows = w.db
+        .select()
+        .from(t.riskDecisions)
+        .where(eq(t.riskDecisions.bottleId, id))
+        .all();
+      const plan = activePlan(w.db, id)!;
+      // A bottle that was lost is no longer at sea; the question is what was on the map at the
+      // instant the decision was taken, so ask with the state it had then.
+      const atSea = { ...bottleRow(id), state: 'at_sea' as const };
+      for (const row of rows) {
+        checked++;
+        const covering = stormWindowsFor(w.ctx, atSea, plan, row.decisionAt).filter(
+          (win) =>
+            Date.parse(win.startsAt) <= row.decisionAt && row.decisionAt < Date.parse(win.endsAt),
+        );
+        expect(covering).toHaveLength(1);
+        expect(Date.parse(covering[0]!.startsAt)).toBe(row.stormStartsAt);
+        expect(Date.parse(covering[0]!.endsAt)).toBe(row.stormEndsAt);
+        // …and it really is night where the bottle is, by the same clock the sea view reads.
+        const offset = nightOffsetMinutesFor(w.ctx, bottleRow(id), plan, row.decisionAt);
+        expect(solarPhaseAt(row.decisionAt, offset * 60_000)).toBe('night');
+      }
+    }
+    expect(checked).toBeGreaterThan(4);
+  });
+
+  it("does not depend on the server's configured zone any more", () => {
+    const here = releaseBottle(w.ctx, ada(), releaseInput(bo().id, 'key-0000000101')).bottleId;
+    const far = slowWorld({ timeZone: 'Pacific/Kiritimati' });
+    const there = releaseBottle(
+      far.ctx,
+      far.user('ada'),
+      releaseInput(far.user('bo').id, 'key-0000000101'),
+    ).bottleId;
+    const span = [T0, T0 + 10 * DAY] as const;
+    expect(nightsOf(far, there, ...span)).toEqual(nightsOf(w, here, ...span));
+    // The zone rule those journeys replace moved with the configuration — that was the bug.
+    expect(nightsOverlapping(...span, 'Pacific/Kiritimati')).not.toEqual(
+      nightsOverlapping(...span, 'UTC'),
+    );
+  });
+
+  it('keeps a journey already sailing under policy v1 on the nights it was given', () => {
+    const tokyo = slowWorld({ timeZone: 'Asia/Tokyo' });
+    const id = releaseBottle(
+      tokyo.ctx,
+      tokyo.user('ada'),
+      releaseInput(tokyo.user('bo').id, 'key-0000000102'),
+    ).bottleId;
+    tokyo.db.update(t.bottles).set({ riskPolicyVersion: 1 }).where(eq(t.bottles.id, id)).run();
+    const plan = activePlan(tokyo.db, id)!;
+    const bottle = tokyo.db.select().from(t.bottles).where(eq(t.bottles.id, id)).get()!;
+    const now = T0 + 3 * DAY;
+    expect(nightRuleOf(1)).toBe('zone');
+    expect(journeyNights(tokyo.ctx, plan, 1, now - DAY, now + DAY)).toEqual(
+      nightsOverlapping(now - DAY, now + DAY, 'Asia/Tokyo'),
+    );
+    // Its windows are published exactly like everyone else's, so they are just as visible…
+    const published = stormWindowsFor(tokyo.ctx, bottle, plan, now);
+    const expected = nightsOverlapping(now - DAY, now + DAY, 'Asia/Tokyo')
+      .map((night) => stormForNight(id, night, 1))
+      .filter((s): s is StormNight => s !== null && s.endsAt > bottle.releasedAt)
+      .map((s) => ({
+        startsAt: new Date(s.startsAt).toISOString(),
+        endsAt: new Date(s.endsAt).toISOString(),
+      }));
+    expect(published).toEqual(expected);
+    // …and the sky the sea view draws for it is that same zone's clock, not a meridian.
+    expect(nightOffsetMinutesFor(tokyo.ctx, bottle, plan, now)).toBe(9 * 60);
+  });
+
+  it('gives every night twelve hours, through every daylight-saving change', () => {
+    const berlin = slowWorld({ timeZone: 'Europe/Berlin' });
+    const id = releaseBottle(
+      berlin.ctx,
+      berlin.user('ada'),
+      releaseInput(berlin.user('bo').id, 'key-0000000103'),
+    ).bottleId;
+    const plan = activePlan(berlin.db, id)!;
+    const span = [T0, T0 + 60 * DAY] as const; // covers 2026-10-25, when Berlin's clocks go back
+    const sea = journeyNights(berlin.ctx, plan, RISK_POLICY_VERSION, ...span);
+    expect(sea.some((n) => n.key === '2026-10-25')).toBe(true);
+    for (const night of sea) expect(night.endsAt - night.startsAt).toBe(12 * HOUR);
+    // The zone rule gained an hour that night, stretching a bottle's exposure with it.
+    const zoned = nightsOverlapping(...span, 'Europe/Berlin');
+    expect(zoned.some((n) => n.endsAt - n.startsAt === 13 * HOUR)).toBe(true);
+  });
+
+  it('follows a route over the date line without moving the bottle a day', () => {
+    expect(
+      unwrapLongitudes([
+        { lng: 170, lat: 0 },
+        { lng: -170, lat: 0 },
+        { lng: -150, lat: 1 },
+      ]),
+    ).toEqual([
+      { lng: 170, lat: 0 },
+      { lng: 190, lat: 0 },
+      { lng: 210, lat: 1 },
+    ]);
+    expect(
+      unwrapLongitudes([
+        { lng: -170, lat: 0 },
+        { lng: 170, lat: 0 },
+      ]),
+    ).toEqual([
+      { lng: -170, lat: 0 },
+      { lng: -190, lat: 0 },
+    ]);
+    // A real crossing: Honiara to Apia runs straight over the antimeridian.
+    w.db.update(t.users).set({ shoreId: 'shore_sb_honiara' }).where(eq(t.users.id, ada().id)).run();
+    w.db.update(t.users).set({ shoreId: 'shore_ws_apia' }).where(eq(t.users.id, bo().id)).run();
+    const id = releaseBottle(w.ctx, ada(), releaseInput(bo().id, 'key-0000000104')).bottleId;
+    const plan = activePlan(w.db, id)!;
+    const geo = unwrapLongitudes(
+      pathGeoPoints(loadGraphVersion(w.db, plan.graphVersion), plan.nodeIds)!,
+    );
+    expect(Math.max(...geo.map((g) => Math.abs(g.lng)))).toBeGreaterThan(180);
+    const nights = nightsOf(w, id, T0, T0 + 20 * DAY);
+    expect(nights.length).toBeGreaterThan(10);
+    for (let i = 1; i < nights.length; i++) {
+      const gap = nights[i]!.startsAt - nights[i - 1]!.startsAt;
+      expect(gap).toBeGreaterThan(20 * HOUR);
+      expect(gap).toBeLessThan(28 * HOUR);
+      expect(nights[i]!.startsAt).toBeGreaterThan(nights[i - 1]!.endsAt);
+    }
+    // The sky it publishes stays a time of day, whichever side of the line it is on.
+    const offset = nightOffsetMinutesFor(w.ctx, bottleRow(id), plan, T0 + 5 * DAY);
+    expect(Math.abs(offset)).toBeLessThanOrEqual(12 * 60);
+    expect(offset).toBe(Math.round(solarOffsetMs(offset / 4) / 60_000));
+  });
+
+  it('publishes the same instants to every reader, whatever their clock says', () => {
+    const id = releaseBottle(w.ctx, ada(), releaseInput(bo().id, 'key-0000000105')).bottleId;
+    const plan = activePlan(w.db, id)!;
+    // Storms fall on a quarter of the nights: walk forward to the first night that has one.
+    let windows: ReturnType<typeof stormWindowsFor> = [];
+    for (let d = 1; d <= 20 && windows.length === 0; d++) {
+      windows = stormWindowsFor(w.ctx, bottleRow(id), plan, T0 + d * DAY);
+    }
+    expect(windows.length).toBeGreaterThan(0);
+    for (const win of windows) {
+      // Absolute UTC instants: nothing here is a local time anybody has to reinterpret.
+      expect(win.startsAt).toMatch(/Z$/);
+      expect(new Date(win.startsAt).toISOString()).toBe(win.startsAt);
+      const from = Date.parse(win.startsAt);
+      const to = Date.parse(win.endsAt);
+      // Each one sits inside a night of this journey — the same nights the worker walks.
+      const nights = journeyNights(w.ctx, plan, RISK_POLICY_VERSION, from - DAY, to + DAY);
+      expect(nights.some((n) => n.startsAt <= from && to <= n.endsAt)).toBe(true);
+    }
   });
 });

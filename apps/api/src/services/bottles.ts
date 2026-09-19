@@ -28,7 +28,7 @@ import { loadGraphVersion, toShoreDto } from './chart.js';
 import type { AppContext, AuthUser } from './context.js';
 import { activePlan, appendEvent, releaseCapacityOnce, transitionBottle } from './journey.js';
 import { outcomeVisibility, publicOpeningOf } from './outcomes.js';
-import { stormWindowsFor } from './risk.js';
+import { nightOffsetMinutesFor, stormWindowsFor } from './risk.js';
 
 type BottleRow = typeof t.bottles.$inferSelect;
 type PlanRow = typeof t.routePlans.$inferSelect;
@@ -89,7 +89,8 @@ function sentSummary(
         },
     outcome,
     visibility: outcome ? outcomeVisibility(ctx.db, bottle.senderId, bottle.id) : null,
-    storms: stormWindowsFor(ctx, bottle, now),
+    storms: stormWindowsFor(ctx, bottle, plan, now),
+    nightOffsetMinutes: nightOffsetMinutesFor(ctx, bottle, plan, now),
     publicListing: publicListingOf(ctx, bottle, now),
     serverTime: iso(now),
   };

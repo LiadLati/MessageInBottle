@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { OCEAN_SCHEDULE, SHORE_SCHEDULE, activeStormAt } from '@mib/shared';
+import {
+  DAYLIGHT_DEFAULTS,
+  OCEAN_SCHEDULE,
+  SHORE_SCHEDULE,
+  activeStormAt,
+  phaseAt,
+  solarPhaseAt,
+} from '@mib/shared';
 import { bottleWeatherAt, oceanWeatherMap } from './oceanWeather.js';
 import { shoreWeatherAt } from './shoreWeather.js';
 
@@ -17,44 +24,58 @@ const bottle = (
 describe("per-bottle weather from the server's storm windows", () => {
   it('is a storm exactly inside a window, calm outside it', () => {
     const b = bottle('btl_a', [win(T - 60_000, T + 60_000)]);
-    expect(bottleWeatherAt(b, T, { phase: 'night' })).toBe('storm');
-    expect(bottleWeatherAt(b, T + 60_000, { phase: 'night' })).toBe('calm'); // end is exclusive
-    expect(bottleWeatherAt(b, T - 60_001, { phase: 'night' })).toBe('calm');
-    expect(bottleWeatherAt(bottle('btl_b', []), T, { phase: 'night' })).toBe('calm');
+    expect(bottleWeatherAt(b, T)).toBe('storm');
+    expect(bottleWeatherAt(b, T + 60_000)).toBe('calm'); // end is exclusive
+    expect(bottleWeatherAt(b, T - 60_001)).toBe('calm');
+    expect(bottleWeatherAt(bottle('btl_b', []), T)).toBe('calm');
   });
 
-  it('is calm in daylight, whatever the windows say', () => {
-    const b = bottle('btl_day', [win(T - 60_000, T + 60_000)]);
-    expect(bottleWeatherAt(b, T, { phase: 'day' })).toBe('calm');
+  it('shows a storm whatever hour it is where the reader is standing', () => {
+    // The whole point of the server's windows: a storm that can carry a risk decision is never
+    // hidden by the reader's own clock. Midday in Tokyo is still a storm at sea.
+    const b = bottle('btl_zones', [win(T - 60_000, T + 60_000)]);
+    for (const zone of ['Asia/Tokyo', 'America/Los_Angeles', 'Europe/Berlin', 'UTC']) {
+      expect(bottleWeatherAt(b, T)).toBe('storm');
+      // …and at least one of those zones really is in daylight at that instant.
+      void phaseAt(T, zone);
+    }
+    expect(
+      ['Asia/Tokyo', 'America/Los_Angeles', 'Europe/Berlin', 'UTC'].some(
+        (z) => phaseAt(T, z) === 'day',
+      ),
+    ).toBe(true);
+  });
+
+  it("reads the sky at the bottle's own meridian, not the reader's", () => {
+    // 22:00 UTC is night at Greenwich and mid-afternoon 150° west.
+    expect(solarPhaseAt(T, 0)).toBe('night');
+    expect(solarPhaseAt(T, -10 * 3600_000)).toBe('day');
+    expect(DAYLIGHT_DEFAULTS).toEqual({ dayStartHour: 7, dayEndHour: 19 });
   });
 
   it('is calm for anything not at sea, so no storm is ever invented for a landed bottle', () => {
     for (const state of ['delivered', 'opened', 'lost', 'cancelled']) {
-      expect(
-        bottleWeatherAt({ id: 'x', state, storms: [win(T - 1, T + 1)] } as never, T, {
-          phase: 'night',
-        }),
-      ).toBe('calm');
+      expect(bottleWeatherAt({ id: 'x', state, storms: [win(T - 1, T + 1)] } as never, T)).toBe(
+        'calm',
+      );
     }
-    expect(oceanWeatherMap([], T, { phase: 'night' })).toEqual({});
+    expect(oceanWeatherMap([], T)).toEqual({});
   });
 
   it('lets two bottles on the same route hold different weather', () => {
     const map = oceanWeatherMap(
       [bottle('btl_1', [win(T - 1, T + 1)]), bottle('btl_2', [win(T + 3600_000, T + 7200_000)])],
       T,
-      { phase: 'night' },
     );
     expect(map).toEqual({ btl_1: 'storm', btl_2: 'calm' });
   });
 
   it('honours the development force switches without touching any bottle', () => {
     const b = bottle('btl_f', []);
-    expect(bottleWeatherAt(b, T, { phase: 'night', force: 'on' })).toBe('storm');
-    expect(
-      bottleWeatherAt(bottle('btl_g', [win(T - 1, T + 1)]), T, { phase: 'night', force: 'off' }),
-    ).toBe('calm');
-    expect(bottleWeatherAt(b, T, { phase: 'day', force: 'on' })).toBe('calm');
+    expect(bottleWeatherAt(b, T, { force: 'on' })).toBe('storm');
+    expect(bottleWeatherAt(bottle('btl_g', [win(T - 1, T + 1)]), T, { force: 'off' })).toBe('calm');
+    // A forced storm is a preview of the same thing, so it no longer depends on the hour here.
+    expect(bottleWeatherAt(bottle('btl_h', [], 'delivered'), T, { force: 'on' })).toBe('calm');
   });
 });
 

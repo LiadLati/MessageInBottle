@@ -99,14 +99,15 @@ All variables are optional and documented in `.env.example`. The important ones:
 - `MIB_MS_PER_CHART_UNIT` / `MIB_MIN_JOURNEY_MS`: the provisional travel model (spec decision D01 is
   still open). Defaults give roughly 1–4 days per crossing.
 - `MIB_DEFAULT_SHORE_CAPACITY`: destination slots per shore (spec D06 is open).
-- `MIB_RISK_POLICY_VERSION` (default `1`): the automatic storm-outcome policy new journeys are
-  released under (spec §9.3). `1` is the approved policy; `0` releases new journeys with no
-  automatic risk at all. The value is stamped on each bottle at release, so changing it never
-  touches a journey already at sea, and journeys released before the policy existed carry no
-  version and are never put at risk.
-- `MIB_TIME_ZONE` (default `UTC`): the IANA zone whose nights (19:00–07:00 local) the risk worker
-  uses for per-bottle storm nights. Set it to your audience's zone so the storms the server
-  schedules fall in their night as well.
+- `MIB_RISK_POLICY_VERSION` (default `2`): the automatic storm-outcome policy new journeys are
+  released under (spec §9.3). `2` is the approved policy — nights are the bottle's own, at the
+  meridian it is sailing on; `0` releases new journeys with no automatic risk at all. The value
+  is stamped on each bottle at release, so changing it never touches a journey already at sea,
+  and journeys released before the policy existed carry no version and are never put at risk.
+- `MIB_TIME_ZONE` (default `UTC`): **legacy.** Policy v1 measured a bottle's nights in this zone;
+  it is read only for journeys still sailing under v1, so that they keep the schedule they were
+  released with. It has no effect on anything released today, and setting it is never needed —
+  a bottle's nights come from its own position, which needs no zone and has no daylight saving.
 
 ### Map provider
 

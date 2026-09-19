@@ -171,11 +171,12 @@ is additive: `bottles.risk_policy_version`, `bottles.public_deadline_at`,
 `bottles.public_expired_at`, `public_openings.session_expires_at`, `public_openings.closed_at`
 and the new `risk_decisions` table (one row per bottle per storm night, unique on both).
 
-- **Policy v1** (`RISK_POLICY`, `RISK_POLICY_VERSION = 1` in `packages/shared/src/weather.ts`):
-  each night (19:00→07:00 local in `MIB_TIME_ZONE`, the existing day/night convention) every
-  at-sea bottle has, independently, a 25 % chance of a storm of 40–100 minutes; calm nights
-  carry no risk. A storm night yields at most one **risk decision**, taken at the midpoint of the
-  storm window (a stable moment after the storm has become visible). The decision is *eligible*
+- **Policy v2** (`RISK_POLICY`, `RISK_POLICY_VERSION = 2` in `packages/shared/src/weather.ts`):
+  each night (19:00→07:00, the existing day/night convention, measured at the bottle's own
+  meridian — see *One night rule* below) every at-sea bottle has, independently, a 25 % chance
+  of a storm of 40–100 minutes; calm nights carry no risk. A storm night yields at most one
+  **risk decision**, taken at the midpoint of the storm window (a stable moment after the storm
+  has become visible). The decision is *eligible*
   only if the bottle is still at sea at that moment and its planned progress is below 80 %; only
   the first five eligible decisions of a journey carry risk (cap 1 − 0.99⁵ ≈ 4.9 %). An eligible
   decision loses the bottle with probability 1 %; conditional on loss it is adrift with 75 % and
@@ -187,6 +188,25 @@ and the new `risk_decisions` table (one row per bottle per storm night, unique o
   id, the night and the policy version alone. Retries, restarts, clock jumps, selection, the sea
   viewer and refreshes cannot reroll anything, and a new policy version reshuffles nothing for
   bottles stamped with an older one.
+- **One night rule** (amended 2026-09-19, policy v2). A bottle's night is *the night where the
+  bottle is*: 19:00–07:00 mean solar time at its own meridian, one hour per 15° of longitude,
+  taken from its persisted route plan (`seaNightWindow` / `seaNightsOverlapping` in the shared
+  module, `journeyNights` in `services/risk.ts` — the one place the rule is chosen, for the
+  worker and the map alike). Each night is anchored at midday UTC of its own date, so a window
+  is a pure function of the plan and the date, never of when the worker happens to run; the
+  route's longitudes are unwrapped first (179°, 181°, 183°…) so crossing the date line does not
+  move a bottle's clock by a day. There is no zone database, no browser clock and no daylight
+  saving at sea, so **every reader anywhere gets the same instants** and the window the map
+  draws is exactly the window a decision can be taken in. Policy v1 measured nights in
+  `MIB_TIME_ZONE` instead; it survives only so journeys already sailing under it keep their
+  schedule, and their windows are published the same way, so they are just as visible.
+  `SentBottleSummaryDto.nightOffsetMinutes` carries the clock a bottle's nights are kept by (its
+  meridian under v2, the configured zone under v1) so the sea view draws the sky *out there*.
+- **Visibility is the same rule.** `apps/web/src/lib/oceanWeather.ts` shows a storm iff the
+  server's window covers the instant: the browser's own day/night phase no longer gates it
+  (it still chooses the map's palette, and My Shore weather stays independent and cosmetic).
+  This is what closes the hole the zone rule left — a storm scheduled at 02:00 UTC could carry a
+  decision while a reader in Tokyo, in the middle of their afternoon, was shown a calm sea.
 - **Worker.** `runJourneyTick` runs `processRiskDecisions → arrivals → expirePublicListings`.
   For each at-sea bottle with a non-null `risk_policy_version` it walks the storm nights between
   release and now, skips storms that started before release or whose decision is still in the
@@ -196,11 +216,11 @@ and the new `risk_decisions` table (one row per bottle per storm night, unique o
   `at_sea → X` transition, the reservation is released once and the sender is told once. Decisions
   that fell due while nothing was running are taken deterministically on the next tick, at their
   original decision time (progress and arrival are evaluated at that time, not at catch-up).
-- **Activation.** `MIB_RISK_POLICY_VERSION` (default `1`) is stamped on each bottle at release;
+- **Activation.** `MIB_RISK_POLICY_VERSION` (default `2`) is stamped on each bottle at release;
   `0` stamps `null`. Bottles released before this migration have `risk_policy_version = NULL`
-  and are never put at risk, however long they sail; nothing is backfilled. The client no longer
-  computes bottle storms: `SentBottleSummaryDto.storms` carries the server's windows for the
-  nights around now, and the map still shows them only during the browser's own night phase.
+  and are never put at risk, however long they sail; nothing is backfilled, and no schedule that
+  has already been given out is recomputed. The client no longer computes bottle storms:
+  `SentBottleSummaryDto.storms` carries the server's windows for the nights around now.
 - **72-hour public listing.** `commitLoss(…, 'adrift')` sets `public_deadline_at = outcome_at +
   72 h`. `listPublicOcean` and `openPublicBottle` enforce the deadline themselves (`>` now to
   list, `409 listing_expired` at or after it), so the rule holds even if no worker runs;
