@@ -50,6 +50,13 @@
       "when": 1789819243395,
       "tag": "0006_public_openings",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "6",
+      "when": 1789822944742,
+      "tag": "0007_notification_kinds",
+      "breakpoints": true
     }
   ]
 }

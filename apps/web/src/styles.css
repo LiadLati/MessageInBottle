@@ -1717,6 +1717,10 @@ button.avatar {
     animation: none;
     box-shadow: none;
   }
+  /* The cosmetic weather note belongs to the scene, never over the side pane's controls. */
+  .world-screen.two-pane .weather-advisory.shore {
+    right: calc(var(--pane-width) + 24px);
+  }
   .world-screen.two-pane .sheet.preview {
     padding: 0;
   }
@@ -2434,4 +2438,68 @@ button.avatar {
   .map-marker .pennant {
     animation: none;
   }
+}
+
+/* ---------- notifications inbox ---------- */
+.inbox-control {
+  position: relative;
+}
+.inbox-count {
+  position: absolute;
+  top: -5px;
+  right: -5px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 999px;
+  background: var(--status-lost-core);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 16px;
+  text-align: center;
+}
+.inbox-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.inbox-row {
+  align-items: flex-start;
+  cursor: default;
+}
+.inbox-row.unread {
+  border-color: rgba(143, 211, 204, 0.35);
+}
+.inbox-text {
+  display: block;
+  font-size: 14px;
+  line-height: 1.45;
+  color: var(--foam-white);
+}
+.inbox-icon {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 12px;
+  background: rgba(9, 26, 39, 0.7);
+  border: 1px solid rgba(215, 231, 228, 0.16);
+}
+.inbox-icon.tone-gold {
+  color: #e4b94e;
+}
+.inbox-icon.tone-red {
+  color: #e04b32;
+}
+.inbox-icon.tone-green {
+  color: var(--status-arrived);
+}
+.inbox-icon.tone-foam {
+  color: var(--foam);
+}
+.inbox-icon.tone-muted {
+  color: var(--text-secondary);
 }

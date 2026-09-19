@@ -10,6 +10,7 @@ import { FriendsScreen } from './screens/FriendsScreen.js';
 import { LettersScreen } from './screens/LettersScreen.js';
 import { LoginScreen } from './screens/LoginScreen.js';
 import { MyShoreScreen } from './screens/MyShoreScreen.js';
+import { NotificationsScreen } from './screens/NotificationsScreen.js';
 import { OceanScreen } from './screens/OceanScreen.js';
 import { ShoreSetupScreen } from './screens/ShoreSetupScreen.js';
 import { WriteScreen } from './screens/WriteScreen.js';
@@ -65,6 +66,17 @@ function Shell() {
   );
   const unread = (notifications.data?.notifications ?? []).filter((n) => n.readAt === null);
   const reloadNotifications = notifications.reload;
+  // The My Shore badge means one thing: a bottle is waiting there for this user to open. It is
+  // the shore's own sealed count, so a notification about a bottle this user *sent* (lost, sunk,
+  // arrived elsewhere) can never light it, and nothing has to be visited to clear it.
+  const shore = useAsync(
+    () => (user ? api.myShore() : Promise.resolve(null)),
+    [user?.id, epoch],
+    20_000,
+  );
+  const sealedAtShore = (shore.data?.bottles ?? []).filter((b) => b.state === 'delivered').length;
+  const reloadShore = shore.reload;
+  const [inboxOpen, setInboxOpen] = useState(false);
   // Friend-request badge: the server's count of pending requests addressed to this user.
   const friends = useAsync(
     () => (user ? api.friends() : Promise.resolve(null)),
@@ -74,11 +86,17 @@ function Shell() {
   const pendingFriends = friends.data?.pendingIncomingCount ?? 0;
   const reloadFriends = friends.reload;
 
+  // Visiting My Shore refreshes its count (a bottle opened there clears the badge); it no
+  // longer marks notifications read — that is the inbox's job.
   useEffect(() => {
-    if (tab === 'shore' && unread.length > 0) {
-      void api.markNotificationsRead().then(() => reloadNotifications());
-    }
-  }, [tab, unread.length, reloadNotifications]);
+    if (tab === 'shore') void reloadShore();
+  }, [tab, reloadShore]);
+  // Opening the inbox is what marks its notifications read; the count follows.
+  const openInbox = useCallback(() => {
+    setInboxOpen(true);
+    if (unread.length > 0) void api.markNotificationsRead().then(() => reloadNotifications());
+  }, [unread.length, reloadNotifications]);
+  const closeInbox = useCallback(() => setInboxOpen(false), []);
 
   const openProfile = useCallback(() => setProfileOpen(true), []);
   const closeProfile = useCallback(() => setProfileOpen(false), []);
@@ -126,25 +144,38 @@ function Shell() {
     setTab('ocean');
   };
 
-  const on3d = tab === 'shore';
+  // The top strip stays an *arrival* banner: only an unread "a bottle arrived for you" event,
+  // which is the one notification that leads somewhere (My Shore, where the bottle is).
+  const arrivals = unread.filter((n) => n.kind === 'received_arrived');
+  const on3d = tab === 'shore' && !inboxOpen;
   // The daylight palette belongs to the Ocean surface; every other screen keeps the night
   // chrome it was designed with.
   const daylight = tab === 'ocean' ? phase : 'night';
   return (
     <main className={`app-viewport${immersive ? ' immersive' : ''}`} data-daylight={daylight}>
-      {unread.length > 0 && tab !== 'shore' && !immersive ? (
+      {arrivals.length > 0 && tab !== 'shore' && !immersive && !inboxOpen ? (
         <ArrivalBanner
-          message={unread[0]!.message}
-          more={unread.length - 1}
-          onClick={() => setTab('shore')}
+          message={arrivals[0]!.message}
+          more={arrivals.length - 1}
+          onClick={() => leaveOceanTo('shore')}
         />
       ) : null}
       <div key={epoch}>
-        {tab === 'ocean' ? (
+        {inboxOpen ? (
+          <NotificationsScreen
+            notifications={notifications.data?.notifications ?? null}
+            loading={notifications.loading && !notifications.data}
+            error={notifications.error}
+            onBack={closeInbox}
+          />
+        ) : null}
+        {tab === 'ocean' && !inboxOpen ? (
           <OceanScreen
             focusId={focusId}
             focusPublicId={focusPublicId}
             leaveRef={oceanLeave}
+            unread={unread.length}
+            onOpenInbox={openInbox}
             onWrite={() => leaveOceanTo('write')}
             onOpenProfile={openProfile}
             onOpenPassport={(id) => {
@@ -153,17 +184,17 @@ function Shell() {
             }}
           />
         ) : null}
-        {tab === 'write' ? (
+        {tab === 'write' && !inboxOpen ? (
           <WriteScreen
             onReleased={onReleased}
             onChooseShore={chooseShore}
             onImmersive={setImmersive}
           />
         ) : null}
-        {tab === 'shore' ? (
+        {tab === 'shore' && !inboxOpen ? (
           <MyShoreScreen onOpenProfile={openProfile} onChooseShore={chooseShore} />
         ) : null}
-        {tab === 'letters' ? (
+        {tab === 'letters' && !inboxOpen ? (
           <LettersScreen
             passportId={passportId}
             onSelect={setPassportId}
@@ -175,7 +206,7 @@ function Shell() {
             }}
           />
         ) : null}
-        {tab === 'friends' ? <FriendsScreen onChanged={reloadFriends} /> : null}
+        {tab === 'friends' && !inboxOpen ? <FriendsScreen onChanged={reloadFriends} /> : null}
       </div>
       {immersive ? null : <DevPanel refreshKey={epoch} onChanged={() => setEpoch((e) => e + 1)} />}
       {profileOpen ? (
@@ -185,9 +216,10 @@ function Shell() {
         <Nav
           active={tab}
           on3d={on3d}
-          unread={unread.length}
+          unread={sealedAtShore}
           pendingFriends={pendingFriends}
           onSelect={(t) => {
+            setInboxOpen(false);
             if (t === 'letters') setPassportId(null);
             if (t !== 'ocean') leaveOceanTo(t);
             else setTab(t);

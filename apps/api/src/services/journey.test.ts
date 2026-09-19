@@ -76,6 +76,15 @@ describe('journey: visibility, deterministic arrival, opening', () => {
     const notes = listNotifications(w.ctx, bo().id);
     expect(notes).toHaveLength(1);
     expect(notes[0]!.type).toBe('bottle_arrived');
+    expect(notes[0]!.kind).toBe('received_arrived');
+    expect(notes[0]!.message).toBe('A new bottle has arrived at your shore.');
+    // The sender gets their own, separate event — and a worker replay adds nothing to either.
+    const senderNotes = listNotifications(w.ctx, ada().id);
+    expect(senderNotes.map((n) => n.kind)).toEqual(['sent_arrived']);
+    expect(senderNotes[0]!.message).toBe('The bottle you sent to Bo reached its destination.');
+    expect(runJourneyTick(w.ctx).delivered).toBe(0);
+    expect(listNotifications(w.ctx, bo().id)).toHaveLength(1);
+    expect(listNotifications(w.ctx, ada().id)).toHaveLength(1);
     // The slot stays held while delivered-but-unopened (spec §8.3).
     expect(heldReservations(w.db, 'shore_driftmoor_strand')).toBe(1);
   });

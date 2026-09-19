@@ -303,6 +303,9 @@ export const notifications = sqliteTable(
     bottleId: text('bottle_id').references(() => bottles.id),
     // Dedupe key so retries/replays never create a second notification (spec §14).
     dedupeKey: text('dedupe_key').notNull().unique(),
+    // What the row is about (NotificationKind). Null on rows written before the inbox existed;
+    // those are classified from their dedupe key when listed.
+    kind: text('kind'),
     message: text('message').notNull(),
     createdAt: integer('created_at').notNull(),
     readAt: integer('read_at'),

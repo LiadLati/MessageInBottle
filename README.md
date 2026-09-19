@@ -142,6 +142,19 @@ In a development build the dev bar carries **Sky**, **Ocean storm** and **Shore 
 switches. They change only what is drawn — no request is made and no bottle is touched. The sea
 view follows the same switches, so calm/storm and day/night can be previewed there too.
 
+### Notifications
+
+The envelope beside the `+` control in the Ocean header counts unread notifications and opens a
+full-screen inbox (newest first, each row an icon, one sentence and its time; rows do nothing
+when tapped). Four events are recorded, one row per account per bottle, never duplicated by
+worker retries: a bottle you sent reached its destination, was lost at sea and drifted into the
+public ocean, or sank at sea; and a new bottle arrived at your shore. Opening the inbox marks
+everything read, and that is remembered across reloads and sessions. Reading a notice about a
+sunk bottle does not count as seeing its marker on the map.
+
+The badge on **My Shore** means only that a bottle is waiting there for you to open; it clears
+when you open it, not when you read the inbox, and nothing you sent can light it.
+
 ### Lost bottles and the public ocean
 
 The Ocean has a compact **Private / Public** switch. Private is your own journeys; Public shows
@@ -273,7 +286,7 @@ All routes are under `/api`, JSON, bearer-token authenticated except sign-in.
 | GET    | `/shore`                      | Recipient's shore: delivered/opened bottles only              |
 | POST   | `/shore/bottles/:id/open`     | Open a delivered bottle (completes the journey)               |
 | GET    | `/shore/bottles/:id/letter`   | Re-read an opened letter                                      |
-| GET    | `/notifications`              | In-app events (arrival notices are created only on commit)    |
+| GET    | `/notifications`              | Inbox events with a `kind`, newest first; `POST /notifications/read-all` marks them read |
 | GET    | `/dev/status`, POST `/dev/advance`, `/dev/arrive`, `/dev/tick` | Dev-mode clock and worker controls |
 | GET    | `/dev/outbox`                 | Dev-mode captured e-mails (password-reset links)              |
 

@@ -82,7 +82,10 @@ Rules live in `services/` and are tested directly against an in-memory database
 - `capacity_reservations` — exactly one per bottle, `held|released`; released once at opening or a
   terminal outcome via a guarded update.
 - `idempotency_keys` — `(user, scope, key)` with request fingerprint and stored response.
-- `notifications` — with a unique `dedupe_key` so replays never duplicate.
+- `notifications` — with a unique `dedupe_key` so replays never duplicate, and a `kind`
+  (`received_arrived`, `sent_arrived`, `sent_adrift`, `sent_sunk`, `sent_found`,
+  `sent_cancelled`) for the inbox icon; rows written before `kind` existed are classified from
+  their dedupe key when listed. Migration `0007_notification_kinds` is additive.
 - `password_resets` — hashed single-use reset tokens with expiry/used/invalidated timestamps.
 - `dev_clock` — persisted dev offset (dev mode only).
 
@@ -163,6 +166,27 @@ narrow.
   and nothing about it exists in this repository. Until those values are approved the only
   caller of `commitLoss` is the development control `POST /api/dev/lose` (owner only, dev mode
   only); no worker loses a bottle on its own, and production has no automatic outcomes.
+
+## Notifications inbox and the My Shore badge
+
+- **Events.** Four approved events, each one row per account per bottle under its own dedupe
+  key: the recipient's *A new bottle has arrived at your shore* (`arrived:`), and the sender's
+  *reached its destination* (`sent_arrived:`), *lost at sea and drifted into the public ocean*
+  (`lost:` + reason adrift) and *sank at sea* (`lost:` + reason sunk). The two arrival events
+  are written in the same transaction as the arrival, for two different accounts. Worker
+  retries, repeated ticks and replayed requests insert nothing new. Older sender events
+  (`cancelled:`, `public_opened:`) stay in history with their own icons.
+- **Inbox.** The envelope beside the `+` control shows the unread count; opening it marks all of
+  this account's notifications read (`POST /api/notifications/read-all`), which is persisted, so
+  a reload or another session shows the same state. Rows are newest first, information only:
+  no row opens a bottle, navigates, or touches a marker. Reading a sinking notice is not seeing
+  the marker — `bottle_outcome_views` is written only by the map viewport, as before.
+- **My Shore badge.** It was `unread.length` over *every* notification, so a sender's own lost,
+  sunk or cancelled events lit My Shore with nothing to open there, and only a visit to the
+  (possibly empty) shore cleared them. It is now the shore's own count of sealed bottles
+  (`GET /api/shore`), refreshed on each visit: it lights only while a bottle is waiting to be
+  opened, and clears when that bottle is opened — never by reading the inbox. The top strip
+  remains an *arrival* banner and reacts to unread `received_arrived` events only.
 
 ## Deliberately not implemented (per task scope)
 

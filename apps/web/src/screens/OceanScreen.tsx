@@ -24,6 +24,9 @@ interface Props {
   // The shell calls this before navigating to another application screen, so the private map
   // can acknowledge the terminal markers the sender has actually seen on this visit.
   leaveRef?: RefObject<(() => void) | null>;
+  // Unread notifications, shown on the envelope beside the + control.
+  unread?: number;
+  onOpenInbox?: () => void;
   onOpenPassport: (id: string) => void;
   onWrite: () => void;
   onOpenProfile: () => void;
@@ -103,6 +106,8 @@ export function OceanScreen({
   focusId = null,
   focusPublicId = null,
   leaveRef,
+  unread = 0,
+  onOpenInbox,
   onOpenPassport,
   onWrite,
   onOpenProfile,
@@ -399,6 +404,21 @@ export function OceanScreen({
           >
             <Icon name="plus" size={18} />
           </button>
+          {onOpenInbox ? (
+            <button
+              type="button"
+              className="glass-control inbox-control"
+              aria-label={unread > 0 ? `Notifications, ${unread} unread` : 'Notifications'}
+              onClick={onOpenInbox}
+            >
+              <Icon name="inbox" size={18} />
+              {unread > 0 ? (
+                <span className="inbox-count" aria-hidden>
+                  {unread > 9 ? '9+' : unread}
+                </span>
+              ) : null}
+            </button>
+          ) : null}
           <button
             type="button"
             className="avatar"

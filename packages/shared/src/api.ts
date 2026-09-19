@@ -309,9 +309,24 @@ export const PublicOpenResponseSchema = OpenedLetterSchema;
 export type PublicOpenResponse = z.infer<typeof PublicOpenResponseSchema>;
 
 // ---------- notifications ----------
+// What an inbox row is about. The four approved events plus the two older sender events that
+// already exist in history (a cancelled delivery, a drifting bottle someone opened).
+export const NOTIFICATION_KINDS = [
+  'received_arrived',
+  'sent_arrived',
+  'sent_adrift',
+  'sent_sunk',
+  'sent_found',
+  'sent_cancelled',
+  'other',
+] as const;
+export const NotificationKindSchema = z.enum(NOTIFICATION_KINDS);
+export type NotificationKind = z.infer<typeof NotificationKindSchema>;
+
 export const NotificationSchema = z.object({
   id: IdSchema,
   type: z.enum(['bottle_arrived', 'journey_event']),
+  kind: NotificationKindSchema,
   bottleId: IdSchema.nullable(),
   message: z.string(),
   createdAt: z.string(),

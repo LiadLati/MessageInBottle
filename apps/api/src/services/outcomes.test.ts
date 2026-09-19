@@ -68,7 +68,10 @@ describe('journey outcomes: loss is server-owned, persisted once, and cannot rac
     const senderNotes = listNotifications(w.ctx, ada().id);
     expect(senderNotes).toHaveLength(1);
     expect(senderNotes[0]!.type).toBe('journey_event');
-    expect(senderNotes[0]!.message).toMatch(/adrift/);
+    expect(senderNotes[0]!.message).toBe(
+      'The bottle you sent to Bo was lost at sea and drifted into the public ocean.',
+    );
+    expect(senderNotes[0]!.kind).toBe('sent_adrift');
     expect(listNotifications(w.ctx, bo().id)).toEqual([]);
     expect(getMyShore(w.ctx, bo()).bottles).toEqual([]);
   });

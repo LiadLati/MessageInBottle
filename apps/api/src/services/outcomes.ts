@@ -16,7 +16,13 @@ import { openedLetter } from './bottles.js';
 import { loadGraphVersion } from './chart.js';
 import type { AppContext, AuthUser } from './context.js';
 import { isBlockedEitherWay } from './friends.js';
-import { activePlan, appendEvent, releaseCapacityOnce, transitionBottle } from './journey.js';
+import {
+  activePlan,
+  appendEvent,
+  recipientName,
+  releaseCapacityOnce,
+  transitionBottle,
+} from './journey.js';
 import { enqueueNotification } from './notifications.js';
 
 // Real journey outcomes (spec §9, §11). Everything here is server-owned and persisted once:
@@ -38,8 +44,8 @@ export interface CommitLossResult {
 }
 
 const OUTCOME_MESSAGES: Record<LossOutcome, (recipient: string) => string> = {
-  adrift: (r) => `Your bottle to ${r} was swept off course in a storm. It is adrift now.`,
-  sunk: (r) => `Your bottle to ${r} went down in a storm. It is lost at sea.`,
+  adrift: (r) => `The bottle you sent to ${r} was lost at sea and drifted into the public ocean.`,
+  sunk: (r) => `The bottle you sent to ${r} sank at sea.`,
 };
 
 // Commits At sea → Lost for one bottle at `at`. Idempotent and race-safe: the optimistic
@@ -95,9 +101,10 @@ export function commitLoss(
     enqueueNotification(tx, {
       userId: bottle.senderId,
       type: 'journey_event',
+      kind: reason === 'sunk' ? 'sent_sunk' : 'sent_adrift',
       bottleId,
       dedupeKey: `lost:${bottleId}`,
-      message: OUTCOME_MESSAGES[reason](bottle.recipientNameSnapshot),
+      message: OUTCOME_MESSAGES[reason](recipientName(bottle)),
       now: at,
     });
     return { committed: true, reason: 'committed' };
@@ -233,6 +240,7 @@ export function openPublicBottle(
     enqueueNotification(tx, {
       userId: bottle.senderId,
       type: 'journey_event',
+      kind: 'sent_found',
       bottleId,
       dedupeKey: `public_opened:${bottleId}`,
       message: 'Someone found your drifting bottle and read your letter.',

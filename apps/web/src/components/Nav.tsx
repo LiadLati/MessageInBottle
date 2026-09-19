@@ -13,6 +13,7 @@ const ITEMS: Array<{ id: Tab; label: string; icon: IconName }> = [
 interface Props {
   active: Tab;
   on3d?: boolean;
+  // Bottles waiting, sealed, at My Shore for this user to open (server-authoritative count).
   unread?: number;
   // Pending incoming friend requests (server-authoritative count).
   pendingFriends?: number;
@@ -30,7 +31,7 @@ export function Nav({ active, on3d = false, unread = 0, pendingFriends = 0, onSe
         const count = item.id === 'shore' ? unread : item.id === 'friends' ? pendingFriends : 0;
         const countLabel =
           item.id === 'shore'
-            ? `${count} unread`
+            ? `${count} ${count === 1 ? 'bottle' : 'bottles'} waiting at your shore`
             : `${count} pending friend ${count === 1 ? 'request' : 'requests'}`;
         return (
           <button
