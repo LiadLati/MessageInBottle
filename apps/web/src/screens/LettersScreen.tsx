@@ -202,7 +202,7 @@ function ReceivedHistory({ tabs }: { tabs: ReactNode }) {
     }
   };
   return (
-    <DeckScreen title="Letters" subtitle="Letters that reached you and were opened">
+    <DeckScreen title="Letters" subtitle="Letters that reached you, and bottles you found adrift">
       {tabs}
       <div
         id="letters-panel-received"
@@ -216,7 +216,8 @@ function ReceivedHistory({ tabs }: { tabs: ReactNode }) {
           <div className="glass-panel stack">
             <h2 className="t-display-sm">Nothing opened yet</h2>
             <p className="secondary">
-              Letters you pick up on your shore are kept here once opened.
+              Letters you pick up on your shore — and bottles you open in the public ocean — are
+              kept here.
             </p>
           </div>
         ) : (
@@ -228,14 +229,23 @@ function ReceivedHistory({ tabs }: { tabs: ReactNode }) {
                   className="row-item selectable"
                   onClick={() => void read(b.id)}
                 >
-                  <Avatar name={b.sender.displayName} />
+                  {/* A bottle found adrift carries no attribution: the public ocean never names
+                      a sender or a shore, and opening one does not change that. */}
+                  {b.sender ? (
+                    <Avatar name={b.sender.displayName} />
+                  ) : (
+                    <span className="avatar glass pennant-avatar" aria-hidden>
+                      ⚑
+                    </span>
+                  )}
                   <span className="grow">
                     <span className="t-card-title" style={{ display: 'block' }}>
-                      From {b.sender.displayName}
+                      {b.sender ? `From ${b.sender.displayName}` : 'Found adrift'}
                     </span>
                     <span className="t-meta">
-                      Opened {b.openedAt ? formatDate(b.openedAt) : '—'} · from {b.originShore.name}{' '}
-                      · {formatDuration(b.journeyDurationMs)} at sea
+                      Opened {b.openedAt ? formatDate(b.openedAt) : '—'} ·{' '}
+                      {b.originShore ? `from ${b.originShore.name} · ` : ''}
+                      {formatDuration(b.journeyDurationMs)} at sea
                     </span>
                   </span>
                   <span className="t-meta">Read</span>

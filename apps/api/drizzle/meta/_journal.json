@@ -43,6 +43,13 @@
       "when": 1789768624789,
       "tag": "0005_bottle_outcomes",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1789819243395,
+      "tag": "0006_public_openings",
+      "breakpoints": true
     }
   ]
 }

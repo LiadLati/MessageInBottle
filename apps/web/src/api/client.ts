@@ -117,6 +117,11 @@ export const api = {
     request<{ visibility: OutcomeVisibilityDto }>('POST', `/bottles/sent/${id}/acknowledge`),
   // The public ocean: only the strict public projection ever comes back from here.
   publicOcean: () => request<PublicOceanResponse>('GET', '/ocean/public'),
+  // One server-owned action: it grants the caller the letter and takes the bottle off the
+  // public map for everyone. 409 `already_opened` means somebody else was first.
+  openPublicBottle: (id: string) => request<OpenedLetterDto>('POST', `/ocean/public/${id}/open`),
+  // The sender reading their own letter: a pure read that never claims the bottle.
+  ownLetter: (id: string) => request<OpenedLetterDto>('GET', `/bottles/sent/${id}/letter`),
   previewRelease: (recipientId: string) =>
     request<ReleasePreviewResponse>('POST', '/bottles/preview', { recipientId }),
   release: (input: {

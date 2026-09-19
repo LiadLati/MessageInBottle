@@ -310,6 +310,24 @@ export const notifications = sqliteTable(
   (t) => [index('notifications_user_idx').on(t.userId, t.createdAt)],
 );
 
+// A bottle found adrift and opened by someone who is not its sender. The bottle id is the
+// primary key, so the insert itself decides the single winner of a race: whoever commits first
+// owns the reading, everyone else is told it is gone. Opening never changes the journey outcome
+// (the bottle stays `lost`), so the sender keeps their letter, passport and history.
+export const publicOpenings = sqliteTable(
+  'public_openings',
+  {
+    bottleId: text('bottle_id')
+      .primaryKey()
+      .references(() => bottles.id),
+    openedById: text('opened_by_id')
+      .notNull()
+      .references(() => users.id),
+    openedAt: integer('opened_at').notNull(),
+  },
+  (t) => [index('public_openings_opener_idx').on(t.openedById, t.openedAt)],
+);
+
 export const devClock = sqliteTable('dev_clock', {
   id: integer('id').primaryKey(),
   offsetMs: integer('offset_ms').notNull().default(0),

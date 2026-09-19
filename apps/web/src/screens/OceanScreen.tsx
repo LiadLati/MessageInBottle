@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from 'react';
-import type { PublicBottleDto, SentBottleSummaryDto } from '@mib/shared';
-import { api } from '../api/client.js';
+import type { OpenedLetterDto, PublicBottleDto, SentBottleSummaryDto } from '@mib/shared';
+import { ApiError, api } from '../api/client.js';
+import { LetterModal } from '../components/LetterModal.js';
 import { OceanMap, SeaViewer } from '../components/lazy.js';
 import type { HarborLabel, MapAnchor, MapRoute, OceanMapHandle } from '../components/OceanMap.js';
 import { Avatar, ErrorNote, OutcomeChip, Skeleton, StatusChip } from '../components/ui.js';
@@ -182,6 +183,19 @@ export function OceanScreen({
     [weatherKey],
   );
   const weatherOf = (id: string) => (phase === 'night' ? (weather[id] ?? 'calm') : 'calm');
+  // Reading a letter from the public ocean: the sender re-reading their own (a pure read), or a
+  // finder reading the bottle they have just opened. Both use the ordinary letter reader.
+  const [reading, setReading] = useState<{
+    letter: OpenedLetterDto;
+    justOpened: boolean;
+    // Only the sender's own read needs a line of its own; a found letter carries no attribution
+    // and the reader states that itself.
+    provenance?: string;
+  } | null>(null);
+  // Set when this bottle turned out to be gone — someone else opened it first.
+  const [claimedIds, setClaimedIds] = useState<string[]>([]);
+  const [publicBusy, setPublicBusy] = useState(false);
+  const [publicError, setPublicError] = useState<Error | null>(null);
   // The dedicated sea viewer: opened only from the card's "View at sea", never from a marker.
   const [viewing, setViewing] = useState<string | null>(null);
   const viewingBottle = viewing ? (list.find((b) => b.id === viewing) ?? null) : null;
@@ -255,6 +269,45 @@ export function OceanScreen({
     };
   }, [leaveRef, acknowledgeSeen]);
 
+  const reloadPublic = publicOcean.reload;
+  // The sender's own read: never claims the bottle, never takes it off the map.
+  const readOwn = async (id: string) => {
+    setPublicError(null);
+    setPublicBusy(true);
+    try {
+      const letter = await api.ownLetter(id);
+      setReading({
+        letter,
+        justOpened: false,
+        provenance: `Your letter · ${formatDuration(letter.bottle.journeyDurationMs)} at sea`,
+      });
+    } catch (err) {
+      setPublicError(err instanceof Error ? err : new Error(String(err)));
+    } finally {
+      setPublicBusy(false);
+    }
+  };
+  // One server-owned action: it grants this account the letter and removes the bottle from the
+  // public map for everyone. If somebody else was first, the card says so and shows nothing.
+  const openFound = async (id: string) => {
+    setPublicError(null);
+    setPublicBusy(true);
+    try {
+      const letter = await api.openPublicBottle(id);
+      setReading({ letter, justOpened: true });
+      await reloadPublic();
+    } catch (err) {
+      if (err instanceof ApiError && err.code === 'already_opened') {
+        setClaimedIds((ids) => (ids.includes(id) ? ids : [...ids, id]));
+        await reloadPublic();
+      } else {
+        setPublicError(err instanceof Error ? err : new Error(String(err)));
+      }
+    } finally {
+      setPublicBusy(false);
+    }
+  };
+
   const refit = (key: string) => setFitKey(`${key}:${Date.now()}`);
   const switchMode = (next: OceanMode) => {
     if (next === mode) return;
@@ -268,6 +321,7 @@ export function OceanScreen({
     setMode(next);
     setView({ kind: 'clean' });
     setViewing(null);
+    setPublicError(null);
     refit(`mode:${next}`);
   };
   // A tap on a bottle marker or route line: one bottle opens directly, a shared route lists them.
@@ -424,13 +478,21 @@ export function OceanScreen({
               </p>
             </div>
           </section>
-        ) : view.kind === 'bottle' && currentPublic ? (
+        ) : view.kind === 'bottle' && (currentPublic || claimedIds.includes(view.id)) ? (
           <section className="sheet" aria-label="Adrift bottle">
-            <PublicCard
-              bottle={currentPublic}
-              onClose={close}
-              onPassport={currentPublic.mine ? () => onOpenPassport(currentPublic.id) : null}
-            />
+            {currentPublic ? (
+              <PublicCard
+                bottle={currentPublic}
+                busy={publicBusy}
+                error={publicError}
+                onClose={close}
+                onPassport={currentPublic.mine ? () => onOpenPassport(currentPublic.id) : null}
+                onRead={currentPublic.mine ? () => void readOwn(currentPublic.id) : null}
+                onOpen={currentPublic.mine ? null : () => void openFound(currentPublic.id)}
+              />
+            ) : (
+              <UnavailableCard onClose={close} />
+            )}
           </section>
         ) : null
       ) : bottles.loading && !bottles.data ? (
@@ -506,6 +568,14 @@ export function OceanScreen({
         <section className="sheet" aria-label="Journey">
           <ErrorNote error={loadError} />
         </section>
+      ) : null}
+      {reading ? (
+        <LetterModal
+          letter={reading.letter}
+          justOpened={reading.justOpened}
+          provenance={reading.provenance}
+          onClose={() => setReading(null)}
+        />
       ) : null}
       {viewing ? (
         <SeaViewer
@@ -653,12 +723,20 @@ function JourneyCard({
 // bottle by the pennant and the "Your bottle" title; nobody is told whose the others are.
 function PublicCard({
   bottle,
+  busy,
+  error,
   onClose,
   onPassport,
+  onRead,
+  onOpen,
 }: {
   bottle: PublicBottleDto;
+  busy: boolean;
+  error: Error | null;
   onClose: () => void;
   onPassport: (() => void) | null;
+  onRead: (() => void) | null;
+  onOpen: (() => void) | null;
 }) {
   return (
     <div>
@@ -682,14 +760,61 @@ function PublicCard({
           ? 'Swept off course in a storm. Its delivery is over; it drifts here for anyone to see.'
           : 'Swept off course in a storm. It drifts here, sealed.'}
       </p>
-      {onPassport ? (
-        <div className="action-row" style={{ marginTop: 14 }}>
+      {onOpen ? (
+        // Said plainly before the action, because it cannot be undone and it is the one thing
+        // that changes for everybody else looking at this map.
+        <p className="card-note warn">Opening this bottle will remove it from the public map.</p>
+      ) : null}
+      <div className="action-row" style={{ marginTop: 14 }}>
+        {onOpen ? (
+          <button type="button" className="btn-primary" disabled={busy} onClick={onOpen}>
+            <Icon name="letters" size={16} />
+            {busy ? 'Opening…' : 'Open bottle'}
+          </button>
+        ) : null}
+        {onRead ? (
+          <button type="button" className="btn-primary" disabled={busy} onClick={onRead}>
+            <Icon name="letters" size={16} />
+            {busy ? 'Opening…' : 'Read your letter'}
+          </button>
+        ) : null}
+        {onPassport ? (
           <button type="button" className="btn-ghost" onClick={onPassport}>
             <Icon name="passport" size={14} />
             Passport
           </button>
-        </div>
+        ) : null}
+      </div>
+      {onRead ? (
+        <p className="t-meta" style={{ marginTop: 10 }}>
+          Reading your own letter changes nothing: the bottle stays adrift on the map.
+        </p>
       ) : null}
+      <ErrorNote error={error} />
+    </div>
+  );
+}
+
+// Somebody else opened this bottle first. It is gone from the map, and nothing about it —
+// least of all a word of the letter — is shown here.
+function UnavailableCard({ onClose }: { onClose: () => void }) {
+  return (
+    <div>
+      <div className="row">
+        <span className="avatar glass" aria-hidden>
+          ◦
+        </span>
+        <div className="grow" style={{ minWidth: 0 }}>
+          <div className="t-card-title">No longer adrift</div>
+          <div className="t-meta">Another traveller opened this bottle first</div>
+        </div>
+        <button type="button" className="glass-control" aria-label="Close" onClick={onClose}>
+          <Icon name="close" size={16} />
+        </button>
+      </div>
+      <p className="card-note">
+        Its letter belongs to whoever found it. The public ocean has other bottles.
+      </p>
     </div>
   );
 }

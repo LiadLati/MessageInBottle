@@ -3,7 +3,14 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { PublicBottleSchema } from '@mib/shared';
 import * as t from '../db/schema.js';
 import { AppError } from '../lib/errors.js';
-import { getMyShore, getSentBottle, listSentBottles } from './bottles.js';
+import {
+  getMyShore,
+  getSentBottle,
+  listReceivedLetters,
+  listSentBottles,
+  readOpenedLetter,
+  readOwnLetter,
+} from './bottles.js';
 import { blockUser } from './friends.js';
 import { commitArrivalIfDue, runJourneyTick } from './journey.js';
 import { listNotifications } from './notifications.js';
@@ -13,6 +20,7 @@ import {
   devLoseBottle,
   listPublicOcean,
   markOutcomeSeen,
+  openPublicBottle,
 } from './outcomes.js';
 import { heldReservations, releaseBottle } from './release.js';
 import { createTestWorld, releaseInput, type TestWorld } from '../test/harness.js';
@@ -154,6 +162,124 @@ describe('journey outcomes: loss is server-owned, persisted once, and cannot rac
       blockUser(w.ctx, bo().id, 'cy');
       expect(listPublicOcean(w.ctx, cy())).toEqual([]);
       expect(listPublicOcean(w.ctx, bo()).map((b) => b.mine)).toEqual([false, true]);
+    });
+  });
+
+  describe('opening a bottle found adrift', () => {
+    beforeEach(() => {
+      commitLoss(w.ctx, bottleId, 'adrift', w.clock.now());
+    });
+
+    it('is one atomic action: the finder gets the letter and it leaves the public map for everyone', () => {
+      expect(listPublicOcean(w.ctx, cy()).map((b) => b.id)).toEqual([bottleId]);
+      w.clock.advance(60_000);
+      const at = w.clock.now();
+      const opened = openPublicBottle(w.ctx, cy(), bottleId);
+      expect(opened.letter.text).toContain('tide was gentle');
+      expect(opened.bottle.source).toBe('public');
+      expect(opened.bottle.openedAt).toBe(new Date(at).toISOString());
+      // Gone from the map for every viewer, including its sender.
+      for (const viewer of [ada(), bo(), cy()]) expect(listPublicOcean(w.ctx, viewer)).toEqual([]);
+      // The finder keeps it in their own archive and can read it again.
+      expect(listReceivedLetters(w.ctx, cy()).map((l) => l.id)).toEqual([bottleId]);
+      expect(readOpenedLetter(w.ctx, cy(), bottleId).letter.text).toBe(opened.letter.text);
+      // The journey outcome is untouched: the sender keeps letter, passport and Lost entry.
+      const senders = getSentBottle(w.ctx, ada(), bottleId);
+      expect(senders.state).toBe('lost');
+      expect(senders.outcome?.reason).toBe('adrift');
+      expect(senders.letter.text).toContain('tide was gentle');
+      expect(events(bottleId)).toEqual(['released', 'lost', 'opened']);
+      // The sender is told once, and never who read it.
+      const notes = listNotifications(w.ctx, ada().id).filter((n) =>
+        /found your drifting/.test(n.message),
+      );
+      expect(notes).toHaveLength(1);
+      expect(notes[0]!.message).not.toContain('Cy');
+    });
+
+    it('reveals no sender, origin shore or destination to the finder', () => {
+      const opened = openPublicBottle(w.ctx, cy(), bottleId);
+      expect(opened.bottle.sender).toBeNull();
+      expect(opened.bottle.originShore).toBeNull();
+      expect(opened.bottle.deliveredAt).toBeNull();
+      const json = JSON.stringify({ opened, archive: listReceivedLetters(w.ctx, cy()) });
+      for (const secret of ['Ada', 'Bo', 'driftmoor', 'lantern', 'nodeIds']) {
+        expect(json).not.toContain(secret);
+      }
+    });
+
+    it('is idempotent for the finder and a plain 409 for everyone else', () => {
+      const first = openPublicBottle(w.ctx, cy(), bottleId);
+      w.clock.advance(5000);
+      const again = openPublicBottle(w.ctx, cy(), bottleId);
+      expect(again.bottle.openedAt).toBe(first.bottle.openedAt);
+      expect(again.letter.text).toBe(first.letter.text);
+      expect(again.aging).toEqual(first.aging);
+      expect(events(bottleId)).toEqual(['released', 'lost', 'opened']);
+      expect(
+        listNotifications(w.ctx, ada().id).filter((n) => /found your drifting/.test(n.message)),
+      ).toHaveLength(1);
+
+      // A second person arrives: told it is gone, shown nothing, and given no archive entry.
+      let err: unknown;
+      try {
+        openPublicBottle(w.ctx, bo(), bottleId);
+      } catch (e) {
+        err = e;
+      }
+      expect(err).toBeInstanceOf(AppError);
+      expect((err as AppError).status).toBe(409);
+      expect((err as AppError).code).toBe('already_opened');
+      expect(JSON.stringify(err)).not.toContain('tide was gentle');
+      expect(listReceivedLetters(w.ctx, bo())).toEqual([]);
+      expect(() => readOpenedLetter(w.ctx, bo(), bottleId)).toThrowError(AppError);
+    });
+
+    it('refuses the sender, blocked accounts and anything that is not an open adrift bottle', () => {
+      // The sender never claims their own bottle.
+      expect(() => openPublicBottle(w.ctx, ada(), bottleId)).toThrowError(AppError);
+      expect(listPublicOcean(w.ctx, cy()).map((b) => b.id)).toEqual([bottleId]);
+      // A block in either direction hides it completely.
+      blockUser(w.ctx, cy().id, 'ada');
+      expect(() => openPublicBottle(w.ctx, cy(), bottleId)).toThrowError(AppError);
+      // A sunk bottle is never public and can never be opened this way.
+      const sunk = releaseBottle(w.ctx, ada(), releaseInput(bo().id, 'key-0000000009')).bottleId;
+      commitLoss(w.ctx, sunk, 'sunk', w.clock.now());
+      expect(() => openPublicBottle(w.ctx, bo(), sunk)).toThrowError(AppError);
+      // …nor is a bottle still at sea.
+      const sailing = releaseBottle(w.ctx, ada(), releaseInput(bo().id, 'key-0000000010')).bottleId;
+      expect(() => openPublicBottle(w.ctx, bo(), sailing)).toThrowError(AppError);
+    });
+
+    it('never delivers the bottle to its intended recipient afterwards', () => {
+      openPublicBottle(w.ctx, cy(), bottleId);
+      w.clock.advance(60 * 24 * 60 * 60 * 1000);
+      expect(runJourneyTick(w.ctx).delivered).toBe(0);
+      expect(commitArrivalIfDue(w.ctx, bottleId, w.clock.now())).toBe(false);
+      expect(getMyShore(w.ctx, bo()).bottles).toEqual([]);
+      expect(listReceivedLetters(w.ctx, bo())).toEqual([]);
+      expect(listNotifications(w.ctx, bo().id)).toEqual([]);
+      expect(getSentBottle(w.ctx, ada(), bottleId).state).toBe('lost');
+    });
+
+    it('lets the sender read their own letter any number of times without claiming it', () => {
+      for (let i = 0; i < 3; i++) {
+        const own = readOwnLetter(w.ctx, ada(), bottleId);
+        expect(own.letter.text).toContain('tide was gentle');
+        // Still adrift, still public, still no opening, no extra history.
+        expect(listPublicOcean(w.ctx, bo()).map((b) => b.id)).toEqual([bottleId]);
+        expect(getSentBottle(w.ctx, ada(), bottleId).outcome?.reason).toBe('adrift');
+        expect(events(bottleId)).toEqual(['released', 'lost']);
+        w.clock.advance(1000);
+      }
+      // Nobody else can use that endpoint.
+      expect(() => readOwnLetter(w.ctx, cy(), bottleId)).toThrowError(AppError);
+      // And after a finder opens it, the sender still has letter and passport.
+      openPublicBottle(w.ctx, cy(), bottleId);
+      expect(readOwnLetter(w.ctx, ada(), bottleId).letter.text).toContain('tide was gentle');
+      const passport = getSentBottle(w.ctx, ada(), bottleId);
+      expect(passport.outcome?.reason).toBe('adrift');
+      expect(passport.route.nodeIds.length).toBeGreaterThan(2);
     });
   });
 

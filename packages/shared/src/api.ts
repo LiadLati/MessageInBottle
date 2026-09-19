@@ -250,12 +250,31 @@ export const ShoreResponseSchema = z.object({
 });
 export type ShoreResponse = z.infer<typeof ShoreResponseSchema>;
 
+// A letter in the reader's own archive (Letters → Received). Two ways in: it arrived on their
+// shore and they opened it (`shore`), or they found it adrift in the public ocean and opened it
+// there (`public`). A found bottle deliberately carries **no sender and no origin shore**: the
+// public ocean never attributes a letter, and sender attribution in public discovery is still an
+// open decision (spec D03). Nothing else about the journey is exposed either.
+export const ReceivedLetterSchema = z.object({
+  id: IdSchema,
+  source: z.enum(['shore', 'public']),
+  state: z.enum(['delivered', 'opened', 'lost']),
+  sender: z.object({ id: IdSchema, displayName: z.string() }).nullable(),
+  originShore: z.object({ id: IdSchema, name: z.string() }).nullable(),
+  releasedAt: z.string(),
+  // Null for a bottle found adrift: it never reached a shore.
+  deliveredAt: z.string().nullable(),
+  openedAt: z.string().nullable(),
+  journeyDurationMs: z.number().int(),
+});
+export type ReceivedLetterDto = z.infer<typeof ReceivedLetterSchema>;
+
 // Letters the user has opened, newest first (Letters → Received).
-export const ReceivedLettersResponseSchema = z.object({ letters: z.array(ShoreBottleSchema) });
+export const ReceivedLettersResponseSchema = z.object({ letters: z.array(ReceivedLetterSchema) });
 export type ReceivedLettersResponse = z.infer<typeof ReceivedLettersResponseSchema>;
 
 export const OpenedLetterSchema = z.object({
-  bottle: ShoreBottleSchema,
+  bottle: ReceivedLetterSchema,
   letter: z.object({ text: z.string(), font: LetterFontSchema, characters: z.number().int() }),
   aging: AgingProfileSchema,
 });
@@ -282,6 +301,12 @@ export const PublicOceanResponseSchema = z.object({
   serverTime: z.string(),
 });
 export type PublicOceanResponse = z.infer<typeof PublicOceanResponseSchema>;
+
+// Opening a bottle found adrift: one server-owned action that grants the finder access to the
+// letter and takes the bottle off the public map for everyone. The response is the ordinary
+// opened-letter payload, so the finder reads it in the same reader as any other letter.
+export const PublicOpenResponseSchema = OpenedLetterSchema;
+export type PublicOpenResponse = z.infer<typeof PublicOpenResponseSchema>;
 
 // ---------- notifications ----------
 export const NotificationSchema = z.object({

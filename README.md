@@ -151,6 +151,15 @@ card says **Your bottle · Adrift in the public ocean**. Nobody is told whose th
 public API returns only `id`, `reason`, `lostAt`, `position` and `mine` — never the letter, the
 sender, the intended recipient, the destination or the route.
 
+Tapping somebody else's adrift bottle opens its public card, which says plainly that **opening
+this bottle will remove it from the public map** before you act. **Open bottle** is one
+server-owned action: it gives you the letter, takes the bottle off the map for everyone, and
+keeps it in your **Letters → Received** as *Found adrift* — with no sender, no origin shore and
+no destination, because the public ocean attributes nothing. If someone opened it first you are
+told it is no longer adrift and shown nothing of it. The sender has their own **Read your
+letter** action on their own bottle: a pure read, as often as they like, that never claims it or
+takes it off the map. Nobody can rescue, re-release or re-send a found bottle in this version.
+
 A **sunk** bottle stays on your private map at its sinking position with a red X above it and no
 route. It remains there until you have actually seen it (the marker was inside your viewport
 while the page was active — no tap needed) *and* then left the map for another screen; after
@@ -235,6 +244,8 @@ instead of blaming the request. Check, in order:
 ## API overview
 
 Outcome-related endpoints (all require a session): `GET /api/ocean/public`,
+`POST /api/ocean/public/:id/open` (the finder's single atomic action),
+`GET /api/bottles/sent/:id/letter` (the sender's own read),
 `POST /api/bottles/sent/:id/seen`, `POST /api/bottles/sent/:id/acknowledge`, and in development
 `POST /api/dev/lose { bottleId, reason: 'adrift' | 'sunk' }`.
 

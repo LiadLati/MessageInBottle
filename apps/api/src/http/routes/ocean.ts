@@ -1,5 +1,5 @@
 import { Hono } from 'hono';
-import { listPublicOcean } from '../../services/outcomes.js';
+import { listPublicOcean, openPublicBottle } from '../../services/outcomes.js';
 import type { AppEnv } from '../app.js';
 import { requireAuth } from '../middleware/auth.js';
 
@@ -15,5 +15,10 @@ export function oceanRoutes() {
       serverTime: new Date(ctx.clock.now()).toISOString(),
     });
   });
+  // One atomic action: it grants the finder access to the letter and removes the bottle from the
+  // public map for everyone. Idempotent for the finder, 409 for anyone who arrives second.
+  r.post('/public/:id/open', (c) =>
+    c.json(openPublicBottle(c.get('ctx'), c.get('user'), c.req.param('id'))),
+  );
   return r;
 }

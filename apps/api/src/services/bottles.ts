@@ -1,10 +1,12 @@
 import { and, asc, desc, eq } from 'drizzle-orm';
 import {
   AgingProfileSchema,
+  type AgingProfile,
   type JourneyEventDto,
   type LetterFont,
   type OpenedLetterDto,
   type OutcomeDto,
+  type ReceivedLetterDto,
   type SentBottleDto,
   type SentBottleSummaryDto,
   type ShoreBottleDto,
@@ -19,11 +21,12 @@ import {
   plannedArrivalAt,
   progressAt,
 } from '../domain/routing.js';
+import { deriveAgingProfile } from '../domain/aging.js';
 import { conflict, notFound } from '../lib/errors.js';
 import { loadGraphVersion, toShoreDto } from './chart.js';
 import type { AppContext, AuthUser } from './context.js';
 import { activePlan, appendEvent, releaseCapacityOnce, transitionBottle } from './journey.js';
-import { outcomeVisibility } from './outcomes.js';
+import { outcomeVisibility, publicOpeningOf } from './outcomes.js';
 
 type BottleRow = typeof t.bottles.$inferSelect;
 type PlanRow = typeof t.routePlans.$inferSelect;
@@ -160,6 +163,31 @@ export function getSentBottle(ctx: AppContext, user: AuthUser, bottleId: string)
   };
 }
 
+// The reader's own view of a letter they hold. A bottle **found adrift** carries no sender and
+// no origin shore: the public ocean never attributes a letter, and opening one must not reveal
+// more than the map did (sender attribution in public discovery is spec D03, still open).
+function receivedLetter(
+  bottle: BottleRow,
+  source: 'shore' | 'public',
+  foundAt: number | null = null,
+): ReceivedLetterDto {
+  if (source === 'public') {
+    const endedAt = bottle.outcomeAt ?? bottle.releasedAt;
+    return {
+      id: bottle.id,
+      source,
+      state: bottle.state as ReceivedLetterDto['state'],
+      sender: null,
+      originShore: null,
+      releasedAt: iso(bottle.releasedAt),
+      deliveredAt: null,
+      openedAt: isoOrNull(foundAt),
+      journeyDurationMs: Math.max(0, endedAt - bottle.releasedAt),
+    };
+  }
+  return { ...shoreBottle(bottle), source };
+}
+
 function shoreBottle(bottle: BottleRow): ShoreBottleDto {
   const deliveredAt = bottle.deliveredAt!;
   return {
@@ -196,10 +224,11 @@ export function getMyShore(ctx: AppContext, user: AuthUser): ShoreResponse {
   return { shore: shore ? toShoreDto(shore) : null, bottles: rows.map(shoreBottle) };
 }
 
-// Everything the user has opened, newest first. The rows are the same bottles: nothing is
-// deleted or rewritten when a bottle leaves the shore.
-export function listReceivedLetters(ctx: AppContext, user: AuthUser): ShoreBottleDto[] {
-  return ctx.db
+// Everything the user holds, newest first: letters that arrived on their shore and were opened,
+// and bottles they found adrift and opened in the public ocean. The rows are the same bottles —
+// nothing is deleted or rewritten when a bottle leaves the shore or the public map.
+export function listReceivedLetters(ctx: AppContext, user: AuthUser): ReceivedLetterDto[] {
+  const fromShore = ctx.db
     .select()
     .from(t.bottles)
     .where(
@@ -209,36 +238,48 @@ export function listReceivedLetters(ctx: AppContext, user: AuthUser): ShoreBottl
         eq(t.bottles.moderationStatus, 'clear'),
       ),
     )
-    .orderBy(desc(t.bottles.openedAt))
     .all()
-    .map(shoreBottle);
+    .map((b) => ({ at: b.openedAt ?? b.releasedAt, dto: receivedLetter(b, 'shore') }));
+  const found = ctx.db
+    .select({ bottle: t.bottles, openedAt: t.publicOpenings.openedAt })
+    .from(t.publicOpenings)
+    .innerJoin(t.bottles, eq(t.bottles.id, t.publicOpenings.bottleId))
+    .where(and(eq(t.publicOpenings.openedById, user.id), eq(t.bottles.moderationStatus, 'clear')))
+    .all()
+    .map((r) => ({ at: r.openedAt, dto: receivedLetter(r.bottle, 'public', r.openedAt) }));
+  return [...fromShore, ...found].sort((a, b) => b.at - a.at).map((r) => r.dto);
 }
 
-function deliveredBottleForRecipient(ctx: AppContext, user: AuthUser, bottleId: string): BottleRow {
-  const bottle = ctx.db.select().from(t.bottles).where(eq(t.bottles.id, bottleId)).get();
-  if (
-    !bottle ||
-    bottle.recipientId !== user.id ||
-    (bottle.state !== 'delivered' && bottle.state !== 'opened') ||
-    bottle.moderationStatus !== 'clear'
-  ) {
-    throw notFound('bottle');
-  }
-  return bottle;
-}
-
-function openedLetter(ctx: AppContext, bottle: BottleRow): OpenedLetterDto {
+export function openedLetter(
+  ctx: AppContext,
+  bottle: BottleRow,
+  source: 'shore' | 'public' = 'shore',
+  foundAt: number | null = null,
+): OpenedLetterDto {
   const letter = ctx.db.select().from(t.letters).where(eq(t.letters.id, bottle.letterId)).get()!;
-  const aging = AgingProfileSchema.parse(bottle.agingProfile);
   return {
-    bottle: shoreBottle(bottle),
+    bottle: receivedLetter(bottle, source, foundAt),
     letter: {
       text: letter.text,
       font: letter.originalFont as LetterFont,
       characters: letter.characters,
     },
-    aging,
+    aging: agingFor(ctx, bottle),
   };
+}
+
+// The frozen aging profile if the journey stored one (arrival, or a public opening). A bottle
+// that ended at sea and has not been opened by anyone has none yet: derive the same reproducible
+// parameters from the journey, without writing anything — reading never changes a bottle.
+function agingFor(ctx: AppContext, bottle: BottleRow): AgingProfile {
+  if (bottle.agingProfile) return AgingProfileSchema.parse(bottle.agingProfile);
+  const plan = activePlan(ctx.db, bottle.id);
+  return deriveAgingProfile({
+    bottleId: bottle.id,
+    releasedAt: bottle.releasedAt,
+    deliveredAt: bottle.outcomeAt ?? bottle.completedAt ?? ctx.clock.now(),
+    plannedDurationMs: plan?.plannedDurationMs ?? 0,
+  });
 }
 
 // Opening commits Delivered -> Opened, releases the destination slot exactly once and completes
@@ -260,12 +301,28 @@ export function openBottle(ctx: AppContext, user: AuthUser, bottleId: string): O
   return openedLetter(ctx, result);
 }
 
+// Re-reading a letter the caller already holds. Two ways to hold one: it arrived on their shore
+// and they opened it, or they found it adrift and opened it. Anyone else gets 404 — knowing an
+// id is not authorization (spec §7).
 export function readOpenedLetter(
   ctx: AppContext,
   user: AuthUser,
   bottleId: string,
 ): OpenedLetterDto {
-  const bottle = deliveredBottleForRecipient(ctx, user, bottleId);
-  if (bottle.state !== 'opened') throw notFound('letter');
+  const bottle = ctx.db.select().from(t.bottles).where(eq(t.bottles.id, bottleId)).get();
+  if (!bottle || bottle.moderationStatus !== 'clear') throw notFound('letter');
+  const opening = publicOpeningOf(ctx.db, bottleId);
+  if (opening && opening.openedById === user.id) {
+    return openedLetter(ctx, bottle, 'public', opening.openedAt);
+  }
+  if (bottle.recipientId !== user.id || bottle.state !== 'opened') throw notFound('letter');
   return openedLetter(ctx, bottle);
+}
+
+// The sender reading their own letter. Pure read: it never claims the bottle, never takes it off
+// the public map and never touches the outcome, so a sender may do it as often as they like.
+export function readOwnLetter(ctx: AppContext, user: AuthUser, bottleId: string): OpenedLetterDto {
+  const bottle = ctx.db.select().from(t.bottles).where(eq(t.bottles.id, bottleId)).get();
+  if (!bottle || bottle.senderId !== user.id) throw notFound('bottle');
+  return openedLetter(ctx, bottle, 'shore');
 }

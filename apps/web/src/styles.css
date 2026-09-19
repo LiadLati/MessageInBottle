@@ -2300,10 +2300,13 @@ button.avatar {
 /* A sunk bottle: the bottle icon stays, a red X sits above it in the glyph slot. Adrift on the
    public ocean: the sender's own bottle carries a small golden pennant beside it. Nothing here
    draws a circle, ring or halo around a bottle. */
+/* The red X rides just above the bottle's shoulder: small enough not to compete with it, close
+   enough to read as one marker, and a different shape from the storm glyph at a glance. */
 .map-marker .mark-sunk {
   display: none;
-  width: 20px;
-  height: 20px;
+  width: 14px;
+  height: 14px;
+  margin-bottom: -3px;
 }
 .map-marker.sunk .mark-sunk {
   display: block;
@@ -2408,6 +2411,9 @@ button.avatar {
 .t-stat-date {
   font-size: 13px;
   line-height: 1.35;
+}
+.card-note.warn {
+  color: rgba(240, 221, 174, 0.92);
 }
 .lost-row {
   align-items: flex-start;

@@ -8,6 +8,63 @@ const auth = (token: string) => ({
 });
 
 describe('HTTP surface', () => {
+  it('opening a bottle found adrift: authenticated, single winner, no content to the loser', async () => {
+    const w = createTestWorld();
+    const app = createApp(w.ctx);
+    const ada = await login(app, 'ada');
+    const bo = await login(app, 'bo');
+    const cy = await login(app, 'cy');
+    const release = await app.request('/api/bottles/release', {
+      method: 'POST',
+      headers: auth(ada.token),
+      body: JSON.stringify(releaseInput(bo.id, 'http-key-0000010')),
+    });
+    const { bottle } = (await release.json()) as { bottle: { id: string } };
+    await app.request('/api/dev/lose', {
+      method: 'POST',
+      headers: auth(ada.token),
+      body: JSON.stringify({ bottleId: bottle.id, reason: 'adrift' }),
+    });
+    const openUrl = `/api/ocean/public/${bottle.id}/open`;
+    expect((await app.request(openUrl, { method: 'POST' })).status).toBe(401);
+    // The sender cannot claim their own bottle, but may read it as often as they like.
+    expect((await app.request(openUrl, { method: 'POST', headers: auth(ada.token) })).status).toBe(
+      400,
+    );
+    for (let i = 0; i < 2; i++) {
+      const own = await app.request(`/api/bottles/sent/${bottle.id}/letter`, {
+        headers: auth(ada.token),
+      });
+      expect(own.status).toBe(200);
+      expect(JSON.stringify(await own.json())).toContain('tide was gentle');
+    }
+    expect(
+      (await app.request(`/api/bottles/sent/${bottle.id}/letter`, { headers: auth(cy.token) }))
+        .status,
+    ).toBe(404);
+
+    // Two finders race: exactly one wins, the other is told it is gone and shown nothing.
+    const [first, second] = await Promise.all([
+      app.request(openUrl, { method: 'POST', headers: auth(cy.token) }),
+      app.request(openUrl, { method: 'POST', headers: auth(bo.token) }),
+    ]);
+    const statuses = [first.status, second.status].sort();
+    expect(statuses).toEqual([200, 409]);
+    const winner = first.status === 200 ? first : second;
+    const loser = first.status === 200 ? second : first;
+    const winnerBody = (await winner.json()) as { letter: { text: string } };
+    expect(winnerBody.letter.text).toContain('tide was gentle');
+    const loserBody = JSON.stringify(await loser.json());
+    expect(loserBody).toContain('already_opened');
+    expect(loserBody).not.toContain('tide was gentle');
+
+    // The bottle has left the public map for everyone.
+    for (const token of [ada.token, bo.token, cy.token]) {
+      const res = await app.request('/api/ocean/public', { headers: auth(token) });
+      expect(((await res.json()) as { bottles: unknown[] }).bottles).toEqual([]);
+    }
+  });
+
   it('public ocean: authenticated, strict projection, dev loss only by the owner', async () => {
     const w = createTestWorld();
     const app = createApp(w.ctx);

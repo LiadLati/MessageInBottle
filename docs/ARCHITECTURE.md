@@ -74,6 +74,8 @@ Rules live in `services/` and are tested directly against an in-memory database
   position) once the sea ends a journey.
 - `bottle_outcome_views` — per (user, bottle): when a terminal marker was first seen inside the
   sender's viewport and when the sender left the map after seeing it.
+- `public_openings` — one row per bottle found adrift and opened (`bottle_id` primary key, the
+  finder and the moment). Its primary key is what makes the opening race-free.
 - `route_plans` — one active plan per bottle with `plan_version`, `graph_version`, node list,
   `starts_at`, `start_progress` (rescue continuity) and `planned_duration_ms`. Prior plans are kept.
 - `journey_events` — append-only `(bottle_id, seq)` history.
@@ -132,6 +134,23 @@ narrow.
   `PublicBottleSchema` — `id, reason, lostAt, position.geo, mine` — for adrift bottles only.
   Letter, sender, recipient, destination and route never leave the server through it; pairs with
   a block in either direction are hidden; `mine` is computed per caller. Sunk bottles are private.
+- **Opening a bottle found adrift.** `POST /api/ocean/public/:id/open` is one transaction in
+  `openPublicBottle`: insert into `public_openings` (the bottle id is the primary key, so the
+  insert itself elects the single winner of a race), freeze the aging profile, append an
+  `opened` event with `{scope:'public'}`, and notify the sender once — never naming the finder
+  (spec D03). The bottle leaves the public list for everyone (`listPublicOcean` excludes any
+  bottle with an opening) and the finder reads the letter in the ordinary reader. It is
+  idempotent for the finder and a `409 already_opened` with no content for anyone else; the
+  sender is refused (`400 own_bottle`), blocked pairs and non-adrift bottles get `404`.
+  **The journey outcome is untouched**: the bottle stays `lost`, so the sender keeps letter,
+  passport and Lost entry, and the intended recipient is never delivered to — no arrival path
+  acts on a bottle that is not `at_sea`. Nothing else is granted: no rescue, re-release, further
+  travel or transfer of ownership.
+- **Reading afterwards.** The finder's bottle appears in their own `GET /api/shore/received`
+  (`source: 'public'`, **no sender and no origin shore** — the public ocean attributes nothing)
+  and is re-readable through `GET /api/shore/bottles/:id/letter`. The sender reads their own
+  letter with `GET /api/bottles/sent/:id/letter`, a pure read they may repeat at will: it never
+  claims the bottle, never removes it from the map and never touches the outcome.
 - **Private marker visibility.** `POST /api/bottles/sent/:id/seen` is called by the map the first
   time a sunk marker is actually inside the visible viewport while the page is visible and the
   map is not covered; `POST …/acknowledge` when the sender leaves the private map (another
@@ -148,7 +167,6 @@ narrow.
 ## Deliberately not implemented (per task scope)
 
 AI writing/rewriting, random recipients, appended notes, chat, GPS-assisted shore suggestion,
-automatic storm outcomes (the risk policy is unapproved — see above), public claiming/reading of
-adrift bottles, island publication, rescue/discard/expiry, moderation console, push notifications,
+automatic storm outcomes (the risk policy is unapproved — see above), island publication, rescue/discard/expiry, moderation console, push notifications,
 password reset / e-mail verification, request rate limiting outside authentication. Draft persistence is client-side (`sessionStorage`), as the
 specification's Draft state has no live journey.

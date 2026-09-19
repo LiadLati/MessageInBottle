@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import { ReleasePreviewRequestSchema, ReleaseRequestSchema } from '@mib/shared';
-import { getSentBottle, listSentBottles } from '../../services/bottles.js';
+import { getSentBottle, listSentBottles, readOwnLetter } from '../../services/bottles.js';
 import { acknowledgeOutcome, markOutcomeSeen } from '../../services/outcomes.js';
 import { previewRelease, releaseBottle } from '../../services/release.js';
 import type { AppEnv } from '../app.js';
@@ -13,6 +13,11 @@ export function bottleRoutes() {
   r.get('/sent', (c) => c.json({ bottles: listSentBottles(c.get('ctx'), c.get('user')) }));
   r.get('/sent/:id', (c) =>
     c.json({ bottle: getSentBottle(c.get('ctx'), c.get('user'), c.req.param('id')) }),
+  );
+  // The sender reading their own letter: a pure read, at any time, however often. It never
+  // claims the bottle and never takes it off the public map.
+  r.get('/sent/:id/letter', (c) =>
+    c.json(readOwnLetter(c.get('ctx'), c.get('user'), c.req.param('id'))),
   );
   // Private-map visibility of a terminal marker (sender only; see services/outcomes.ts).
   r.post('/sent/:id/seen', (c) =>

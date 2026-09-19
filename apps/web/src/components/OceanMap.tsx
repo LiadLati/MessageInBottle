@@ -715,6 +715,7 @@ export function OceanMap({
         const el = document.createElement('button');
         el.type = 'button';
         el.className = 'map-marker';
+        el.dataset.bottleId = r.id;
         el.innerHTML =
           '<img class="glyph" alt="" src="/markers/storm-cloud-glyph.svg">' +
           '<img class="mark-sunk" alt="" src="/markers/mark-sunk.svg">' +

@@ -1,5 +1,5 @@
 import { and, desc, eq, isNull } from 'drizzle-orm';
-import type { OutcomeVisibilityDto, PublicBottleDto } from '@mib/shared';
+import type { OpenedLetterDto, OutcomeVisibilityDto, PublicBottleDto } from '@mib/shared';
 import type { DbOrTx } from '../db/client.js';
 import * as t from '../db/schema.js';
 import {
@@ -10,7 +10,9 @@ import {
   pointAlongPath,
   progressAt,
 } from '../domain/routing.js';
-import { badRequest, notFound } from '../lib/errors.js';
+import { deriveAgingProfile } from '../domain/aging.js';
+import { badRequest, conflict, notFound } from '../lib/errors.js';
+import { openedLetter } from './bottles.js';
 import { loadGraphVersion } from './chart.js';
 import type { AppContext, AuthUser } from './context.js';
 import { isBlockedEitherWay } from './friends.js';
@@ -119,23 +121,33 @@ export function devLoseBottle(
 
 // ---------- public ocean ----------
 
+// The single opening of a bottle found adrift, if anyone has opened it.
+export function publicOpeningOf(db: DbOrTx, bottleId: string) {
+  return (
+    db.select().from(t.publicOpenings).where(eq(t.publicOpenings.bottleId, bottleId)).get() ?? null
+  );
+}
+
 // Bottles adrift in the public ocean, for any signed-in user. The projection is the strict
 // PublicBottleSchema: no letter, sender, recipient, destination or route ever leaves the server
-// through here. Bottles between blocked accounts are hidden in both directions, and moderation
-// applies as everywhere else.
+// through here. Bottles between blocked accounts are hidden in both directions, moderation
+// applies as everywhere else, and a bottle someone has opened is gone from the map for everyone.
 export function listPublicOcean(ctx: AppContext, viewer: AuthUser): PublicBottleDto[] {
   const rows = ctx.db
     .select()
     .from(t.bottles)
+    .leftJoin(t.publicOpenings, eq(t.publicOpenings.bottleId, t.bottles.id))
     .where(
       and(
         eq(t.bottles.state, 'lost'),
         eq(t.bottles.lossReason, 'adrift'),
         eq(t.bottles.moderationStatus, 'clear'),
+        isNull(t.publicOpenings.bottleId),
       ),
     )
     .orderBy(desc(t.bottles.outcomeAt))
-    .all();
+    .all()
+    .map((r) => r.bottles);
   const out: PublicBottleDto[] = [];
   for (const b of rows) {
     if (b.outcomeLng === null || b.outcomeLat === null || b.outcomeAt === null) continue;
@@ -149,6 +161,89 @@ export function listPublicOcean(ctx: AppContext, viewer: AuthUser): PublicBottle
     });
   }
   return out;
+}
+
+// Opening a bottle found adrift. One server-owned action, one transaction: the opening row is
+// inserted (its primary key is the bottle id, so the insert itself picks the single winner of a
+// race), the aging profile is frozen, the reading is recorded in the journey history and the
+// sender is told once. From that moment the bottle is off the public map for everyone and the
+// finder can read the letter; the journey outcome is untouched, so the sender keeps their
+// letter, passport and Lost entry, and the intended recipient is never delivered to — the
+// bottle is still `lost`, which no arrival path will touch.
+//
+// Idempotent for the finder: opening it again is a plain read. For anybody else it is a 409 with
+// no content whatsoever. This change deliberately adds nothing beyond reading: no rescue, no
+// re-release, no further travel, no transfer of ownership.
+export function openPublicBottle(
+  ctx: AppContext,
+  user: AuthUser,
+  bottleId: string,
+): OpenedLetterDto {
+  const now = ctx.clock.now();
+  const opened = ctx.db.transaction((tx) => {
+    const bottle = tx.select().from(t.bottles).where(eq(t.bottles.id, bottleId)).get();
+    // Anything that is not an openable adrift bottle is simply "not found": the public map must
+    // not become a way to probe for bottles.
+    if (
+      !bottle ||
+      bottle.state !== 'lost' ||
+      bottle.lossReason !== 'adrift' ||
+      bottle.moderationStatus !== 'clear'
+    ) {
+      throw notFound('bottle');
+    }
+    if (isBlockedEitherWay(tx, user.id, bottle.senderId)) throw notFound('bottle');
+    // The sender reads their own letter with their own action, which never claims the bottle.
+    if (bottle.senderId === user.id) {
+      throw badRequest('own_bottle', 'This is your own bottle; reading it changes nothing.');
+    }
+
+    const existing = publicOpeningOf(tx, bottleId);
+    if (existing) {
+      if (existing.openedById !== user.id) {
+        throw conflict('already_opened', 'Another traveller opened this bottle first.');
+      }
+      return { bottle, openedAt: existing.openedAt };
+    }
+    tx.insert(t.publicOpenings)
+      .values({ bottleId, openedById: user.id, openedAt: now })
+      .onConflictDoNothing()
+      .run();
+    const winner = publicOpeningOf(tx, bottleId)!;
+    if (winner.openedById !== user.id) {
+      throw conflict('already_opened', 'Another traveller opened this bottle first.');
+    }
+    // Freeze the paper's appearance at the moment it was opened, exactly as arrival does.
+    const plan = activePlan(tx, bottleId);
+    if (!bottle.agingProfile) {
+      tx.update(t.bottles)
+        .set({
+          agingProfile: deriveAgingProfile({
+            bottleId,
+            releasedAt: bottle.releasedAt,
+            deliveredAt: bottle.outcomeAt ?? now,
+            plannedDurationMs: plan?.plannedDurationMs ?? 0,
+          }),
+        })
+        .where(eq(t.bottles.id, bottleId))
+        .run();
+    }
+    appendEvent(tx, bottleId, 'opened', now, { scope: 'public' });
+    // The sender learns their letter was read, never by whom (spec D03 is open on attribution).
+    enqueueNotification(tx, {
+      userId: bottle.senderId,
+      type: 'journey_event',
+      bottleId,
+      dedupeKey: `public_opened:${bottleId}`,
+      message: 'Someone found your drifting bottle and read your letter.',
+      now,
+    });
+    return {
+      bottle: tx.select().from(t.bottles).where(eq(t.bottles.id, bottleId)).get()!,
+      openedAt: now,
+    };
+  });
+  return openedLetter(ctx, opened.bottle, 'public', opened.openedAt);
 }
 
 // ---------- private marker visibility ----------
