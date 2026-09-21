@@ -1,12 +1,12 @@
 import { useEffect, useId, useState, type FormEvent } from 'react';
 import {
-  POLICY_DOCUMENTS,
+  PUBLISHED_DOCUMENTS,
   confirmationProblem,
   currentPolicyVersions,
   emailProblem,
   passwordProblem,
   usernameProblem,
-  type PolicyId,
+  type DocumentId,
 } from '@mib/shared';
 import { ApiError, UNREACHABLE, api, type HealthResponse } from '../api/client.js';
 import { EMPTY_CONSENT, PolicyConsent, consentProblems } from '../components/PolicyConsent.js';
@@ -20,7 +20,7 @@ interface Props {
   resetToken?: string | undefined;
   onResetDone?: (() => void) | undefined;
   // Opens one of the three documents over this screen (the shell owns the dialog).
-  onOpenPolicy: (doc: PolicyId) => void;
+  onOpenPolicy: (doc: DocumentId) => void;
 }
 
 // Turns an API failure into one sentence for the person; sign-in failures stay generic on
@@ -501,7 +501,7 @@ export function LoginScreen({ resetToken, onResetDone, onOpenPolicy }: Props) {
           strand or be lost.
         </p>
         <nav className="policy-links" aria-label="Terms and privacy">
-          {POLICY_DOCUMENTS.map((d) => (
+          {PUBLISHED_DOCUMENTS.map((d) => (
             <button
               key={d.id}
               type="button"

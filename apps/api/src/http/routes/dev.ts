@@ -86,5 +86,17 @@ export function devRoutes() {
   });
 
   r.post('/tick', (c) => c.json(runJourneyTick(c.get('ctx'))));
+  // Makes the signed-in account look like one that predates the published documents, so the
+  // acceptance gate can be walked through in a browser. Development builds only, and it only
+  // ever removes the caller's own acceptance rows.
+  r.post('/forget-policy-acceptances', (c) => {
+    const ctx = c.get('ctx');
+    const userId = c.get('user').id;
+    const removed = ctx.db
+      .delete(t.policyAcceptances)
+      .where(eq(t.policyAcceptances.userId, userId))
+      .run().changes;
+    return c.json({ removed });
+  });
   return r;
 }

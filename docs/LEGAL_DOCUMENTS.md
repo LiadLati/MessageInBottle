@@ -1,122 +1,133 @@
-# Terms of Use, Community Guidelines and Privacy Policy — status
+# Terms of Use, Community Rules, Privacy Policy and Child Safety Standards
 
-**Status: WORKING DRAFT (version `0.1-draft`). Not approved legal text. Not released.**
+**Published at version `1.0`. Effective when published in the App.**
 
-The three documents live in `packages/shared/src/policies.ts` and are rendered by the app from
-there, so the version a person is shown is always the version the server records. This file says
-how the draft handed over on 2026-09-19 was checked against the product, what was corrected, what
-the code now does with the documents, and — most importantly — what still needs a decision before
-any of it may be released. Nothing in the open list has been guessed.
+The documents live in `packages/shared/src/policies.ts` as structured content, in English and
+left-to-right. One module serves three surfaces — the in-app reader, the public web pages and
+the acceptance records — so the text a person was shown, the version stored against their
+account and the text at the public URL cannot drift apart. The documents name no operator,
+address, company, registration number or jurisdiction, and refer to the product only as
+"the App".
 
-## What the app does now
+## What is published
 
-- **Reachable before registration and after.** The sign-in screen links all three documents; the
-  registration form links them from its controls; the account sheet (avatar → "Terms and
-  privacy") links them again and states what the account accepted and when. `/#terms`,
-  `/#guidelines` and `/#privacy` open a document directly.
-- **Accessible views.** Structured blocks, never HTML: real headings, lists and tables, Hebrew
-  right-to-left inside an English shell, a modal that keeps focus and returns it, and every
-  unresolved field as a highlighted `[…]` mark that a screen reader announces as "not yet
-  completed". Drafts carry a bilingual banner with the count of open fields and the list of
-  statements that depend on unreleased work.
-- **Registration.** Two controls, both unchecked to begin with, each a separate decision:
-  *accept* the Terms of Use and Community Guidelines; *acknowledge* the Privacy Policy. Both are
-  required; the client explains what is missing; the server refuses anything less
-  (`RegisterRequestSchema` demands three literal `true` flags plus the versions shown, and
-  answers `409 policy_version_stale` if they are not the current ones). No marketing consent,
-  because there is no marketing: the only e-mail the service sends is a password-reset link the
-  person asked for.
-- **Recorded per account.** `policy_acceptances` (migration `0010_policy_acceptances`, additive)
-  holds one row per document per acceptance: version, `accepted`/`acknowledged`, where it
-  happened (registration or the later update screen) and the real-clock timestamp. The account
-  and its three rows are written in one transaction. History is kept; a newer version accepted
-  later is a new row.
-- **Existing accounts are never treated as having accepted.** Accounts created before this
-  change have no rows; their session says `acceptedVersion: null` for every document. While the
-  set is a draft nothing is demanded of them — there is nothing final to ask about. Once a
-  released set exists, every account whose latest acceptance differs from the current version
-  (never-accepted included) is gated: sign-in, the documents, acceptance and sign-out work, every
-  other route answers `403 policies_required`, and the app shows the acceptance screen instead
-  of the ocean. The same happens after any future version bump.
-- **Release is blocked in code, not only in a note.** A production build (`MIB_DEV_MODE=false`)
-  refuses registration with `503 policies_not_released` while the set is a draft, so nobody can
-  be asked to agree to unfinished text by accident; development builds allow it so the flow
-  could be built and tested. A document marked released that still carries an open field stops
-  the API from starting (`assertPolicySetServeable`). Releasing is a deliberate code change:
-  resolve every marker, set `status: 'released'`, bump `version`, set `effectiveAt`.
-
-## How the draft was checked against the product
-
-Every factual sentence was compared with the code on `main` (and, for reporting and appeals,
-with `feature/reporting-and-moderation`, which the documents describe and which must merge
-before they can be released). Corrections made:
-
-| Draft said | Product actually does | Text now says |
+| Document | Public URL | Accepted at registration? |
 | --- | --- | --- |
-| Rate limits "on sending letters and reports" | Limits exist on registration, sign-in, password recovery and (moderation branch) reports; none on sending | Names the four; states there is no limit on sending |
-| "Verify no active payment means" | No payment code, no subscriptions, no payment data anywhere | States it plainly, marker removed |
-| "Verify whether marketing exists" | None; no mailing list; only password-reset mail | States it plainly; no marketing control added |
-| Account details "e-mail … as required" | E-mail is mandatory at registration, unique, used for recovery; not shown to others | Says so |
-| Public map | Shows other people's lost bottles as position and loss time only — no sender, recipient, harbours or text | Says exactly that (the draft implied more) |
-| Finder's reading | One reading; recoverable for 15 minutes; then closed; no archive | Confirmed, 15 minutes stated |
-| Sunk bottles | Never listed publicly | Confirmed |
-| Same-harbour delivery | Immediate | Confirmed |
-| Journey timing | Fixed by the server at release; device clock and refreshes irrelevant | Added |
-| Technical data "IP, browser data, logs, as collected" | IP used in memory for auth rate limits only, never stored; request log has method/path/status/duration, no IP; no browser/device data beyond the time zone | States exactly that; infrastructure logs left open |
-| Cookies / SDKs / pixels "to verify" | No cookies; sessionStorage (session token, unsent draft), localStorage (time zone); no analytics, ads or third-party code; map data bundled, no external tile server by default | States exactly that; external tiles flagged as a deployment choice |
-| Security "only what is verified" | scrypt-hashed passwords with per-password salt; hashed session and reset tokens; single-use 30-minute reset tokens; admin role enforced server-side | States those; TLS, storage encryption, backups left open |
-| Deletion | No self-service account or letter deletion exists | Says so; manual handling via the (still open) contact channel |
-| Minimum age | Not decided, not implemented | Kept as an open marker; never stated as a fact |
-| Appeal deadline | None in the product | Kept as an open marker; the code's optional `MIB_APPEAL_WINDOW_DAYS` stays unset |
-| Evidence retention | Mechanism exists and is disabled | Says so |
-| Blocks | Implemented, enforced both ways | Guideline kept |
+| Terms of Use | `/legal/terms` | accepted |
+| Community Rules | `/legal/community-rules` | accepted |
+| Privacy Policy | `/legal/privacy` | acknowledged |
+| Child Safety Standards | `/legal/child-safety` | published for reference |
+| Delete your account | `/legal/delete-account` | an interactive page, not a document |
 
-The registration section (§ד) and the pre-publication checklist (§ה) of the draft are product
-requirements, not user-facing text; they are implemented (§ד) and tracked here (§ה).
+`/legal` lists them all. Every page is plain server-rendered HTML: no sign-in, no JavaScript,
+no PDF, indexable, and readable from a narrow phone upwards. They are served by the API so that
+the URL works on its own, which is what a store listing needs.
 
-## Open before release — needs your decision or a lawyer
+## Registration consent
 
-Every item below appears in the documents as a `[[…]]` marker. `openItemsOf()` lists them; the
-draft banner counts them.
+Two controls, both unchecked, each its own decision:
 
-1. **Operator identity and contact.** Legal name, registration number, address, a working support
-   address, a privacy address, a security address, and realistic response times. (Terms §1, §2,
-   §7; Privacy header, §1, §5, §7.)
-2. **Minimum age.** The draft proposes 18+. Nothing enforces or states an age today. Deciding it
-   also means deciding how a known minor's account is handled. (Terms §1; Privacy §7.)
-3. **Effective dates and legal review.** Both documents carry no effective date; the Privacy Policy
-   needs the legal basis per purpose and per target country; the Terms need governing law and
-   forum. An Israeli lawyer versed in privacy, digital and consumer law, plus any other target
-   jurisdictions, must review before release.
-4. **Deployment data inventory.** Hosting provider, reverse proxy, SMTP provider, where the AI
-   model runs and who can reach it, whether an external map-tile provider is configured, and any
-   transfers outside Israel / the EEA. All deployment-specific; the code cannot know them.
-5. **Retention periods.** For accounts, letters and journey history; expired token rows; public
-   opening records; technical and support logs; and for moderation evidence (rejected cases,
-   revoked violations). The retention engine exists and is off; `docs/ARCHITECTURE.md` carries
-   recommended values.
-6. **Appeal deadline** (and whether old violations ever stop counting towards a ban). The product
-   has no deadline; the documents say so and leave it open.
-7. **Deletion process.** No self-service deletion exists. A manual process — identity check,
-   backups, the relationship between deletion and evidence of an open report — must be defined
-   before the Privacy Policy promises anything.
-8. **Merge dependency.** The moderation clauses (reporting, one case per letter, admin decisions,
-   the warning/suspension/ban ladder, one appeal, report rate limits) describe
-   `feature/reporting-and-moderation`, which is not on `main` yet. They are correct for that
-   branch and listed on each document under "depends on". Do not release before it merges.
-9. **Language.** The texts are Hebrew inside an English interface. Whether an English version is
-   needed, and which one prevails, is a product and legal question.
+1. `I agree to the Terms of Use and Community Rules.`
+2. `I have read the Privacy Policy.`
 
-## Releasing, when the time comes
+Each document name is a link that opens the full-screen legal view without losing the form.
+Both are required. The client explains what is missing and the server refuses independently:
+`RegisterRequestSchema.policies` demands three literal `true` flags plus the versions that were
+shown, and answers `409 policy_version_stale` if they are not current. There is no marketing
+consent, because the App does no marketing.
 
-1. Resolve every `[[…]]` in `packages/shared/src/policies.ts`; `pnpm --filter @mib/shared test`
-   fails while a released document still has one.
-2. Set each document's `status` to `'released'`, its `version` to a release number (`1.0`), and
-   `effectiveAt`.
-3. Ship. From that build, registration in production opens; every existing account is asked to
-   accept on its next sign-in and is blocked from everything else until it does or signs out.
-4. Later changes: bump `version`, set a new `effectiveAt`. Everyone is asked again; earlier
-   acceptances stay on record as history.
+`policy_acceptances` (migration `0012`) records one row per document per acceptance: version,
+`accepted` or `acknowledged`, whether it happened at registration or later, and the real-clock
+time. The rows are written in the same transaction as the account, and the table is append-only
+so history survives a version change.
 
-`MIB_POLICIES_PREVIEW_RELEASED=true` (development only) treats the shipped draft as released so
-the existing-account path can be seen in a browser. It has no effect in production.
+## When a version changes
+
+`accountPolicies` compares each document's latest accepted version with the current one.
+Anything different — including never accepted — gates the account: `requirePolicies` answers
+`403 policies_required` on chart, friends, bottles, shore, ocean and notifications, and the App
+shows the acceptance screen instead of the ocean. Authentication, reading the documents, the
+account's standing, appeals, signing out and **deleting the account** stay open throughout.
+Nothing is ever carried over silently; accounts that predate the documents have no rows and are
+asked on their next sign-in.
+
+Seeded development accounts are created by the seed itself and record the same acceptance
+registration would, because they are new accounts rather than pre-existing ones.
+
+## No age restriction
+
+The App has no age gate. There is no date-of-birth field, no age checkbox, no age verification,
+no stored verification timestamp and no underage registration block anywhere in the schema, the
+API or the interface, and the documents make no claim that users are adults or have been
+age-verified. A test walks every production source file and fails on any of those appearing.
+
+Safety rules concerning minors are unconditional for every user: sexual exploitation of minors,
+grooming and child sexual abuse material are prohibited absolutely in the Community Rules and in
+the Child Safety Standards, which also set out in-app reporting, removal and sanctions, the
+handling of valid legal requests, and where to raise a concern.
+
+Not marketing the App to children is a Play Console target-audience and content-rating decision,
+not a registration restriction. See the list at the end of this file.
+
+## Account deletion
+
+One transactional, idempotent server operation (`services/deletion.ts`), reachable two ways:
+
+- **In the App:** the account sheet → **Delete account**, which asks for the password again and
+  an explicit confirmation.
+- **On the web:** `/legal/delete-account`, which explains what happens, then takes the username,
+  the password and a required confirmation, all as a plain form post.
+
+Both paths re-authenticate and call the same function. What it does:
+
+- deletes every session, so access ends immediately (a non-active account is also refused by
+  `login` and `resolveSession`, independently of the rows);
+- deletes password-recovery records;
+- clears the username, display name, email address, password, chosen harbour and time zone, and
+  replaces the display name other people see on a letter with "Deleted account";
+- deletes friendships, friend requests and blocks, so the account leaves discovery and everyone's
+  lists;
+- deletes notifications, map-marker state and stored idempotency records;
+- cancels letters still at sea or adrift in the public ocean, releases the place reserved at the
+  destination harbour, records a `cancelled` journey event and clears the text, so no deleted
+  account's letter can still be found and opened;
+- leaves letters that already reached their recipient with that recipient, as their correspondence;
+- leaves moderation cases, reports, violations and appeals in place, under the evidence-retention
+  rules in `services/retention.ts`, because an open report, a pending appeal or a restriction
+  still in force must outlive the account that caused it.
+
+The account row itself survives as an anonymous marker with `status = 'deleted'` and
+`deleted_at` set (migration `0013`). Dropping it would break the foreign keys of letters that
+belong to other people. Calling the operation again returns the original deletion and changes
+nothing.
+
+## Releasing a new version
+
+1. Edit the documents in `packages/shared/src/policies.ts`.
+2. Raise `POLICY_VERSION`.
+3. Ship. Every account is asked to accept on its next sign-in and is blocked from ordinary use
+   until it does, or signs out, or deletes itself. Earlier acceptances stay on record.
+
+`validatePolicySet` refuses to publish a document that is not released, is not English
+left-to-right, has no effective statement, or contains unfinished text (an unresolved `[[…]]`
+field, "TBD", "TODO", "placeholder", "draft" or any Hebrew). It runs in the tests and at API
+boot, so an unfinished document cannot reach a person.
+
+## Still to do in the Play Console (configuration, not code)
+
+These cannot be satisfied by wording or by this repository:
+
+1. **Public policy URL** — point the listing at the deployed `/legal/privacy`. It is already a
+   public, non-geofenced HTML page rather than a PDF.
+2. **Data Safety form** — complete it so it matches what the App actually collects, shares,
+   secures and deletes. The Privacy Policy's section 2 is the inventory to copy from.
+3. **Target audience and content rating** — complete both declarations, and do not select
+   children as a target audience for a service that shows letters between strangers.
+4. **Account deletion declaration** — give the deployed `/legal/delete-account` as the web
+   deletion URL; the in-app path already exists.
+5. **Developer account verification** — the account holder verifies their identity privately
+   with Google. Deliberately not written into the in-app documents.
+6. **Store support contact** — supply an active project support address for the listing, not a
+   personal one. The documents point at "the Support and Privacy Request options in the App and
+   on its public support page"; that support page and its contact route still need to exist at
+   the deployed domain.

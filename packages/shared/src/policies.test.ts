@@ -1,124 +1,159 @@
 import { describe, expect, it } from 'vitest';
 import {
-  COMMUNITY_GUIDELINES,
+  CHILD_SAFETY_STANDARDS,
+  COMMUNITY_RULES,
   POLICY_DOCUMENTS,
+  POLICY_EFFECTIVE,
   POLICY_IDS,
+  POLICY_VERSION,
   PRIVACY_POLICY,
+  PUBLISHED_DOCUMENTS,
   PolicyAcceptanceRequestSchema,
   TERMS_OF_USE,
   currentPolicyVersions,
-  openItemsOf,
   policySetStatus,
-  segmentsOf,
+  publishedDocumentBySlug,
+  textOf,
   validatePolicySet,
-  type PolicyDocument,
 } from './policies.js';
 
-describe('policy documents', () => {
-  it('ships all three as a consistent draft set', () => {
+const everything = PUBLISHED_DOCUMENTS.map((d) => `${d.title}\n${d.summary}\n${textOf(d)}`).join(
+  '\n',
+);
+
+describe('the published documents', () => {
+  it('are released English v1.0 documents with an effective statement', () => {
     expect(POLICY_DOCUMENTS.map((d) => d.id)).toEqual([...POLICY_IDS]);
-    expect(validatePolicySet(POLICY_DOCUMENTS)).toEqual([]);
-    expect(policySetStatus()).toBe('draft');
-    for (const d of POLICY_DOCUMENTS) {
-      expect(d.status).toBe('draft');
-      expect(d.version).toMatch(/-draft$/);
-      expect(d.effectiveAt).toBeNull();
-      expect(d.lang).toBe('he');
-      expect(d.dir).toBe('rtl');
+    expect(validatePolicySet(PUBLISHED_DOCUMENTS)).toEqual([]);
+    expect(policySetStatus()).toBe('released');
+    for (const d of PUBLISHED_DOCUMENTS) {
+      expect(d.status).toBe('released');
+      expect(d.version).toBe(POLICY_VERSION);
+      expect(POLICY_VERSION).toBe('1.0');
+      expect(d.effective).toBe(POLICY_EFFECTIVE);
+      expect(d.effective).toBe('Effective when published in the App');
+      expect(d.lang).toBe('en');
+      expect(d.dir).toBe('ltr');
       expect(d.blocks.length).toBeGreaterThan(3);
+      expect(d.slug).toMatch(/^[a-z-]+$/);
     }
     expect(currentPolicyVersions()).toEqual({
-      terms: TERMS_OF_USE.version,
-      guidelines: COMMUNITY_GUIDELINES.version,
-      privacy: PRIVACY_POLICY.version,
+      terms: '1.0',
+      guidelines: '1.0',
+      privacy: '1.0',
     });
+    expect(publishedDocumentBySlug('child-safety')).toBe(CHILD_SAFETY_STANDARDS);
+    expect(publishedDocumentBySlug('nope')).toBeUndefined();
   });
 
-  it('keeps every undecided fact as a visible open item rather than a guess', () => {
-    const open = {
-      terms: openItemsOf(TERMS_OF_USE),
-      guidelines: openItemsOf(COMMUNITY_GUIDELINES),
-      privacy: openItemsOf(PRIVACY_POLICY),
-    };
-    // The decisions the operator still owes: identity and contact, the minimum age, the appeal
-    // deadline, the legal basis, providers and hosting, retention periods, security in
-    // deployment. None of them may be filled in by this code.
-    expect(open.terms.join(' ')).toMatch(/מפעיל השירות|שם משפטי/);
-    expect(open.terms.join(' ')).toMatch(/גיל מינימלי/);
-    expect(open.terms.join(' ')).toMatch(/ערעור/);
-    expect(open.terms.join(' ')).toMatch(/הדין החל|ערכאה/);
-    expect(open.privacy.join(' ')).toMatch(/בסיס המשפטי/);
-    expect(open.privacy.join(' ')).toMatch(/ספקי אירוח|ספק האירוח/);
-    expect(open.privacy.join(' ')).toMatch(/משך שמירה|תקופת שמירה|תקופות שמירה/);
-    expect(open.privacy.join(' ')).toMatch(/TLS/);
-    expect(open.privacy.join(' ')).toMatch(/הגיל/);
-    // Nothing that the draft flagged as "verify" was left hedged once verified: the product
-    // has no payments and no marketing, so the documents say so without a marker.
-    expect(open.terms.join(' ')).not.toMatch(/תשלום/);
-    expect(open.privacy.join(' ')).not.toMatch(/שיווק/);
-    // Guidelines are conduct rules and carry no operator-specific fact at all.
-    expect(open.guidelines).toEqual([]);
-  });
-
-  it('never describes a self-service deletion, an age gate or a marketing consent', () => {
-    const all = POLICY_DOCUMENTS.flatMap((d) =>
-      d.blocks.flatMap((b) =>
-        b.type === 'table'
-          ? b.rows.flat()
-          : b.type === 'ul' || b.type === 'ol'
-            ? b.items
-            : [b.text],
-      ),
-    ).join('\n');
-    expect(all).toMatch(/אין בשירות מחיקת חשבון עצמית/);
-    expect(all).toMatch(/אין בשירות מנויים, רכישות או אמצעי תשלום/);
-    expect(all).toMatch(/אינו שולח מסרים שיווקיים/);
-    expect(all).toMatch(/אינו משתמש בעוגיות/);
-    // The minimum age appears only inside an open marker, never as a plain statement.
-    for (const d of POLICY_DOCUMENTS)
-      for (const b of d.blocks)
-        if (b.type === 'p') {
-          const plain = b.text.replace(/\[\[[^\]]+\]\]/g, '');
-          expect(plain).not.toMatch(/18 ומעלה/);
-        }
-  });
-
-  it('refuses to call a document released while it still has open items', () => {
-    const half: PolicyDocument = {
-      ...TERMS_OF_USE,
-      status: 'released',
-      version: '1.0',
-      effectiveAt: '2026-10-01',
-    };
-    const problems = validatePolicySet([half, COMMUNITY_GUIDELINES, PRIVACY_POLICY]);
-    expect(problems.some((p) => /unresolved field/.test(p))).toBe(true);
-    // A draft may not pretend to be a release and vice versa.
+  it('carry no Hebrew, no draft notice, no placeholder and no unresolved field', () => {
+    expect(everything).not.toMatch(/[֐-׿]/);
+    for (const word of [/\[\[/, /\bdraft\b/i, /\bTBD\b/i, /\bTODO\b/i, /placeholder/i]) {
+      expect(everything).not.toMatch(word);
+    }
+    // The guard is real: a document that acquired unfinished text would fail validation.
     expect(
       validatePolicySet([
-        { ...TERMS_OF_USE, version: '1.0' },
-        COMMUNITY_GUIDELINES,
+        { ...TERMS_OF_USE, summary: 'A draft for review' },
+        COMMUNITY_RULES,
         PRIVACY_POLICY,
       ]),
-    ).toContain("terms: a draft's version must end in -draft");
+    ).toContainEqual(expect.stringMatching(/unfinished text/));
     expect(
-      validatePolicySet([
-        { ...COMMUNITY_GUIDELINES, status: 'released', version: '1.0', effectiveAt: null },
-        TERMS_OF_USE,
-        PRIVACY_POLICY,
-      ]),
-    ).toContain('guidelines: a released document needs effectiveAt');
+      validatePolicySet([{ ...TERMS_OF_USE, status: 'draft' }, COMMUNITY_RULES, PRIVACY_POLICY]),
+    ).toContain('terms: is not released');
+    expect(
+      validatePolicySet([{ ...TERMS_OF_USE, lang: 'he' as 'en' }, COMMUNITY_RULES, PRIVACY_POLICY]),
+    ).toContain('terms: must be English, left-to-right');
   });
 
-  it('splits inline open markers for rendering', () => {
-    expect(segmentsOf('לפני [[א]] ואחרי')).toEqual([
-      { kind: 'text', text: 'לפני ' },
-      { kind: 'open', text: 'א' },
-      { kind: 'text', text: ' ואחרי' },
-    ]);
-    expect(segmentsOf('ללא סימון')).toEqual([{ kind: 'text', text: 'ללא סימון' }]);
+  it('state no age requirement and make no claim that users are adults or age-verified', () => {
+    for (const pattern of [
+      /\b18\b/,
+      /\bage[- ]?verif/i,
+      /\bdate of birth\b/i,
+      /\bbirth ?date\b/i,
+      /\badults only\b/i,
+      /\baged? \d+ or older\b/i,
+      /\bover the age of\b/i,
+      /\bminimum age\b/i,
+      /\bconfirm that you are at least\b/i,
+    ]) {
+      expect(everything, String(pattern)).not.toMatch(pattern);
+    }
   });
 
-  it('accepts only explicit, literal acceptances with versions', () => {
+  it('name no operator, address, company, registration number or jurisdiction', () => {
+    for (const pattern of [
+      /\bregistration number\b/i,
+      /\bgoverning law\b/i,
+      /\bjurisdiction\b/i,
+      /\bcourts? of\b/i,
+      /\bcompany number\b/i,
+      /@[a-z0-9.-]+\.[a-z]{2,}/i, // no e-mail address of any kind
+      /Message in a Bottle/,
+    ]) {
+      expect(everything, String(pattern)).not.toMatch(pattern);
+    }
+    // The product is referred to only as "the App".
+    expect(everything).toMatch(/\bthe App\b/);
+  });
+
+  it('describe the moderation system the App actually implements', () => {
+    const terms = textOf(TERMS_OF_USE);
+    expect(terms).toMatch(/recommendation/i);
+    expect(terms).toMatch(/does not decide anything/i);
+    expect(terms).toMatch(/human administrator/i);
+    expect(terms).toMatch(/not disclosed to its sender/i);
+    expect(terms).toMatch(/First upheld violation: a warning/);
+    expect(terms).toMatch(/seven-day suspension/);
+    expect(terms).toMatch(/permanent ban/);
+    expect(terms).toMatch(/one appeal/i);
+    expect(terms).toMatch(/accepted appeal reverses the violation/i);
+    const rules = textOf(COMMUNITY_RULES);
+    for (const prohibited of [
+      /grooming/i,
+      /child sexual abuse/i,
+      /threats/i,
+      /harassment/i,
+      /hatred/i,
+      /phishing/i,
+      /spam/i,
+      /unlawful/i,
+    ]) {
+      expect(rules, String(prohibited)).toMatch(prohibited);
+    }
+    // The public-ocean finder gets one reading and no archive.
+    expect(textOf(PRIVACY_POLICY)).toMatch(/single reading session/i);
+    expect(textOf(PRIVACY_POLICY)).toMatch(/no lasting archive/i);
+    expect(textOf(PRIVACY_POLICY)).toMatch(/72 hours/);
+    expect(textOf(PRIVACY_POLICY)).toMatch(/15 minutes/);
+  });
+
+  it('promise account deletion only in the terms the App implements', () => {
+    const privacy = textOf(PRIVACY_POLICY);
+    expect(privacy).toMatch(/delete your account from the account settings/i);
+    expect(privacy).toMatch(/account-deletion page on the public support site/i);
+    expect(privacy).toMatch(/asks for your password and an explicit final confirmation/i);
+    expect(privacy).toMatch(/every session is revoked immediately/i);
+    expect(textOf(TERMS_OF_USE)).toMatch(/delete your account/i);
+  });
+
+  it('publish child safety standards covering prohibition, reporting, removal and legal requests', () => {
+    const cs = textOf(CHILD_SAFETY_STANDARDS);
+    expect(cs).toMatch(/child sexual abuse material/i);
+    expect(cs).toMatch(/grooming/i);
+    expect(cs).toMatch(/prohibited absolutely/i);
+    expect(cs).toMatch(/report it from the reader/i);
+    expect(cs).toMatch(/withdrawn from further reading/i);
+    expect(cs).toMatch(/permanent ban/i);
+    expect(cs).toMatch(/valid legal requests/i);
+    expect(cs).toMatch(/support page/i);
+    // It is published but never part of what a person accepts.
+    expect(POLICY_IDS).not.toContain('child-safety' as never);
+  });
+
+  it('accepts only explicit, literal acceptances carrying the versions shown', () => {
     const versions = currentPolicyVersions();
     const ok = { acceptTerms: true, acceptGuidelines: true, acknowledgePrivacy: true, versions };
     expect(PolicyAcceptanceRequestSchema.safeParse(ok).success).toBe(true);

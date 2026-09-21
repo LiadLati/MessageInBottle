@@ -111,6 +111,12 @@ export const api = {
   policyStanding: () => request<AccountPoliciesDto>('GET', '/policies/me/standing'),
   acceptPolicies: (policies: PolicyAcceptanceRequest) =>
     request<AccountPoliciesDto>('POST', '/policies/accept', policies),
+  // Settings → Delete account. Permanent, and refused without the password and the confirmation.
+  deleteAccount: (password: string) =>
+    request<{ deletedAt: string; alreadyDeleted: boolean }>('POST', '/account/delete', {
+      password,
+      confirm: true,
+    }),
   forgotPassword: (email: string) =>
     request<{ ok: boolean }>('POST', '/auth/password/forgot', { email }),
   resetPassword: (token: string, password: string) =>

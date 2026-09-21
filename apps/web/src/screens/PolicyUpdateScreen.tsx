@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { currentPolicyVersions, type PolicyId } from '@mib/shared';
+import { currentPolicyVersions, type DocumentId } from '@mib/shared';
 import { ApiError, api } from '../api/client.js';
 import { EMPTY_CONSENT, PolicyConsent, consentProblems } from '../components/PolicyConsent.js';
 import { useSession } from '../state/session.js';
@@ -7,7 +7,7 @@ import { useSession } from '../state/session.js';
 // Shown instead of the app when a released version of the documents is one this account has
 // not accepted — every account that existed before the documents did, and every account after
 // a change. Nothing was carried over silently: the person reads and decides here, or signs out.
-export function PolicyUpdateScreen({ onOpen }: { onOpen: (doc: PolicyId) => void }) {
+export function PolicyUpdateScreen({ onOpen }: { onOpen: (doc: DocumentId) => void }) {
   const { user, logout, setUser } = useSession();
   const [consent, setConsent] = useState(EMPTY_CONSENT);
   const [submitted, setSubmitted] = useState(false);
@@ -45,13 +45,13 @@ export function PolicyUpdateScreen({ onOpen }: { onOpen: (doc: PolicyId) => void
     <main className="login-screen">
       <div className="scrim" />
       <div className="login-card">
-        <span className="t-eyebrow">Message in a Bottle</span>
+        <span className="t-eyebrow">Before you continue</span>
         <h1 className="t-display">
           {firstTime ? 'Before you continue' : 'The terms have changed'}
         </h1>
         <p className="secondary">
           {firstTime
-            ? 'The service now has published Terms of Use, Community Guidelines and a Privacy Policy. Please read them; using the app needs your acceptance.'
+            ? 'The App has published Terms of Use, Community Rules and a Privacy Policy. Please read them; using the App needs your acceptance.'
             : 'A document you accepted earlier has a new version. Please read it; continuing needs your acceptance of the current version.'}
         </p>
         <ul className="list policy-changes" aria-label="Documents to review">

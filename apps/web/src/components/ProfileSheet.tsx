@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react';
-import { POLICY_DOCUMENTS, type PolicyId } from '@mib/shared';
+import { PUBLISHED_DOCUMENTS, type DocumentId } from '@mib/shared';
 import { useSession } from '../state/session.js';
 import { Avatar } from './ui.js';
 import { Icon } from '../design/Icon.js';
@@ -7,7 +7,8 @@ import { Icon } from '../design/Icon.js';
 interface Props {
   shoreName: string | null;
   onChangeShore: () => void;
-  onOpenPolicy: (doc: PolicyId) => void;
+  onOpenPolicy: (doc: DocumentId) => void;
+  onDeleteAccount: () => void;
   onStanding: () => void;
   onClose: () => void;
 }
@@ -42,6 +43,7 @@ export function ProfileSheet({
   onChangeShore,
   onOpenPolicy,
   onStanding,
+  onDeleteAccount,
   onClose,
 }: Props) {
   const { user, logout } = useSession();
@@ -101,6 +103,9 @@ export function ProfileSheet({
           <button type="button" className="btn-text" onClick={() => void logout()}>
             Sign out
           </button>
+          <button type="button" className="btn-text danger" onClick={onDeleteAccount}>
+            Delete account
+          </button>
           <p className="t-meta">
             A shore is only an anchor in the app. It says nothing about where you live.
           </p>
@@ -109,7 +114,7 @@ export function ProfileSheet({
               Terms and privacy
             </h2>
             <div className="policy-links" style={{ justifyContent: 'flex-start' }}>
-              {POLICY_DOCUMENTS.map((d) => (
+              {PUBLISHED_DOCUMENTS.map((d) => (
                 <button
                   key={d.id}
                   type="button"

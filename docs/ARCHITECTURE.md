@@ -284,149 +284,40 @@ and the new `risk_decisions` table (one row per bottle per storm night, unique o
   opened, and clears when that bottle is opened — never by reading the inbox. The top strip
   remains an *arrival* banner and reacts to unread `received_arrived` events only.
 
-## Terms, guidelines and privacy: documents, acceptance and the release gate
+## Legal documents, consent, and account deletion
 
-- **One source.** `packages/shared/src/policies.ts` holds the three documents as structured
-  blocks (headings, paragraphs, lists, tables — never HTML), their `version`, `status`
-  (`draft` | `released`) and `effectiveAt`, plus `[[…]]` inline markers for every fact still
-  to be decided. The API validates acceptances against the versions there and the web renders
-  from there, so what was shown and what was recorded cannot diverge. `openItemsOf` lists the
-  markers; `validatePolicySet` refuses a released document that still has one, and the API calls
-  it at boot.
-- **Acceptance.** `RegisterRequestSchema.policies` requires three literal `true` flags
-  (`acceptTerms`, `acceptGuidelines`, `acknowledgePrivacy`) and the versions the form showed;
+- **One source.** `packages/shared/src/policies.ts` holds the Terms of Use, Community Rules,
+  Privacy Policy and Child Safety Standards as structured blocks (headings, paragraphs, lists —
+  never raw HTML), in English left-to-right, at `POLICY_VERSION`. The API validates acceptances
+  against it, renders the public pages from it, and the web renders the in-app views from it.
+  `validatePolicySet` rejects a document that is not released, is not English, lacks an
+  effective statement, or contains unfinished text; it runs in the tests and at API boot.
+- **Consent.** `RegisterRequestSchema.policies` requires three literal `true` flags
+  (`acceptTerms`, `acceptGuidelines`, `acknowledgePrivacy`) and the versions the form showed.
   `recordAcceptances` writes one `policy_acceptances` row per document (version, action, source,
-  real-clock time) inside the same transaction as the `users` row. `409 policy_version_stale`
+  real-clock time) inside the same transaction as the `users` row; `409 policy_version_stale`
   when the versions are not current. Existing accounts accept through `POST /api/policies/accept`
-  with the same payload; rows are append-only, so history is kept.
-- **Standing and the gate.** `accountPolicies` derives, per document, the latest accepted version
-  beside the current one; `required` is true only when the set is released and any document
-  differs (never-accepted included). `requirePolicies` sits after `requireAuth` on chart,
-  friends, bottles, shore, ocean and notifications and answers `403 policies_required`; auth,
-  the documents, acceptance and sign-out stay open. The session DTO carries `policies`, and the
-  web shows `PolicyUpdateScreen` instead of the app while `required`.
-- **Release gate.** `assertAcceptancesAllowed`: in development, acceptances of a draft are taken
-  (that is how the flow is built and tested); in production, registration answers
-  `503 policies_not_released` until the set is released in code. `MIB_POLICIES_PREVIEW_RELEASED`
-  (development only) treats the draft as released to exercise the existing-account path.
-- **Web.** `PolicyDialog` (modal, focus-trapped, three tabs) over the sign-in screen, the app and
-  the update screen; `PolicyDocumentView` renders RTL Hebrew with a bilingual draft banner and
-  highlighted open fields; `PolicyConsent` is the pair of unchecked controls with inline links,
-  shared by registration and the update screen; `ProfileSheet` links the documents and states
-  what the account accepted and when. `/#terms` etc. deep-link a document.
-## Reporting, AI review, violations, appeals and admins (spec §16)
-
-Migration `0010_reporting_and_moderation` is additive: `users.role` (+ `role_granted_at/by`),
-`moderation_cases`, `letter_reports`, `violations`, `appeals`. Existing accounts, bottles and
-journeys are untouched; `bottles.moderation_status` (declared since stage 3) is finally written.
-
-- **Reports → one case.** `services/moderation.ts → reportLetter` accepts a report only from a
-  reader who holds the letter (`readerContextOf`: the recipient of a delivered/opened bottle, or
-  the finder who opened it in the public ocean); the sender cannot report their own, and
-  anything else is 404 so reports cannot probe for bottles. The first report opens the case and
-  copies the letter in as protected evidence (`evidence_text/font/characters`); every later
-  report joins it (`letter_reports` is unique per case and reporter, so a repeat is a no-op).
-  `hide` records that the reporter wants the letter gone from their own reads: shore list,
-  received list, rereads and a finder's active reading all consult it, and a finder's session is
-  closed. Nothing is scanned before a report.
-- **AI review queue.** The `ai_*` columns on the case are the queue. `services/ai-review.ts →
-  runAiReviewTick` claims due cases (`queued` → `running` under the single writer), sends the
-  evidence text and report reasons to an Ollama-compatible `POST /api/chat` in JSON mode, and
-  parses the reply through `AiReviewOutputSchema`: `accept` / `reject` / `uncertain`, a reason,
-  optional uncertainty, language and translation. A clear verdict that also states an
-  uncertainty is read as `uncertain`. Unreachable model → back to `queued` with a growing delay
-  (30 s doubling to 10 min, forever); an unparseable answer → retried, then recorded as
-  `uncertain` so a person sees the case. The letter is fenced as untrusted data in the prompt
-  and no id, name or handle travels with it. By default the verdict is a recommendation; with
-  `MIB_AI_AUTO_DECIDE` a clear verdict calls the same `decideCase` an admin's click does —
-  `uncertain` never decides anything. `tools/ai-eval.ts` runs the multilingual sample set
-  (`services/ai-eval-samples.ts`) against the configured model.
-- **Decisions.** `services/admin.ts → decideCase` is one transaction guarded by `status =
-  'pending'`: a replay of the same outcome returns false, the other outcome is 409, so two
-  admins or an admin and the model produce exactly one decision. Accepting inserts the case's
-  single violation (`violations.case_id` unique), sets `bottles.moderation_status = 'removed'`
-  (state, timing, outcome and public listing untouched — a removed letter is withheld from every
-  read, the sender's passport included, while the evidence stays on the case) and enqueues one
-  deduplicated notification. Rejecting closes the case and tells nobody. Resolved cases stay
-  listed under their status.
-- **Standing** (`standingOf`) is derived, never stored, from the violations still in force
-  (`revoked_at IS NULL`), on the real clock: 0 → good, 1 → warned (a one-time warning the
-  sender acknowledges; `acknowledged_at`), 2 → suspended until the second decision + 7 elapsed
-  days, then warned again, 3+ → banned. `requireGoodStanding` sits on chart, friends, bottles,
-  shore and ocean; auth, notifications, `/api/moderation/*` and sign-out stay open, so a
-  suspended or banned account can sign in, read its standing, appeal and sign out.
-- **Appeals.** One per violation (`appeals.violation_id` unique). `decideAppeal` is guarded
-  like `decideCase`; acceptance sets `revoked_at` (the violation stops counting at once, which
-  is what lifts an unjustified suspension or ban) and restores the letter; rejection is final —
-  the unique index refuses a second appeal and the sender is told once.
-- **Admins.** `users.role` is read from the row on every request (`AuthUser.role`) and checked
-  by `requireAdmin` on every `/api/admin/*` route. It is granted only by `tools/grant-admin.ts`,
-  which looks an account up by normalised e-mail, prints its stable id, and writes only when
-  that id is passed back with `--confirm`. Registration never sets it; no request body is read
-  for it. The sender-facing DTOs (`AccountStandingDto`, notifications) carry no reporter.
-- **Report budgets.** Two sliding windows per reporter — 10 an hour, 40 a day
-  (`REPORTS_PER_HOUR` / `REPORTS_PER_DAY`) — counted in `assertReportBudget` directly from the
-  `letter_reports` rows, so they are durable: a new session, a new device or a restart does not
-  reset them. They are charged only when a report is actually written, so re-reporting a letter
-  costs nothing. The route adds per-address windows on top (`REPORTS_PER_ADDRESS`,
-  `APPEALS_PER_ADDRESS`) for one machine driving many accounts. Standing, acknowledgement and
-  appeals carry no budget at all: a restricted account must always reach its last actions.
-
-### Evidence retention (`services/retention.ts`)
-
-A case stores a copy of the reported letter (`moderation_cases.evidence_text`) so that admins
-and any later appeal judge the same text, frozen at the moment of the first report. That copy is
-the most sensitive thing the system holds, and it cannot simply be aged out: a suspension rests
-on it, and a person who appeals two months later is entitled to have their case read against the
-same evidence.
-
-The module separates the part that needs no product decision from the part that does.
-
-**The safety rule, enforced unconditionally.** `planRetention` classifies every case, and
-evidence is redactable only when *none* of these holds apply:
-
-| hold | meaning |
-| --- | --- |
-| `case_pending` | nobody has decided the report yet |
-| `ai_in_queue` | a model review is in flight and this text is its input |
-| `appeal_pending` | an appeal is waiting to be decided |
-| `appeal_open` | the sender may still appeal (always true while no deadline is configured) |
-| `violation_in_force` | it justifies a sanction the account is still under |
-| `within_window` | settled, but younger than the configured window |
-| `no_policy` | no window is configured for this outcome — the default for everything |
-
-`applyRetention` re-checks each case inside the transaction before touching it, so a report or
-appeal that arrived after the plan was drawn up wins. "Redact" clears the letter copy and the
-reporters' explanations and stamps `evidence_redacted_at`; the case, its status, category,
-decision, reasoning, the violation and who reported it all survive, so account standing, the
-appeal record and the admin history are untouched. The admin screen shows the redaction date in
-place of the letter.
-
-**What is switched off, and why.** `MIB_RETENTION_ENABLED` defaults to false and every window
-defaults to unset, so out of the box nothing is ever removed and every settled case reads
-`no_policy`. `retention:plan` still reports what a policy *would* remove, so it can be reviewed
-against real data first. Two questions have to be answered by the product, not by this code:
-
-1. **How long may someone appeal?** Accepted-case evidence cannot be released until appeals
-   close, so with no deadline it is kept for ever. *Recommendation: 30 days from the decision,
-   with the exception already implemented — a suspended or banned account may appeal at any
-   time, because the appeal is its only remaining move.* Set `MIB_APPEAL_WINDOW_DAYS=30` to
-   adopt it; `submitAppeal` then answers `appeal_window_closed` for a warned account past the
-   deadline, and nothing changes for a restricted one.
-2. **Do violations age out of the count?** Standing counts every violation still in force, for
-   ever, so a third one bans an account whatever the interval. *Recommendation: a violation
-   stops counting 12 months after its decision (history kept, `standingOf` ignoring it).* This
-   is **not** implemented: it changes who is banned, which is a policy call, and it is the
-   precondition for accepted-case evidence ever being released.
-
-**Recommended policy once those are answered:** `MIB_RETENTION_REJECTED_DAYS=90` (a rejected
-report is kept long enough to spot a reporter abusing the system, then goes) and
-`MIB_RETENTION_ACCEPTED_DAYS=180`, measured from the last moment the text could have mattered —
-the revocation, the appeal decision or the appeal deadline, whichever is latest.
-
-Out of scope here, and worth stating plainly: redaction removes the *moderation copy*. The
-original row in `letters` is the sender's own data and is governed by account deletion, which
-this project does not implement yet.
+  with the same payload. Rows are append-only.
+- **The upgrade gate.** `accountPolicies` derives, per document, the latest accepted version
+  beside the current one; `required` is true when any differs, never-accepted included.
+  `requirePolicies` follows `requireAuth` on chart, friends, bottles, shore, ocean and
+  notifications and answers `403 policies_required`. Auth, `/api/policies/*`, `/api/account/*`
+  and sign-out stay open, so a gated account can always read, accept, appeal or delete.
+- **Public pages.** `http/legal-pages.ts` renders the documents to self-contained HTML with an
+  inline stylesheet, and `http/routes/legal.ts` serves them under `/legal` — unauthenticated,
+  JavaScript-free, responsive, indexable. `/legal/delete-account` is a form post: credentials
+  plus a required confirmation, rate-limited per address, reusing `login` and the same deletion
+  service as the App.
+- **Deletion.** `services/deletion.ts` is one transaction and is idempotent. It revokes sessions,
+  clears identifiers, drops friendships, blocks, notifications and idempotency records, cancels
+  in-flight letters (releasing the harbour reservation, recording a `cancelled` event and
+  clearing the text), keeps delivered letters with their recipient under the name
+  "Deleted account", and leaves moderation evidence to `services/retention.ts`. The `users` row
+  survives anonymised with `deleted_at` set, because letters other people hold reference it.
+  `login` and `resolveSession` already refuse a non-active account, so the status change alone
+  ends access.
+- **No age data.** Nothing in the schema, the API or the interface collects or asserts an age;
+  a test walks every production source file to keep it that way.
 
 ## Deliberately not implemented (per task scope)
 

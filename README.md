@@ -338,23 +338,31 @@ instead of blaming the request. Check, in order:
 3. Nothing else already occupying port 3001 (the API reports `EADDRINUSE` if so; start it with a
    different `MIB_PORT`, and point the web app at it with `MIB_API_URL`).
 
-### Terms of Use, Community Guidelines and Privacy Policy
+### Terms of Use, Community Rules, Privacy Policy and account deletion
 
-The three documents are shown before registration (links on the sign-in screen and from the
-registration form) and again from the account sheet. Creating an account needs two separate,
-initially unchecked decisions — accepting the Terms and Community Guidelines, and acknowledging
-the Privacy Policy — and the server refuses anything less, recording the version of each document
-and the time of acceptance per account (`policy_acceptances`). Accounts that existed before the
-documents are never treated as having accepted them: once a released version exists they are
-asked on their next sign-in and can do nothing else until they accept or sign out, and the same
-happens after every later change.
+The documents are published at version `1.0`, in English, and are readable before there is an
+account: linked from the sign-in screen and from the registration form, and served as plain
+public HTML at `/legal/terms`, `/legal/community-rules`, `/legal/privacy`,
+`/legal/child-safety` and `/legal/delete-account` (indexed at `/legal`). Those URLs need no
+sign-in and no JavaScript, which is what a store listing requires.
 
-**The texts are a working draft (`0.1-draft`) and are not released.** They were checked against
-what the product does, but the operator's details, the minimum age, the legal basis, the
-deployment's providers, retention periods and a legal review are still open, and every such gap
-is a visible marker in the text. A production build refuses registration while the documents are
-drafts, so nobody is asked to agree to unfinished text. `docs/LEGAL_DOCUMENTS.md` has the
-comparison with the product, the full open list and the release steps.
+Creating an account needs two separate, initially unchecked decisions — agreeing to the Terms
+and Community Rules, and confirming the Privacy Policy has been read — and the server refuses
+anything less, recording each document's version and the moment of acceptance per account. When
+a version changes, every account is asked again before ordinary use; authentication, the
+documents, account standing, appeals, signing out and deleting the account stay reachable
+meanwhile.
+
+The App has **no age gate**: no date of birth, no age checkbox, no verification and no claim
+that users are adults. Safety rules about minors bind everyone regardless.
+
+**Deleting an account** works from the account sheet in the App and from the public page, both
+asking for the password again and an explicit confirmation, and both running the same
+transactional operation: sessions end at once, the profile and identifiers go, friendships and
+blocks go, letters still at sea are cancelled and cleared, letters already received stay with
+their recipient, and moderation evidence is kept only where an open report, a pending appeal or
+an active restriction still needs it. `docs/LEGAL_DOCUMENTS.md` has the detail and the
+remaining Play Console tasks.
 
 ## API overview
 

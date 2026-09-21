@@ -1,9 +1,9 @@
-import { eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
-import { POLICY_IDS, currentPolicyVersions } from '@mib/shared';
+import { PUBLISHED_DOCUMENTS, currentPolicyVersions } from '@mib/shared';
 import { createApp } from './app.js';
 import * as t from '../db/schema.js';
-import { acceptCurrent, createTestWorld, loginAs } from '../test/harness.js';
+import { acceptCurrent, createTestWorld, legacyAccount } from '../test/harness.js';
 
 type App = ReturnType<typeof createApp>;
 const post = (body: unknown, token?: string) => ({
@@ -34,17 +34,21 @@ describe('the documents', () => {
     expect(set.status).toBe(200);
     const body = (await set.json()) as {
       status: string;
-      documents: Array<{ id: string; version: string; effectiveAt: string | null }>;
+      documents: Array<{ id: string; version: string; effective: string; slug: string }>;
     };
-    expect(body.status).toBe('draft');
-    expect(body.documents.map((d) => d.id)).toEqual([...POLICY_IDS]);
-    for (const d of body.documents) expect(d.effectiveAt).toBeNull();
+    expect(body.status).toBe('released');
+    // Everything with a public page, the reference documents included.
+    expect(body.documents.map((d) => d.id)).toEqual(PUBLISHED_DOCUMENTS.map((d) => d.id));
+    for (const d of body.documents) {
+      expect(d.version).toBe('1.0');
+      expect(d.effective).toBe('Effective when published in the App');
+    }
 
     const terms = await app.request('/api/policies/terms');
     expect(terms.status).toBe(200);
     const doc = (await terms.json()) as { dir: string; lang: string; blocks: unknown[] };
-    expect(doc.dir).toBe('rtl');
-    expect(doc.lang).toBe('he');
+    expect(doc.dir).toBe('ltr');
+    expect(doc.lang).toBe('en');
     expect(doc.blocks.length).toBeGreaterThan(3);
     expect((await app.request('/api/policies/nope')).status).toBe(400);
   });
@@ -100,7 +104,7 @@ describe('registration', () => {
     const me = (await (await app.request('/api/auth/me', bearer(session.token))).json()) as {
       policies: { required: boolean; status: string; documents: Array<Record<string, unknown>> };
     };
-    expect(me.policies.status).toBe('draft');
+    expect(me.policies.status).toBe('released');
     expect(me.policies.required).toBe(false);
     expect(me.policies.documents.map((d) => d.acceptedVersion)).toEqual([
       ok.versions.terms,
@@ -114,8 +118,8 @@ describe('registration', () => {
     ]);
   });
 
-  it('is closed in a production build while the documents are drafts', async () => {
-    const w = createTestWorld({ devMode: false });
+  it('is closed in a production build if the shipped documents are not released', async () => {
+    const w = createTestWorld({ devMode: false, policies: { status: 'draft' } });
     const app = createApp(w.ctx);
     const res = await register(app, 'prod_user', acceptCurrent());
     expect(res.status).toBe(503);
@@ -134,23 +138,27 @@ describe('existing accounts', () => {
   it('are never treated as having accepted anything', async () => {
     const w = createTestWorld();
     const app = createApp(w.ctx);
-    const ada = await loginAs(app, 'ada');
+    const legacy = legacyAccount(w);
     expect(
-      w.db.select().from(t.policyAcceptances).where(eq(t.policyAcceptances.userId, ada.id)).all(),
+      w.db
+        .select()
+        .from(t.policyAcceptances)
+        .where(eq(t.policyAcceptances.userId, legacy.id))
+        .all(),
     ).toHaveLength(0);
-    const me = (await (await app.request('/api/auth/me', bearer(ada.token))).json()) as {
+    const me = (await (await app.request('/api/auth/me', bearer(legacy.token))).json()) as {
       policies: { required: boolean; documents: Array<{ acceptedVersion: string | null }> };
     };
     for (const d of me.policies.documents) expect(d.acceptedVersion).toBeNull();
-    // While the set is a draft nothing is required of them and the app works as before.
-    expect(me.policies.required).toBe(false);
-    expect((await app.request('/api/chart', bearer(ada.token))).status).toBe(200);
+    // Nothing was carried over for them: they must accept before ordinary use.
+    expect(me.policies.required).toBe(true);
+    expect((await app.request('/api/chart', bearer(legacy.token))).status).toBe(403);
   });
 
   it('must accept a released set before using the app, and only through an explicit acceptance', async () => {
-    const w = createTestWorld({ policies: { status: 'released' } });
+    const w = createTestWorld();
     const app = createApp(w.ctx);
-    const ada = await loginAs(app, 'ada');
+    const ada = legacyAccount(w);
 
     const me = (await (await app.request('/api/auth/me', bearer(ada.token))).json()) as {
       policies: { required: boolean };
@@ -207,16 +215,18 @@ describe('existing accounts', () => {
   });
 
   it('are asked again when a document changes, and the old acceptance is kept as history', async () => {
-    const w = createTestWorld({ policies: { status: 'released' } });
+    const w = createTestWorld();
     const app = createApp(w.ctx);
-    const ada = await loginAs(app, 'ada');
+    const ada = legacyAccount(w);
     await app.request('/api/policies/accept', post(acceptCurrent(), ada.token));
     // Simulate an earlier acceptance of an older privacy policy by rewriting the row's version,
     // as an account that accepted 1.0 would look after 1.1 shipped.
     w.db
       .update(t.policyAcceptances)
       .set({ version: 'older' })
-      .where(eq(t.policyAcceptances.document, 'privacy'))
+      .where(
+        and(eq(t.policyAcceptances.document, 'privacy'), eq(t.policyAcceptances.userId, ada.id)),
+      )
       .run();
     const me = (await (await app.request('/api/auth/me', bearer(ada.token))).json()) as {
       policies: { required: boolean; documents: Array<{ id: string; acceptedVersion: string }> };
@@ -231,7 +241,9 @@ describe('existing accounts', () => {
     const privacyRows = w.db
       .select()
       .from(t.policyAcceptances)
-      .where(eq(t.policyAcceptances.document, 'privacy'))
+      .where(
+        and(eq(t.policyAcceptances.document, 'privacy'), eq(t.policyAcceptances.userId, ada.id)),
+      )
       .all();
     expect(privacyRows).toHaveLength(2);
   });

@@ -1,9 +1,16 @@
 import { eq } from 'drizzle-orm';
-import { RISK_POLICY_VERSION, currentPolicyVersions } from '@mib/shared';
+import {
+  POLICY_DOCUMENTS,
+  RISK_POLICY_VERSION,
+  currentPolicyVersions,
+  policySetStatus,
+} from '@mib/shared';
 import type { AppConfig } from '../config.js';
 import { createDb, runMigrations, type Db } from '../db/client.js';
 import * as t from '../db/schema.js';
 import { DEV_SEED_PASSWORD } from '../db/seed-data.js';
+import { newId, newSecretToken, sha256 } from '../lib/ids.js';
+import { hashPassword } from '../lib/password.js';
 import { seedChart, seedUsers } from '../db/seed.js';
 import type { Clock } from '../lib/clock.js';
 import { OutboxMailer } from '../lib/mail.js';
@@ -46,7 +53,8 @@ export function testConfig(overrides: Partial<AppConfig> = {}): AppConfig {
       smtp: { host: '', port: 587, secure: false, user: '', pass: '' },
     },
     riskPolicyVersion: RISK_POLICY_VERSION,
-    policies: { status: 'draft' },
+    // The same status production runs with: the shipped documents decide it.
+    policies: { status: policySetStatus(POLICY_DOCUMENTS) },
     ai: {
       enabled: true,
       endpoint: 'http://ai.test',
@@ -139,4 +147,38 @@ export function acceptCurrent() {
     acknowledgePrivacy: true as const,
     versions: currentPolicyVersions(),
   };
+}
+
+// An account that existed before the documents did: a users row with no acceptance rows at
+// all, which is exactly what every account looks like after the migration. Returns a usable
+// session so the policy gate can be exercised the way a real person would meet it.
+export function legacyAccount(
+  w: TestWorld,
+  username = 'legacy_one',
+): { id: string; token: string } {
+  const id = newId('usr');
+  w.db
+    .insert(t.users)
+    .values({
+      id,
+      username,
+      displayName: username,
+      shoreId: 'shore_lantern_cove',
+      createdAt: w.clock.now(),
+      passwordHash: hashPassword(DEV_SEED_PASSWORD),
+      passwordUpdatedAt: w.clock.now(),
+      email: `${username}@example.test`,
+    })
+    .run();
+  const token = newSecretToken();
+  w.db
+    .insert(t.sessions)
+    .values({
+      tokenHash: sha256(token),
+      userId: id,
+      createdAt: w.realClock.now(),
+      expiresAt: w.realClock.now() + w.ctx.config.sessionTtlMs,
+    })
+    .run();
+  return { id, token };
 }

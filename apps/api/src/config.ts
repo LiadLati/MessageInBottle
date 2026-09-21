@@ -81,7 +81,6 @@ export interface AiConfig {
   // `accept` or `reject` decides the case itself; `uncertain` always goes to an admin. Enable
   // only after running `pnpm --filter @mib/api ai:eval` against your own model.
   autoDecide: boolean;
-
 }
 
 export type MailProvider = 'outbox' | 'smtp' | 'disabled';
@@ -109,12 +108,9 @@ export function loadConfig(): AppConfig {
     trustProxy: (process.env.MIB_TRUST_PROXY ?? 'false') === 'true',
     appUrl: process.env.MIB_APP_URL ?? 'http://localhost:5173',
     mail: loadMailConfig(devMode),
-    policies: {
-      status:
-        devMode && (process.env.MIB_POLICIES_PREVIEW_RELEASED ?? 'false') === 'true'
-          ? 'released'
-          : policySetStatus(POLICY_DOCUMENTS),
-    },
+    // The published set is the authority; there is no environment switch that can release
+    // documents that are not released in code, or hold back ones that are.
+    policies: { status: policySetStatus(POLICY_DOCUMENTS) },
     riskPolicyVersion: envInt('MIB_RISK_POLICY_VERSION', RISK_POLICY_VERSION),
     retention: loadRetentionPolicy(),
     ai: {

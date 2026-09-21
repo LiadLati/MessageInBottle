@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { POLICY_IDS, type PolicyId, type SentBottleDto } from '@mib/shared';
+import { PUBLISHED_DOCUMENTS, type DocumentId, type SentBottleDto } from '@mib/shared';
 import { api } from './api/client.js';
 import { Nav, type Tab } from './components/Nav.js';
+import { DeleteAccountDialog } from './components/DeleteAccountDialog.js';
 import { PolicyDialog } from './components/PolicyDialog.js';
 import { ProfileSheet } from './components/ProfileSheet.js';
 import { useAsync } from './lib/useAsync.js';
@@ -47,21 +48,21 @@ function readResetToken(): string | null {
 
 // A link such as /#privacy opens that document on load, signed in or not, so support replies
 // and the documents themselves can point at one another.
-function readPolicyHash(): PolicyId | null {
+function readPolicyHash(): DocumentId | null {
   try {
     const h = window.location.hash.replace(/^#/, '');
-    return (POLICY_IDS as readonly string[]).includes(h) ? (h as PolicyId) : null;
+    return PUBLISHED_DOCUMENTS.some((d) => d.id === h) ? (h as DocumentId) : null;
   } catch {
     return null;
   }
 }
 
 function Shell() {
-  const { user, loading } = useSession();
+  const { user, loading, logout } = useSession();
   // The document dialog is owned here so it can open over the sign-in screen, over the app,
   // and over the "updated terms" screen alike.
-  const [policyDoc, setPolicyDoc] = useState<PolicyId | null>(readPolicyHash);
-  const openPolicy = useCallback((doc: PolicyId) => setPolicyDoc(doc), []);
+  const [policyDoc, setPolicyDoc] = useState<DocumentId | null>(readPolicyHash);
+  const openPolicy = useCallback((doc: DocumentId) => setPolicyDoc(doc), []);
   const closePolicy = useCallback(() => {
     setPolicyDoc(null);
     if (readPolicyHash()) window.history.replaceState({}, '', window.location.pathname);
@@ -90,6 +91,7 @@ function Shell() {
   const oceanLeave = useRef<(() => void) | null>(null);
   const [epoch, setEpoch] = useState(0);
   const [profileOpen, setProfileOpen] = useState(false);
+  const [deletingAccount, setDeletingAccount] = useState(false);
   const [choosingShore, setChoosingShore] = useState(false);
   // Immersive screens (preview & release, the release sequence) take the whole viewport: no
   // navigation, no system strips. An opened letter is a modal over the shore instead.
@@ -311,6 +313,10 @@ function Shell() {
           shoreName={shoreName}
           onChangeShore={chooseShore}
           onOpenPolicy={openPolicy}
+          onDeleteAccount={() => {
+            setProfileOpen(false);
+            setDeletingAccount(true);
+          }}
           onStanding={() => {
             setProfileOpen(false);
             setStandingOpen(true);
@@ -332,7 +338,16 @@ function Shell() {
             void reloadStanding();
           }}
         />
-
+      ) : null}
+      {deletingAccount ? (
+        <DeleteAccountDialog
+          onCancel={() => setDeletingAccount(false)}
+          onDeleted={() => {
+            setDeletingAccount(false);
+            // The account is gone and its session with it: drop the token and show sign-in.
+            void logout();
+          }}
+        />
       ) : null}
       {policyDialog}
       {immersive ? null : (

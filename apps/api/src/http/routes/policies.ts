@@ -1,5 +1,5 @@
 import { Hono } from 'hono';
-import { POLICY_DOCUMENTS, PolicyAcceptanceRequestSchema } from '@mib/shared';
+import { PUBLISHED_DOCUMENTS, PolicyAcceptanceRequestSchema } from '@mib/shared';
 import {
   acceptCurrentPolicies,
   accountPolicies,
@@ -18,12 +18,12 @@ export function policyRoutes() {
   r.get('/', (c) =>
     c.json({
       status: policyStatus(c.get('ctx')),
-      documents: POLICY_DOCUMENTS.map((d) => ({
+      documents: PUBLISHED_DOCUMENTS.map((d) => ({
         id: d.id,
         title: d.title,
-        titleHe: d.titleHe,
+        slug: d.slug,
         version: d.version,
-        effectiveAt: d.effectiveAt,
+        effective: d.effective,
       })),
     }),
   );

@@ -13,6 +13,8 @@ import { friendRoutes } from './routes/friends.js';
 import { moderationRoutes } from './routes/moderation.js';
 import { notificationRoutes } from './routes/notifications.js';
 import { oceanRoutes } from './routes/ocean.js';
+import { accountRoutes } from './routes/account.js';
+import { legalRoutes } from './routes/legal.js';
 import { policyRoutes } from './routes/policies.js';
 import { shoreRoutes } from './routes/shore.js';
 
@@ -46,6 +48,9 @@ export function createApp(ctx: AppContext) {
   );
   app.route('/api/auth', authRoutes());
   app.route('/api/policies', policyRoutes());
+  app.route('/api/account', accountRoutes());
+  // Public, unauthenticated HTML. Deliberately not under /api: these are pages, not endpoints.
+  app.route('/legal', legalRoutes());
   app.route('/api/chart', chartRoutes());
   app.route('/api/friends', friendRoutes());
   app.route('/api/bottles', bottleRoutes());

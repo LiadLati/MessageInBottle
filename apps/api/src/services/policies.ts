@@ -21,18 +21,15 @@ import type { AppContext } from './context.js';
 // Terms, guidelines and privacy: what the server does with them. The documents themselves live
 // in @mib/shared (one source for the API and the web). This module answers three questions:
 //
-//   1. Which versions are current, and is the set released or still a draft?
+//   1. Which versions are current, and is the published set complete?
 //   2. What has this account accepted, and must it be asked again?
 //   3. May this deployment collect acceptances at all?
 //
-// The last one is the release gate. A draft may be shown and, in development, accepted — that
-// is how the flow is built and tested — but a production build refuses to register anyone
-// while the documents are drafts, so nobody is ever asked to agree to unfinished legal text.
+// The last one is the release gate: a build whose documents are not all released cannot take
+// acceptances in production, so nobody is ever asked to agree to unfinished legal text.
 
 export interface PoliciesConfig {
-  // The set's status as shipped ('draft' until the texts are released in code). In development
-  // only, MIB_POLICIES_PREVIEW_RELEASED=true overrides it to 'released' so the "updated terms"
-  // path for existing accounts can be exercised in a browser.
+  // The status of the documents as shipped, read from the documents themselves.
   status: PolicyStatus;
 }
 

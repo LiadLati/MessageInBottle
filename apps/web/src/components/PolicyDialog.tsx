@@ -1,6 +1,6 @@
 import { useEffect, useId, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { POLICY_DOCUMENTS, policyDocument, type PolicyId } from '@mib/shared';
+import { PUBLISHED_DOCUMENTS, type DocumentId } from '@mib/shared';
 import { Icon } from '../design/Icon.js';
 import { focusableIn, nextTabTarget } from '../lib/focusTrap.js';
 import { PolicyDocumentView } from './PolicyDocumentView.js';
@@ -8,12 +8,12 @@ import { PolicyDocumentView } from './PolicyDocumentView.js';
 // The three documents, readable before there is an account and again from account settings.
 // A modal so a half-filled registration form survives the reading; focus stays inside, Escape
 // and the close button return it to where it was.
-export function PolicyDialog({ initial, onClose }: { initial: PolicyId; onClose: () => void }) {
-  const [current, setCurrent] = useState<PolicyId>(initial);
+export function PolicyDialog({ initial, onClose }: { initial: DocumentId; onClose: () => void }) {
+  const [current, setCurrent] = useState<DocumentId>(initial);
   const dialogRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const headingId = useId();
-  const doc = policyDocument(current);
+  const doc = PUBLISHED_DOCUMENTS.find((d) => d.id === current) ?? PUBLISHED_DOCUMENTS[0]!;
 
   useEffect(() => {
     const previous = document.activeElement as HTMLElement | null;
@@ -72,7 +72,7 @@ export function PolicyDialog({ initial, onClose }: { initial: PolicyId; onClose:
         </div>
       </div>
       <div className="policy-tabs" role="tablist" aria-label="Documents">
-        {POLICY_DOCUMENTS.map((d) => (
+        {PUBLISHED_DOCUMENTS.map((d) => (
           <button
             key={d.id}
             type="button"

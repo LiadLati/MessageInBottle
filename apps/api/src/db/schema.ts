@@ -39,6 +39,10 @@ export const users = sqliteTable('users', {
     .default('member'),
   roleGrantedAt: integer('role_granted_at'),
   roleGrantedBy: text('role_granted_by'),
+  // When the account was deleted at its owner's request. The row itself survives so that the
+  // letters other people legitimately hold, and any moderation record that must be kept, do
+  // not lose their foreign key; everything identifying it is cleared (services/deletion.ts).
+  deletedAt: integer('deleted_at'),
 });
 
 // What each account accepted or acknowledged, per document and version, and when. Append-only:

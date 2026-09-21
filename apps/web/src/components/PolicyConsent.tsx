@@ -1,8 +1,8 @@
 import { useId } from 'react';
-import type { PolicyId } from '@mib/shared';
+import type { DocumentId, PolicyId } from '@mib/shared';
 
 // The two registration controls, both unchecked to begin with and each its own decision:
-// accepting the Terms of Use and the Community Guidelines (they bind), and acknowledging the
+// accepting the Terms of Use and the Community Rules (they bind), and acknowledging the
 // Privacy Policy (it informs). Each names the documents it covers as links, so the person can
 // read before deciding without losing what they typed. Used by registration and by the screen
 // an existing account sees when a released version changes.
@@ -14,9 +14,7 @@ export const EMPTY_CONSENT: ConsentState = { terms: false, privacy: false };
 
 export function consentProblems(c: ConsentState): { terms: string | null; privacy: string | null } {
   return {
-    terms: c.terms
-      ? null
-      : 'To create an account, accept the Terms of Use and Community Guidelines.',
+    terms: c.terms ? null : 'To create an account, accept the Terms of Use and Community Rules.',
     privacy: c.privacy ? null : 'Please confirm that you have read the Privacy Policy.',
   };
 }
@@ -31,7 +29,7 @@ export function PolicyConsent({
 }: {
   value: ConsentState;
   onChange: (next: ConsentState) => void;
-  onOpen: (doc: PolicyId) => void;
+  onOpen: (doc: DocumentId) => void;
   showProblems: boolean;
   disabled: boolean;
   legend?: string;
@@ -67,8 +65,8 @@ export function PolicyConsent({
             onChange={(e) => onChange({ ...value, terms: e.target.checked })}
           />
           <span>
-            I have read and accept the {link('terms', 'Terms of Use')} and the{' '}
-            {link('guidelines', 'Community Guidelines')}.
+            I agree to the {link('terms', 'Terms of Use')} and{' '}
+            {link('guidelines', 'Community Rules')}.
           </span>
         </label>
         {showProblems && problems.terms ? (

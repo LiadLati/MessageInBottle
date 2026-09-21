@@ -22,7 +22,7 @@ export function normalizeEmail(email: string): string {
 }
 export const EmailSchema = z.string().trim().max(EMAIL_MAX_LENGTH).email();
 
-// Creating an account requires accepting the Terms of Use and the Community Guidelines and
+// Creating an account requires accepting the Terms of Use and the Community Rules and
 // acknowledging the Privacy Policy, each as a literal true, with the versions that were shown.
 // There is no default and no way to register without them.
 export const RegisterRequestSchema = z.object({
