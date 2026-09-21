@@ -17,7 +17,13 @@ import { ManualClock, T0, createTestWorld, releaseInput, testConfig } from '../t
 
 type Row = Record<string, unknown>;
 // The migrations an older installation does not have yet: everything from this branch.
-const NEWEST = new Set(['0008_journey_rules', '0009_account_time_zone', '0010_policy_acceptances']);
+const NEWEST = new Set([
+  '0008_journey_rules',
+  '0009_account_time_zone',
+  '0010_reporting_and_moderation',
+  '0011_evidence_retention',
+  '0012_policy_acceptances',
+]);
 
 function tableNames(sqlite: Database.Database): string[] {
   return sqlite
@@ -91,6 +97,7 @@ describe('migrating a populated database', () => {
     expect(columnsOf(sqlite, 'bottles')).not.toContain('risk_policy_version');
     expect(columnsOf(sqlite, 'users')).not.toContain('time_zone');
     expect(tableNames(sqlite)).not.toContain('policy_acceptances');
+    expect(tableNames(sqlite)).not.toContain('moderation_cases');
     sqlite.pragma('foreign_keys = OFF');
     for (const [table, rows] of Object.entries(dump(sourceSqlite))) {
       if (!tableNames(sqlite).includes(table)) continue;
@@ -114,6 +121,10 @@ describe('migrating a populated database', () => {
     expect(columnsOf(sqlite, 'public_openings')).toContain('session_expires_at');
     expect(columnsOf(sqlite, 'users')).toContain('time_zone_since');
     expect(tableNames(sqlite)).toContain('policy_acceptances');
+    expect(columnsOf(sqlite, 'users')).toContain('role');
+    for (const table of ['moderation_cases', 'letter_reports', 'violations', 'appeals'])
+      expect(tableNames(sqlite)).toContain(table);
+    expect(columnsOf(sqlite, 'moderation_cases')).toContain('evidence_redacted_at');
     expect(columnsOf(sqlite, 'bottles')).toContain('outcome_at');
     seedChart(db, testConfig().defaultShoreCapacity, T0);
 

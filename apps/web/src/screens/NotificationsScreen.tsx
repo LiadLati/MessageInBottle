@@ -21,6 +21,15 @@ const KIND_ICON: Record<NotificationKind, { icon: IconName; tone: string; label:
   sent_found: { icon: 'letters', tone: 'gold', label: 'Read by a finder' },
   sent_expired: { icon: 'clock', tone: 'muted', label: 'Removed from the public map' },
   sent_cancelled: { icon: 'lost', tone: 'muted', label: 'Delivery unavailable' },
+  moderation_violation: {
+    icon: 'report',
+    tone: 'gold',
+    label: 'A letter was removed after a report',
+  },
+  moderation_suspended: { icon: 'report', tone: 'red', label: 'Account suspended' },
+  moderation_banned: { icon: 'report', tone: 'red', label: 'Account banned' },
+  moderation_appeal_accepted: { icon: 'check', tone: 'green', label: 'Appeal accepted' },
+  moderation_appeal_rejected: { icon: 'close', tone: 'muted', label: 'Appeal rejected' },
   other: { icon: 'info', tone: 'muted', label: 'Notice' },
 };
 

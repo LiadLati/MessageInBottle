@@ -36,6 +36,8 @@ export const ICONS = {
     '<circle cx="12" cy="12" r="3"></circle><path d="M12 2v3M12 19v3M2 12h3M19 12h3"></path>',
   report: '<path d="M6 3v18M6 4h11l-2 4 2 4H6"></path>',
   search: '<circle cx="11" cy="11" r="6.5"></circle><path d="M16 16l4 4"></path>',
+  shield:
+    '<path d="M12 3l7 3v5.5c0 4.4-3 8-7 9.5-4-1.5-7-5.1-7-9.5V6l7-3Z"></path><path d="M9.2 12.2l2 2 3.8-4"></path>',
   shore:
     '<path d="M2 17c4-2.5 7-2.5 11 0 3.4 2 6.6.6 9-1.5"></path><circle cx="17" cy="7" r="3.2"></circle>',
   storm:

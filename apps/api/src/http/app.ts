@@ -4,11 +4,13 @@ import { logger } from 'hono/logger';
 import type { ZodError } from 'zod';
 import { AppError } from '../lib/errors.js';
 import type { AppContext, AuthUser } from '../services/context.js';
+import { adminRoutes } from './routes/admin.js';
 import { authRoutes } from './routes/auth.js';
 import { bottleRoutes } from './routes/bottles.js';
 import { chartRoutes } from './routes/chart.js';
 import { devRoutes } from './routes/dev.js';
 import { friendRoutes } from './routes/friends.js';
+import { moderationRoutes } from './routes/moderation.js';
 import { notificationRoutes } from './routes/notifications.js';
 import { oceanRoutes } from './routes/ocean.js';
 import { policyRoutes } from './routes/policies.js';
@@ -50,6 +52,8 @@ export function createApp(ctx: AppContext) {
   app.route('/api/shore', shoreRoutes());
   app.route('/api/ocean', oceanRoutes());
   app.route('/api/notifications', notificationRoutes());
+  app.route('/api/moderation', moderationRoutes());
+  app.route('/api/admin', adminRoutes());
   if (ctx.config.devMode) app.route('/api/dev', devRoutes());
 
   app.notFound((c) => c.json({ error: { code: 'not_found', message: 'route not found' } }, 404));

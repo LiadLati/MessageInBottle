@@ -8,6 +8,7 @@ interface Props {
   shoreName: string | null;
   onChangeShore: () => void;
   onOpenPolicy: (doc: PolicyId) => void;
+  onStanding: () => void;
   onClose: () => void;
 }
 
@@ -36,7 +37,13 @@ function acceptanceLine(p: {
 }
 
 // The header avatar opens this instead of a permanent "signed in as" row (IA note on S1).
-export function ProfileSheet({ shoreName, onChangeShore, onOpenPolicy, onClose }: Props) {
+export function ProfileSheet({
+  shoreName,
+  onChangeShore,
+  onOpenPolicy,
+  onStanding,
+  onClose,
+}: Props) {
   const { user, logout } = useSession();
   const first = useRef<HTMLButtonElement>(null);
   useEffect(() => {
@@ -87,6 +94,9 @@ export function ProfileSheet({ shoreName, onChangeShore, onOpenPolicy, onClose }
           <button type="button" className="btn-secondary" onClick={onChangeShore}>
             <Icon name="shore" size={16} />
             {shoreName ? 'Change shore' : 'Choose a shore'}
+          </button>
+          <button type="button" className="btn-text" onClick={onStanding}>
+            Account standing
           </button>
           <button type="button" className="btn-text" onClick={() => void logout()}>
             Sign out

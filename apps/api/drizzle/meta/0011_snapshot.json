@@ -1,8 +1,8 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "94e8d09d-3052-4f37-be38-9d7ea19fe151",
-  "prevId": "1d5cf83b-1e8c-4ff3-9e79-6bf958acb5c7",
+  "id": "7758deab-8532-47f8-b257-c16dca532052",
+  "prevId": "94e8d09d-3052-4f37-be38-9d7ea19fe151",
   "tables": {
     "appeals": {
       "name": "appeals",
@@ -1196,6 +1196,13 @@
           "type": "integer",
           "primaryKey": false,
           "notNull": true,
+          "autoincrement": false
+        },
+        "evidence_redacted_at": {
+          "name": "evidence_redacted_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
           "autoincrement": false
         },
         "created_at": {

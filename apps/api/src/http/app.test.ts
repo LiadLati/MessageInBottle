@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { createApp } from './app.js';
-import { createTestWorld, loginAs as login, releaseInput } from '../test/harness.js';
+import { acceptCurrent, createTestWorld, loginAs as login, releaseInput } from '../test/harness.js';
 
 const auth = (token: string) => ({
   authorization: `Bearer ${token}`,
@@ -194,6 +194,127 @@ describe('HTTP surface', () => {
     };
     expect(me1.timeZone).toBe('Asia/Tokyo');
     expect((await app.request('/api/auth/time-zone', { method: 'PUT' })).status).toBe(401);
+  });
+
+  it('admin endpoints are refused to every non-admin, and the standing gate blocks a suspended account', async () => {
+    const { eq } = await import('drizzle-orm');
+    const t = await import('../db/schema.js');
+    const w = createTestWorld();
+    const app = createApp(w.ctx);
+    const member = await login(app, 'ada');
+    const auth = (token: string) => ({
+      authorization: `Bearer ${token}`,
+      'content-type': 'application/json',
+    });
+    // A member, and a member who *claims* to be an admin in the body or a header: all 403.
+    for (const [method, path] of [
+      ['GET', '/api/admin/reports'],
+      ['GET', '/api/admin/reports/cas_x'],
+      ['POST', '/api/admin/reports/cas_x/accept'],
+      ['POST', '/api/admin/reports/cas_x/reject'],
+      ['GET', '/api/admin/appeals'],
+      ['GET', '/api/admin/appeals/apl_x'],
+      ['POST', '/api/admin/appeals/apl_x/accept'],
+      ['POST', '/api/admin/appeals/apl_x/reject'],
+    ] as const) {
+      const res = await app.request(path, {
+        method,
+        headers: { ...auth(member.token), 'x-role': 'admin' },
+        ...(method === 'POST' ? { body: JSON.stringify({ role: 'admin', reason: 'x' }) } : {}),
+      });
+      expect(res.status, `${method} ${path}`).toBe(403);
+      expect(
+        (await app.request(path, { method })).status,
+        `${method} ${path} unauthenticated`,
+      ).toBe(401);
+    }
+    // Registration cannot pick a role.
+    const reg = await app.request('/api/auth/register', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        username: 'wannabe',
+        email: 'w@example.test',
+        password: 'Tide-pass-2026',
+        policies: acceptCurrent(),
+        role: 'admin',
+      }),
+    });
+    expect(reg.status).toBe(201);
+    expect(((await reg.json()) as { user: { role: string } }).user.role).toBe('member');
+    // The role granted the way the tool grants it opens the door — for that account only.
+    w.db
+      .update(t.users)
+      .set({ role: 'admin' })
+      .where(eq(t.users.id, w.user('cy').id))
+      .run();
+    const adminUser = await login(app, 'cy');
+    expect(
+      (await app.request('/api/admin/reports', { headers: auth(adminUser.token) })).status,
+    ).toBe(200);
+    expect(
+      (await app.request('/api/admin/reports/cas_missing', { headers: auth(adminUser.token) }))
+        .status,
+    ).toBe(404);
+    // A suspended account: sign-in, /me, standing and appeals answer; the rest is 403.
+    const { decideCase } = await import('../services/admin.js');
+    const { reportLetter } = await import('../services/moderation.js');
+    const { releaseBottle } = await import('../services/release.js');
+    const { commitArrivalIfDue } = await import('../services/journey.js');
+    const { openBottle } = await import('../services/bottles.js');
+    for (const key of ['key-0000000901', 'key-0000000902']) {
+      const id = releaseBottle(w.ctx, w.user('ada'), releaseInput(w.user('bo').id, key)).bottleId;
+      w.clock.advance(40 * 24 * 60 * 60 * 1000);
+      commitArrivalIfDue(w.ctx, id, w.clock.now());
+      openBottle(w.ctx, w.user('bo'), id);
+      const caseId = reportLetter(w.ctx, w.user('bo'), {
+        bottleId: id,
+        reason: 'hate',
+        hide: false,
+      }).caseId;
+      decideCase(w.ctx, { ...w.user('cy'), role: 'admin' }, caseId, 'accepted', null);
+    }
+    const again = await login(app, 'ada');
+    expect((await app.request('/api/auth/me', { headers: auth(again.token) })).status).toBe(200);
+    const standing = (await (
+      await app.request('/api/moderation/standing', { headers: auth(again.token) })
+    ).json()) as { standing: string; violations: Array<{ id: string }> };
+    expect(standing.standing).toBe('suspended');
+    for (const path of [
+      '/api/bottles/sent',
+      '/api/shore',
+      '/api/ocean/public',
+      '/api/friends',
+      '/api/chart',
+    ]) {
+      const res = await app.request(path, { headers: auth(again.token) });
+      expect(res.status, path).toBe(403);
+      expect(((await res.json()) as { error: { message: string } }).error.message).toMatch(
+        /suspended until/,
+      );
+    }
+    expect(
+      (
+        await app.request('/api/moderation/reports', {
+          method: 'POST',
+          headers: auth(again.token),
+          body: JSON.stringify({ bottleId: 'btl_x', reason: 'hate', hide: true }),
+        })
+      ).status,
+    ).toBe(403);
+    const appeal = await app.request('/api/moderation/appeals', {
+      method: 'POST',
+      headers: auth(again.token),
+      body: JSON.stringify({ violationId: standing.violations[0]!.id, text: 'Please look again.' }),
+    });
+    expect(appeal.status).toBe(201);
+    expect(
+      (await app.request('/api/auth/logout', { method: 'POST', headers: auth(again.token) }))
+        .status,
+    ).toBe(204);
+    // What the sender is ever shown carries no reporter.
+    expect(JSON.stringify(standing)).not.toContain(w.user('bo').id);
+    expect(JSON.stringify(standing)).not.toMatch(/reporter/);
   });
 
   it('rejects malformed release bodies without creating anything', async () => {

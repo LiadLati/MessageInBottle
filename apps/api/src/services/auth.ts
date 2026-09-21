@@ -16,6 +16,7 @@ export function toAuthUser(row: typeof t.users.$inferSelect): AuthUser {
     shoreId: row.shoreId,
     email: row.email,
     timeZone: row.timeZone,
+    role: row.role,
   };
 }
 

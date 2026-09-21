@@ -1,8 +1,8 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "94e8d09d-3052-4f37-be38-9d7ea19fe151",
-  "prevId": "1d5cf83b-1e8c-4ff3-9e79-6bf958acb5c7",
+  "id": "21063741-81cf-4992-9d99-c5a4a4db89ea",
+  "prevId": "7758deab-8532-47f8-b257-c16dca532052",
   "tables": {
     "appeals": {
       "name": "appeals",
@@ -1198,6 +1198,13 @@
           "notNull": true,
           "autoincrement": false
         },
+        "evidence_redacted_at": {
+          "name": "evidence_redacted_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
         "created_at": {
           "name": "created_at",
           "type": "integer",
@@ -1626,6 +1633,89 @@
         "password_resets_user_id_users_id_fk": {
           "name": "password_resets_user_id_users_id_fk",
           "tableFrom": "password_resets",
+          "tableTo": "users",
+          "columnsFrom": [
+            "user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "policy_acceptances": {
+      "name": "policy_acceptances",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "user_id": {
+          "name": "user_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "document": {
+          "name": "document",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "version": {
+          "name": "version",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "action": {
+          "name": "action",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "source": {
+          "name": "source",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "accepted_at": {
+          "name": "accepted_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "policy_acceptances_user_idx": {
+          "name": "policy_acceptances_user_idx",
+          "columns": [
+            "user_id",
+            "document",
+            "accepted_at"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {
+        "policy_acceptances_user_id_users_id_fk": {
+          "name": "policy_acceptances_user_id_users_id_fk",
+          "tableFrom": "policy_acceptances",
           "tableTo": "users",
           "columnsFrom": [
             "user_id"

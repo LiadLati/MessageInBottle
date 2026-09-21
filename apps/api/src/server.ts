@@ -19,6 +19,7 @@ async function main(): Promise<void> {
   const { createMailer } = await import('./lib/mail.js');
   const { runJourneyTick } = await import('./services/journey.js');
   const { activatePublicListings } = await import('./services/risk.js');
+  const { createOllamaReviewer, runAiReviewTick } = await import('./services/ai-review.js');
   const { serve } = await import('@hono/node-server');
   const { assertPolicySetServeable } = await import('./services/policies.js');
 
@@ -52,10 +53,31 @@ async function main(): Promise<void> {
   }, config.journeyTickMs);
   worker.unref();
 
+  // The AI review queue: reported letters go to the local model when it is reachable, and wait
+  // when it is not. Nothing but a queued case ever leaves the server, and nothing the model
+  // says is acted on before the backend has validated it.
+  const reviewer = createOllamaReviewer(config.ai);
+  let reviewing = false;
+  const aiWorker = setInterval(() => {
+    if (reviewing || !config.ai.enabled) return;
+    reviewing = true;
+    runAiReviewTick(ctx, reviewer)
+      .catch((err) => console.error('AI review tick failed', err))
+      .finally(() => {
+        reviewing = false;
+      });
+  }, config.ai.tickMs);
+  aiWorker.unref();
+
   const server = serve({ fetch: app.fetch, port: config.port }, (info) => {
     for (const file of loadedEnv) console.log(`Loaded environment from ${file}`);
     console.log(
       `Message in a Bottle API listening on http://localhost:${info.port} (devMode=${config.devMode}, mail=${config.mail.provider})`,
+    );
+    console.log(
+      config.ai.enabled
+        ? `  AI review: ${config.ai.model} at ${config.ai.endpoint} (${config.ai.autoDecide ? 'automatic decisions ON' : 'recommendations only'}); reports queue while it is offline.`
+        : '  AI review is OFF: reports wait for an admin.',
     );
     if (config.mail.provider !== 'smtp') {
       console.log(

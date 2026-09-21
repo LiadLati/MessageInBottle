@@ -1,5 +1,9 @@
 import type {
   AccountPoliciesDto,
+  AccountStandingDto,
+  AdminAppealDto,
+  AdminCaseDetailDto,
+  AdminCaseSummaryDto,
   ChartResponse,
   DevStatus,
   FriendsResponse,
@@ -11,11 +15,14 @@ import type {
   PolicyAcceptanceRequest,
   PublicOceanResponse,
   ReleasePreviewResponse,
+  ReportReason,
+  ReportResponse,
   SentBottleDto,
   SentBottleSummaryDto,
   SessionResponse,
   ReceivedLettersResponse,
   ShoreResponse,
+  ViolationNoticeDto,
 } from '@mib/shared';
 
 export class ApiError extends Error {
@@ -156,6 +163,37 @@ export const api = {
   markNotificationsRead: () => request<void>('POST', '/notifications/read-all'),
   // The device's zone, reported on every start and resume; the account keeps the last one.
   syncTimeZone: (timeZone: string) => request<MeResponse>('PUT', '/auth/time-zone', { timeZone }),
+  // Reporting and standing (spec §16). Reporting is one request from the reader; the sender's
+  // standing, warning acknowledgement and appeals work even while suspended or banned.
+  reportLetter: (input: {
+    bottleId: string;
+    reason: ReportReason;
+    explanation?: string;
+    hide: boolean;
+  }) => request<ReportResponse>('POST', '/moderation/reports', input),
+  standing: () => request<AccountStandingDto>('GET', '/moderation/standing'),
+  acknowledgeWarning: (violationId: string) =>
+    request<void>('POST', `/moderation/violations/${violationId}/acknowledge`),
+  submitAppeal: (violationId: string, text: string) =>
+    request<ViolationNoticeDto>('POST', '/moderation/appeals', { violationId, text }),
+  // Admin console. Every one of these is refused by the server unless the account's role says so.
+  adminCases: (status: 'pending' | 'accepted' | 'rejected' | 'all') =>
+    request<{ cases: AdminCaseSummaryDto[] }>('GET', `/admin/reports?status=${status}`),
+  adminCase: (id: string) => request<{ case: AdminCaseDetailDto }>('GET', `/admin/reports/${id}`),
+  adminDecideCase: (id: string, outcome: 'accept' | 'reject', reason: string) =>
+    request<{ case: AdminCaseDetailDto; changed: boolean }>(
+      'POST',
+      `/admin/reports/${id}/${outcome}`,
+      { reason },
+    ),
+  adminAppeals: (status: 'pending' | 'accepted' | 'rejected' | 'all') =>
+    request<{ appeals: AdminAppealDto[] }>('GET', `/admin/appeals?status=${status}`),
+  adminDecideAppeal: (id: string, outcome: 'accept' | 'reject', reason: string) =>
+    request<{ appeal: AdminAppealDto; changed: boolean }>(
+      'POST',
+      `/admin/appeals/${id}/${outcome}`,
+      { reason },
+    ),
   devStatus: () => request<DevStatus>('GET', '/dev/status'),
   devAdvance: (ms: number) => request<DevStatus>('POST', '/dev/advance', { ms }),
   devArrive: (bottleId: string) => request<DevStatus>('POST', '/dev/arrive', { bottleId }),

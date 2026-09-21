@@ -27,6 +27,7 @@ import { conflict, notFound } from '../lib/errors.js';
 import { loadGraphVersion, toShoreDto } from './chart.js';
 import type { AppContext, AuthUser } from './context.js';
 import { activePlan, appendEvent, releaseCapacityOnce, transitionBottle } from './journey.js';
+import { hiddenBottleIds, hiddenByReporter } from './moderation.js';
 import { outcomeVisibility, publicOpeningOf } from './outcomes.js';
 import { stormWindowsFor } from './risk.js';
 
@@ -170,13 +171,19 @@ export function getSentBottle(ctx: AppContext, user: AuthUser, bottleId: string)
   const plan = activePlan(ctx.db, bottle.id);
   if (!plan) throw notFound('bottle');
   const letter = ctx.db.select().from(t.letters).where(eq(t.letters.id, bottle.letterId)).get()!;
+  const removed = bottle.moderationStatus !== 'clear';
   return {
     ...sentSummary(ctx, bottle, plan, ctx.clock.now()),
-    letter: {
-      text: letter.text,
-      font: letter.originalFont as LetterFont,
-      characters: letter.characters,
-    },
+    // A letter removed after an accepted report is withheld from the passport too; the journey
+    // record around it is untouched.
+    letter: removed
+      ? { text: '', font: letter.originalFont as LetterFont, characters: 0 }
+      : {
+          text: letter.text,
+          font: letter.originalFont as LetterFont,
+          characters: letter.characters,
+        },
+    removed,
     events: eventsFor(ctx, bottle.id),
   };
 }
@@ -239,7 +246,12 @@ export function getMyShore(ctx: AppContext, user: AuthUser): ShoreResponse {
     )
     .orderBy(desc(t.bottles.deliveredAt))
     .all();
-  return { shore: shore ? toShoreDto(shore) : null, bottles: rows.map(shoreBottle) };
+  // A letter its recipient reported and chose to hide leaves their shore at once.
+  const hidden = hiddenBottleIds(ctx.db, user.id);
+  return {
+    shore: shore ? toShoreDto(shore) : null,
+    bottles: rows.filter((b) => !hidden.has(b.id)).map(shoreBottle),
+  };
 }
 
 // Everything the user holds, newest first: letters that arrived on their shore and were opened,
@@ -248,7 +260,7 @@ export function getMyShore(ctx: AppContext, user: AuthUser): ShoreResponse {
 export function listReceivedLetters(ctx: AppContext, user: AuthUser): ReceivedLetterDto[] {
   // A bottle found adrift is a one-time reading (spec §9.3), never an archive entry: only
   // letters that arrived on this user's own shore live here.
-  return ctx.db
+  const rows = ctx.db
     .select()
     .from(t.bottles)
     .where(
@@ -259,8 +271,9 @@ export function listReceivedLetters(ctx: AppContext, user: AuthUser): ReceivedLe
       ),
     )
     .orderBy(desc(t.bottles.openedAt))
-    .all()
-    .map((b) => receivedLetter(b, 'shore'));
+    .all();
+  const hidden = hiddenBottleIds(ctx.db, user.id);
+  return rows.filter((b) => !hidden.has(b.id)).map((b) => receivedLetter(b, 'shore'));
 }
 
 export function openedLetter(
@@ -303,6 +316,7 @@ export function openBottle(ctx: AppContext, user: AuthUser, bottleId: string): O
     const bottle = tx.select().from(t.bottles).where(eq(t.bottles.id, bottleId)).get();
     if (!bottle || bottle.recipientId !== user.id || bottle.moderationStatus !== 'clear')
       throw notFound('bottle');
+    if (hiddenByReporter(tx, user.id, bottle.id)) throw notFound('bottle');
     if (bottle.state === 'opened') return bottle;
     if (bottle.state !== 'delivered') throw notFound('bottle');
     const moved = transitionBottle(tx, bottle, 'opened', { openedAt: now, completedAt: now });
@@ -325,6 +339,7 @@ export function readOpenedLetter(
   if (!bottle || bottle.moderationStatus !== 'clear') throw notFound('letter');
   // A finder's one-time reading is served by activeReading only, never from here.
   if (bottle.recipientId !== user.id || bottle.state !== 'opened') throw notFound('letter');
+  if (hiddenByReporter(ctx.db, user.id, bottle.id)) throw notFound('letter');
   return openedLetter(ctx, bottle);
 }
 
@@ -333,5 +348,8 @@ export function readOpenedLetter(
 export function readOwnLetter(ctx: AppContext, user: AuthUser, bottleId: string): OpenedLetterDto {
   const bottle = ctx.db.select().from(t.bottles).where(eq(t.bottles.id, bottleId)).get();
   if (!bottle || bottle.senderId !== user.id) throw notFound('bottle');
+  // A letter removed after an accepted report is withheld from every in-app read, the sender's
+  // own included; the case keeps the evidence.
+  if (bottle.moderationStatus !== 'clear') throw notFound('letter');
   return openedLetter(ctx, bottle, 'shore');
 }

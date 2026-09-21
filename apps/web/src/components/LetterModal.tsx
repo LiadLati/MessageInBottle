@@ -5,6 +5,7 @@ import { Icon } from '../design/Icon.js';
 import { focusableIn, nextTabTarget } from '../lib/focusTrap.js';
 import { formatDuration, prefersReducedMotion } from '../lib/format.js';
 import { LetterPaper } from './LetterPaper.js';
+import { ReportSheet } from './ReportSheet.js';
 
 interface Props {
   letter: OpenedLetterDto;
@@ -14,6 +15,11 @@ interface Props {
   provenance?: string | undefined;
   // A finder's one reading of a bottle found adrift: says so, and that closing ends it.
   oneTime?: boolean;
+  // Offered to a reader who holds the letter (its recipient, or the finder reading it once):
+  // never to the sender reading their own. After a report that hides the letter, the reader
+  // closes and `onHidden` lets the screen behind drop it.
+  reportable?: boolean;
+  onHidden?: (() => void) | undefined;
   onClose: () => void;
 }
 
@@ -25,9 +31,19 @@ const CLOSE_MS_REDUCED = 120;
 // app is `inert`, focus is trapped and restored, Escape closes, the page behind cannot scroll.
 // Exactly two controls (Back to shore, Readable Print); text is selectable, dir="auto", and the
 // stored words are rendered verbatim (storyboard §D).
-export function LetterModal({ letter, justOpened, provenance, oneTime = false, onClose }: Props) {
+export function LetterModal({
+  letter,
+  justOpened,
+  provenance,
+  oneTime = false,
+  reportable = false,
+  onHidden,
+  onClose,
+}: Props) {
   const [readable, setReadable] = useState(false);
   const [closing, setClosing] = useState(false);
+  const [reporting, setReporting] = useState(false);
+  const [reported, setReported] = useState<'kept' | null>(null);
   const dialogRef = useRef<HTMLDivElement>(null);
   const titleId = useId();
   const b = letter.bottle;
@@ -55,6 +71,15 @@ export function LetterModal({ letter, justOpened, provenance, oneTime = false, o
     if (closing) return;
     setClosing(true);
     window.setTimeout(onClose, prefersReducedMotion() ? CLOSE_MS_REDUCED : CLOSE_MS);
+  };
+  const reportDone = ({ hidden }: { hidden: boolean }) => {
+    setReporting(false);
+    if (hidden) {
+      onHidden?.();
+      close();
+    } else {
+      setReported('kept');
+    }
   };
 
   const onKeyDown = (e: React.KeyboardEvent) => {
@@ -98,6 +123,18 @@ export function LetterModal({ letter, justOpened, provenance, oneTime = false, o
                 b.journeyDurationMs,
               )} at sea`}
           </span>
+          {reportable && !reported ? (
+            <button
+              type="button"
+              className="btn-ghost"
+              aria-pressed={reporting}
+              aria-label="Report this letter"
+              onClick={() => setReporting((r) => !r)}
+            >
+              <Icon name="report" size={14} />
+              Report
+            </button>
+          ) : null}
           <button
             type="button"
             className="btn-ghost"
@@ -109,6 +146,16 @@ export function LetterModal({ letter, justOpened, provenance, oneTime = false, o
             Aa
           </button>
         </div>
+        {reporting ? (
+          <div className="letter-chrome letter-modal-report">
+            <ReportSheet bottleId={b.id} onDone={reportDone} onCancel={() => setReporting(false)} />
+          </div>
+        ) : null}
+        {reported ? (
+          <p className="letter-chrome letter-modal-report t-meta" role="status">
+            Thank you. Your report has been sent for review.
+          </p>
+        ) : null}
         <div className="letter-modal-scroll">
           <LetterPaper
             text={letter.letter.text}

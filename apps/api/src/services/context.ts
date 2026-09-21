@@ -23,4 +23,6 @@ export interface AuthUser {
   email: string | null;
   // The zone the account's nights are counted in; null until a device has reported one.
   timeZone: string | null;
+  // Read from the users row on every request; only the server-side grant tool changes it.
+  role: 'member' | 'admin';
 }
