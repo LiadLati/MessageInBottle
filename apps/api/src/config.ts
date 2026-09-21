@@ -1,9 +1,28 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { RISK_POLICY_VERSION } from '@mib/shared';
+import type { RetentionPolicy } from './services/retention.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 export const API_ROOT = path.resolve(here, '..');
+
+function envDays(name: string): number | null {
+  const raw = process.env[name];
+  if (raw === undefined || raw === '') return null;
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n < 0)
+    throw new Error(`${name} must be a non-negative number of days`);
+  return n * 24 * 60 * 60 * 1000;
+}
+
+function loadRetentionPolicy(): RetentionPolicy {
+  return {
+    enabled: (process.env.MIB_RETENTION_ENABLED ?? 'false') === 'true',
+    rejectedAfterMs: envDays('MIB_RETENTION_REJECTED_DAYS'),
+    acceptedAfterMs: envDays('MIB_RETENTION_ACCEPTED_DAYS'),
+    appealWindowMs: envDays('MIB_APPEAL_WINDOW_DAYS'),
+  };
+}
 
 function envInt(name: string, fallback: number): number {
   const raw = process.env[name];
@@ -36,6 +55,28 @@ export interface AppConfig {
   // RISK_POLICY_VERSION (3) enables the approved policy. Existing journeys keep the version
   // they were released under.
   riskPolicyVersion: number;
+  // Local AI review of reported letters (spec §16). The model is reached over HTTP at an
+  // Ollama-compatible endpoint; nothing here is a paid API. Reports queue while it is away.
+  ai: AiConfig;
+  // How long moderation evidence is kept. Disabled by default: nothing is ever removed until
+  // a policy is configured deliberately. See services/retention.ts.
+  retention: RetentionPolicy;
+}
+
+export interface AiConfig {
+  // false: reported cases are queued but never sent to a model; admins decide everything.
+  enabled: boolean;
+  // Ollama-compatible base URL (POST {endpoint}/api/chat). Local by default; a cloud host later
+  // is a URL change, nothing else.
+  endpoint: string;
+  model: string;
+  timeoutMs: number;
+  // How often the worker looks for queued cases.
+  tickMs: number;
+  // false (default): the model's verdict is a recommendation shown to admins. true: a clear
+  // `accept` or `reject` decides the case itself; `uncertain` always goes to an admin. Enable
+  // only after running `pnpm --filter @mib/api ai:eval` against your own model.
+  autoDecide: boolean;
 }
 
 export type MailProvider = 'outbox' | 'smtp' | 'disabled';
@@ -64,6 +105,15 @@ export function loadConfig(): AppConfig {
     appUrl: process.env.MIB_APP_URL ?? 'http://localhost:5173',
     mail: loadMailConfig(devMode),
     riskPolicyVersion: envInt('MIB_RISK_POLICY_VERSION', RISK_POLICY_VERSION),
+    retention: loadRetentionPolicy(),
+    ai: {
+      enabled: (process.env.MIB_AI_ENABLED ?? 'true') === 'true',
+      endpoint: (process.env.MIB_AI_ENDPOINT ?? 'http://127.0.0.1:11434').replace(/\/+$/, ''),
+      model: process.env.MIB_AI_MODEL ?? 'qwen2.5:7b',
+      timeoutMs: envInt('MIB_AI_TIMEOUT_MS', 60_000),
+      tickMs: envInt('MIB_AI_TICK_MS', 10_000),
+      autoDecide: (process.env.MIB_AI_AUTO_DECIDE ?? 'false') === 'true',
+    },
   };
 }
 

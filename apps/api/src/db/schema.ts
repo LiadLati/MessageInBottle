@@ -32,6 +32,13 @@ export const users = sqliteTable('users', {
   // effect. Nights are walked from that instant only, so a change never reaches into the past.
   timeZone: text('time_zone'),
   timeZoneSince: integer('time_zone_since'),
+  // `admin` is granted only by the server-side tool (tools/grant-admin.ts), by stable user id.
+  // Registration never sets it and no request body is ever read for it.
+  role: text('role', { enum: ['member', 'admin'] })
+    .notNull()
+    .default('member'),
+  roleGrantedAt: integer('role_granted_at'),
+  roleGrantedBy: text('role_granted_by'),
 });
 
 // Password-reset tokens: only the SHA-256 of the token is stored, each token is single-use and
@@ -374,3 +381,146 @@ export const devClock = sqliteTable('dev_clock', {
   id: integer('id').primaryKey(),
   offsetMs: integer('offset_ms').notNull().default(0),
 });
+
+// ---------- reporting and moderation (spec §16) ----------
+
+// One case per reported letter: every report about the same bottle joins it, and a case can
+// produce at most one violation. The letter text is copied in as protected evidence when the
+// first report arrives, so a later removal, edit or moderation change never loses what was
+// reviewed. The ai_* columns are the persistent review queue: a case stays `queued` until the
+// local model has answered, however long the model or the machine is away.
+export const moderationCases = sqliteTable(
+  'moderation_cases',
+  {
+    id: text('id').primaryKey(),
+    bottleId: text('bottle_id')
+      .notNull()
+      .unique()
+      .references(() => bottles.id),
+    letterId: text('letter_id')
+      .notNull()
+      .references(() => letters.id),
+    senderId: text('sender_id')
+      .notNull()
+      .references(() => users.id),
+    recipientId: text('recipient_id')
+      .notNull()
+      .references(() => users.id),
+    // Where the first reporter read it: their own shore, or the public ocean as a finder.
+    context: text('context', { enum: ['shore', 'public'] }).notNull(),
+    status: text('status', { enum: ['pending', 'accepted', 'rejected'] })
+      .notNull()
+      .default('pending'),
+    evidenceText: text('evidence_text').notNull(),
+    evidenceFont: text('evidence_font').notNull(),
+    evidenceCharacters: integer('evidence_characters').notNull(),
+    // Set when a retention run has cleared the evidence text from a finally settled case. The
+    // case, its decision and its violation survive; only the copied letter goes. Null on every
+    // case until a retention policy is configured and switched on (services/retention.ts).
+    evidenceRedactedAt: integer('evidence_redacted_at'),
+    createdAt: integer('created_at').notNull(),
+    updatedAt: integer('updated_at').notNull(),
+    aiStatus: text('ai_status', { enum: ['queued', 'running', 'done', 'failed'] })
+      .notNull()
+      .default('queued'),
+    aiAttempts: integer('ai_attempts').notNull().default(0),
+    aiNextAttemptAt: integer('ai_next_attempt_at'),
+    aiStartedAt: integer('ai_started_at'),
+    aiVerdict: text('ai_verdict', { enum: ['accept', 'reject', 'uncertain'] }),
+    aiReason: text('ai_reason'),
+    aiUncertainty: text('ai_uncertainty'),
+    aiTranslation: text('ai_translation'),
+    aiLanguage: text('ai_language'),
+    aiModel: text('ai_model'),
+    aiCompletedAt: integer('ai_completed_at'),
+    aiLastError: text('ai_last_error'),
+    decidedOutcome: text('decided_outcome', { enum: ['accepted', 'rejected'] }),
+    decidedBy: text('decided_by', { enum: ['admin', 'ai'] }),
+    decidedByUserId: text('decided_by_user_id').references(() => users.id),
+    decidedAt: integer('decided_at'),
+    decisionReason: text('decision_reason'),
+  },
+  (t) => [
+    index('moderation_cases_status_idx').on(t.status, t.createdAt),
+    index('moderation_cases_ai_idx').on(t.aiStatus, t.aiNextAttemptAt),
+    index('moderation_cases_sender_idx').on(t.senderId),
+  ],
+);
+
+// A reader's report. One per reader per case; a second report by the same reader is a no-op.
+// `hidden` records that the reporter chose to hide the letter from their own reads at once.
+export const letterReports = sqliteTable(
+  'letter_reports',
+  {
+    id: text('id').primaryKey(),
+    caseId: text('case_id')
+      .notNull()
+      .references(() => moderationCases.id),
+    reporterId: text('reporter_id')
+      .notNull()
+      .references(() => users.id),
+    reason: text('reason').notNull(),
+    explanation: text('explanation'),
+    context: text('context', { enum: ['shore', 'public'] }).notNull(),
+    hidden: integer('hidden', { mode: 'boolean' }).notNull().default(true),
+    createdAt: integer('created_at').notNull(),
+  },
+  (t) => [
+    uniqueIndex('letter_reports_case_reporter_idx').on(t.caseId, t.reporterId),
+    index('letter_reports_reporter_idx').on(t.reporterId),
+  ],
+);
+
+// An accepted report. The case id is unique, so a case yields one violation at most. A revoked
+// violation (an accepted appeal) stays as history but no longer counts towards the account's
+// standing; `acknowledged_at` is the one-time warning the sender has seen.
+export const violations = sqliteTable(
+  'violations',
+  {
+    id: text('id').primaryKey(),
+    caseId: text('case_id')
+      .notNull()
+      .unique()
+      .references(() => moderationCases.id),
+    userId: text('user_id')
+      .notNull()
+      .references(() => users.id),
+    bottleId: text('bottle_id')
+      .notNull()
+      .references(() => bottles.id),
+    category: text('category').notNull(),
+    decidedAt: integer('decided_at').notNull(),
+    decidedBy: text('decided_by', { enum: ['admin', 'ai'] }).notNull(),
+    decidedByUserId: text('decided_by_user_id').references(() => users.id),
+    reason: text('reason'),
+    revokedAt: integer('revoked_at'),
+    revokedByUserId: text('revoked_by_user_id').references(() => users.id),
+    acknowledgedAt: integer('acknowledged_at'),
+    createdAt: integer('created_at').notNull(),
+  },
+  (t) => [index('violations_user_idx').on(t.userId, t.decidedAt)],
+);
+
+// One appeal per violation (unique), decided once. A rejected appeal is final.
+export const appeals = sqliteTable(
+  'appeals',
+  {
+    id: text('id').primaryKey(),
+    violationId: text('violation_id')
+      .notNull()
+      .unique()
+      .references(() => violations.id),
+    userId: text('user_id')
+      .notNull()
+      .references(() => users.id),
+    text: text('text').notNull(),
+    status: text('status', { enum: ['pending', 'accepted', 'rejected'] })
+      .notNull()
+      .default('pending'),
+    createdAt: integer('created_at').notNull(),
+    decidedByUserId: text('decided_by_user_id').references(() => users.id),
+    decidedAt: integer('decided_at'),
+    decisionReason: text('decision_reason'),
+  },
+  (t) => [index('appeals_status_idx').on(t.status, t.createdAt)],
+);

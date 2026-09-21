@@ -10,7 +10,7 @@ import {
   normalizeEmail,
   normalizeUsername,
 } from '@mib/shared';
-import { AppError, conflict } from '../../lib/errors.js';
+import { conflict, tooManyRequests } from '../../lib/errors.js';
 import { RateLimiter, type RateLimitRule } from '../../lib/rate-limit.js';
 import {
   emailTaken,
@@ -35,11 +35,6 @@ export const FORGOT_PER_ADDRESS: RateLimitRule = { limit: 5, windowMs: 15 * 60 *
 export const FORGOT_PER_EMAIL: RateLimitRule = { limit: 3, windowMs: 60 * 60 * 1000 };
 export const RESET_PER_ADDRESS: RateLimitRule = { limit: 10, windowMs: 15 * 60 * 1000 };
 
-const rateLimited = (retryAfterMs: number) =>
-  new AppError(429, 'rate_limited', 'too many attempts, try again later', {
-    retryAfterSeconds: Math.max(1, Math.ceil(retryAfterMs / 1000)),
-  });
-
 export function authRoutes(limiter = new RateLimiter()) {
   const r = new Hono<AppEnv>();
 
@@ -59,7 +54,7 @@ export function authRoutes(limiter = new RateLimiter()) {
   };
   const enforce = (key: string, rule: RateLimitRule) => {
     const d = limiter.hit(key, rule);
-    if (!d.allowed) throw rateLimited(d.retryAfterMs);
+    if (!d.allowed) throw tooManyRequests(d.retryAfterMs);
   };
 
   r.post('/register', jsonBody(RegisterRequestSchema), (c) => {

@@ -6,11 +6,12 @@ import { Icon } from '../design/Icon.js';
 interface Props {
   shoreName: string | null;
   onChangeShore: () => void;
+  onStanding: () => void;
   onClose: () => void;
 }
 
 // The header avatar opens this instead of a permanent "signed in as" row (IA note on S1).
-export function ProfileSheet({ shoreName, onChangeShore, onClose }: Props) {
+export function ProfileSheet({ shoreName, onChangeShore, onStanding, onClose }: Props) {
   const { user, logout } = useSession();
   const first = useRef<HTMLButtonElement>(null);
   useEffect(() => {
@@ -61,6 +62,9 @@ export function ProfileSheet({ shoreName, onChangeShore, onClose }: Props) {
           <button type="button" className="btn-secondary" onClick={onChangeShore}>
             <Icon name="shore" size={16} />
             {shoreName ? 'Change shore' : 'Choose a shore'}
+          </button>
+          <button type="button" className="btn-text" onClick={onStanding}>
+            Account standing
           </button>
           <button type="button" className="btn-text" onClick={() => void logout()}>
             Sign out

@@ -197,7 +197,15 @@ export function MyShoreScreen({ onOpenProfile, onChooseShore }: Props) {
         )}
         <ErrorNote error={error ?? shore.error} />
       </section>
-      {opened ? <LetterModal letter={opened} justOpened onClose={() => setOpened(null)} /> : null}
+      {opened ? (
+        <LetterModal
+          letter={opened}
+          justOpened
+          reportable
+          onHidden={() => void shore.reload()}
+          onClose={() => setOpened(null)}
+        />
+      ) : null}
     </div>
   );
 }

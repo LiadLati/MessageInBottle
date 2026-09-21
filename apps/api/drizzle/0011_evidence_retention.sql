@@ -1,0 +1,1 @@
+ALTER TABLE `moderation_cases` ADD `evidence_redacted_at` integer;

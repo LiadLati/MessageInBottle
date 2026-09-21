@@ -48,6 +48,9 @@ export const SessionResponseSchema = z.object({
     // The IANA zone the account's nights are counted in (spec §9.3): first learned from the
     // device and re-synced whenever the app starts or resumes. Null until a device has said.
     timeZone: z.string().nullable(),
+    // Granted only server-side (see apps/api/src/tools/grant-admin.ts); never chosen at
+    // registration and never taken from a client.
+    role: z.enum(['member', 'admin']),
   }),
 });
 
@@ -245,6 +248,8 @@ export const SentBottleSchema = z.object({
   storms: z.array(StormWindowSchema),
   publicListing: PublicListingSchema.nullable(),
   letter: z.object({ text: z.string(), font: LetterFontSchema, characters: z.number().int() }),
+  // True when the letter was removed after an accepted report: the text above is empty.
+  removed: z.boolean().optional(),
   events: z.array(JourneyEventSchema),
   serverTime: z.string(),
 });
@@ -350,6 +355,11 @@ export const NOTIFICATION_KINDS = [
   'sent_found',
   'sent_expired',
   'sent_cancelled',
+  'moderation_violation',
+  'moderation_suspended',
+  'moderation_banned',
+  'moderation_appeal_accepted',
+  'moderation_appeal_rejected',
   'other',
 ] as const;
 export const NotificationKindSchema = z.enum(NOTIFICATION_KINDS);
@@ -357,7 +367,7 @@ export type NotificationKind = z.infer<typeof NotificationKindSchema>;
 
 export const NotificationSchema = z.object({
   id: IdSchema,
-  type: z.enum(['bottle_arrived', 'journey_event']),
+  type: z.enum(['bottle_arrived', 'journey_event', 'moderation']),
   kind: NotificationKindSchema,
   bottleId: IdSchema.nullable(),
   message: z.string(),
@@ -398,3 +408,209 @@ export const ApiErrorSchema = z.object({
   }),
 });
 export type ApiError = z.infer<typeof ApiErrorSchema>;
+
+// ---------- reporting, moderation, appeals (spec §16) ----------
+export const REPORT_REASONS = [
+  'harassment',
+  'hate',
+  'sexual',
+  'violence',
+  'self_harm',
+  'spam',
+  'other',
+] as const;
+export const ReportReasonSchema = z.enum(REPORT_REASONS);
+export type ReportReason = z.infer<typeof ReportReasonSchema>;
+
+// A reader reporting the letter in front of them. `hide` takes the letter out of the reporter's
+// own reads at once; nothing else changes until a case is decided.
+export const ReportRequestSchema = z.object({
+  bottleId: IdSchema,
+  reason: ReportReasonSchema,
+  explanation: z.string().trim().max(1000).optional(),
+  hide: z.boolean().default(true),
+});
+export type ReportRequest = z.infer<typeof ReportRequestSchema>;
+
+export const ReportResponseSchema = z.object({
+  reportId: IdSchema,
+  caseId: IdSchema,
+  hidden: z.boolean(),
+  // The same reader reporting the same letter again changes nothing.
+  alreadyReported: z.boolean(),
+});
+export type ReportResponse = z.infer<typeof ReportResponseSchema>;
+
+export const CASE_STATUSES = ['pending', 'accepted', 'rejected'] as const;
+export const CaseStatusSchema = z.enum(CASE_STATUSES);
+export type CaseStatus = z.infer<typeof CaseStatusSchema>;
+
+export const AI_VERDICTS = ['accept', 'reject', 'uncertain'] as const;
+export const AiVerdictSchema = z.enum(AI_VERDICTS);
+export type AiVerdict = z.infer<typeof AiVerdictSchema>;
+
+// What the local model returns, validated before anything reads it. The model never decides
+// anything itself: the backend validates this and performs every state change.
+export const AiReviewOutputSchema = z.object({
+  verdict: AiVerdictSchema,
+  reason: z.string().trim().min(1).max(600),
+  // Why it could not be sure — required to be meaningful when the verdict is `uncertain`.
+  uncertainty: z.string().trim().max(600).nullable().optional(),
+  language: z.string().trim().max(40).nullable().optional(),
+  // An English rendering of the reported text, shown beside the original, never instead of it.
+  translation: z.string().trim().max(4000).nullable().optional(),
+  confidence: z.number().min(0).max(1).nullable().optional(),
+});
+export type AiReviewOutput = z.infer<typeof AiReviewOutputSchema>;
+
+export const AiReviewSchema = z.object({
+  status: z.enum(['queued', 'running', 'done', 'failed']),
+  verdict: AiVerdictSchema.nullable(),
+  reason: z.string().nullable(),
+  uncertainty: z.string().nullable(),
+  translation: z.string().nullable(),
+  language: z.string().nullable(),
+  model: z.string().nullable(),
+  attempts: z.number().int(),
+  completedAt: z.string().nullable(),
+  nextAttemptAt: z.string().nullable(),
+  lastError: z.string().nullable(),
+});
+export type AiReviewDto = z.infer<typeof AiReviewSchema>;
+
+export const PersonSchema = z.object({
+  id: IdSchema,
+  username: z.string(),
+  displayName: z.string(),
+});
+export type PersonDto = z.infer<typeof PersonSchema>;
+
+export const ModerationDecisionSchema = z.object({
+  outcome: z.enum(['accepted', 'rejected']),
+  // Who decided: an admin (named) or the model under automatic decisions.
+  by: z.enum(['admin', 'ai']),
+  admin: PersonSchema.nullable(),
+  at: z.string(),
+  reason: z.string().nullable(),
+});
+export type ModerationDecisionDto = z.infer<typeof ModerationDecisionSchema>;
+
+export const LetterReportSchema = z.object({
+  id: IdSchema,
+  reason: ReportReasonSchema,
+  explanation: z.string().nullable(),
+  // Where the reporter read it: on their own shore, or as a finder in the public ocean.
+  context: z.enum(['shore', 'public']),
+  hidden: z.boolean(),
+  createdAt: z.string(),
+  reporter: PersonSchema,
+});
+export type LetterReportDto = z.infer<typeof LetterReportSchema>;
+
+export const AdminCaseSummarySchema = z.object({
+  id: IdSchema,
+  status: CaseStatusSchema,
+  bottleId: IdSchema,
+  context: z.enum(['shore', 'public']),
+  sender: PersonSchema,
+  intendedRecipient: PersonSchema,
+  reportCount: z.number().int(),
+  reasons: z.array(ReportReasonSchema),
+  firstReportedAt: z.string(),
+  latestReportAt: z.string(),
+  ai: AiReviewSchema,
+  decision: ModerationDecisionSchema.nullable(),
+  violationId: IdSchema.nullable(),
+});
+export type AdminCaseSummaryDto = z.infer<typeof AdminCaseSummarySchema>;
+
+export const AdminCaseDetailSchema = AdminCaseSummarySchema.extend({
+  // The protected evidence: the letter exactly as it read when it was first reported. `text`
+  // is empty and `redactedAt` is set once a retention run has cleared a finally settled case.
+  letter: z.object({
+    text: z.string(),
+    font: LetterFontSchema,
+    characters: z.number().int(),
+    redactedAt: z.string().nullable(),
+  }),
+  releasedAt: z.string(),
+  reports: z.array(LetterReportSchema),
+  appeal: z
+    .object({
+      id: IdSchema,
+      status: z.enum(['pending', 'accepted', 'rejected']),
+      text: z.string(),
+      createdAt: z.string(),
+    })
+    .nullable(),
+});
+export type AdminCaseDetailDto = z.infer<typeof AdminCaseDetailSchema>;
+
+export const AdminAppealSchema = z.object({
+  id: IdSchema,
+  status: z.enum(['pending', 'accepted', 'rejected']),
+  text: z.string(),
+  createdAt: z.string(),
+  appellant: PersonSchema,
+  violation: z.object({
+    id: IdSchema,
+    category: ReportReasonSchema,
+    decidedAt: z.string(),
+    revokedAt: z.string().nullable(),
+  }),
+  case: AdminCaseDetailSchema,
+  decision: z
+    .object({
+      outcome: z.enum(['accepted', 'rejected']),
+      admin: PersonSchema,
+      at: z.string(),
+      reason: z.string().nullable(),
+    })
+    .nullable(),
+});
+export type AdminAppealDto = z.infer<typeof AdminAppealSchema>;
+
+export const DecisionRequestSchema = z.object({
+  reason: z.string().trim().max(1000).optional(),
+});
+export type DecisionRequest = z.infer<typeof DecisionRequestSchema>;
+
+// ---------- the sender's side: violations, standing, appeals ----------
+// Nothing here ever names or hints at a reporter.
+export const ViolationNoticeSchema = z.object({
+  id: IdSchema,
+  ordinal: z.number().int(),
+  category: ReportReasonSchema,
+  decidedAt: z.string(),
+  revokedAt: z.string().nullable(),
+  acknowledgedAt: z.string().nullable(),
+  bottle: z.object({ id: IdSchema, recipientDisplayName: z.string(), releasedAt: z.string() }),
+  appeal: z
+    .object({
+      id: IdSchema,
+      status: z.enum(['pending', 'accepted', 'rejected']),
+      text: z.string(),
+      createdAt: z.string(),
+      decidedAt: z.string().nullable(),
+    })
+    .nullable(),
+});
+export type ViolationNoticeDto = z.infer<typeof ViolationNoticeSchema>;
+
+export const ACCOUNT_STANDINGS = ['good', 'warned', 'suspended', 'banned'] as const;
+export const AccountStandingSchema = z.object({
+  standing: z.enum(ACCOUNT_STANDINGS),
+  // Set while suspended: the elapsed-time instant the suspension ends.
+  suspendedUntil: z.string().nullable(),
+  violationsInForce: z.number().int(),
+  // A first accepted violation the account has not acknowledged yet: shown once, on entry.
+  pendingWarning: ViolationNoticeSchema.nullable(),
+  violations: z.array(ViolationNoticeSchema),
+});
+export type AccountStandingDto = z.infer<typeof AccountStandingSchema>;
+
+export const AppealRequestSchema = z.object({
+  violationId: IdSchema,
+  text: z.string().trim().min(1).max(2000),
+});
+export type AppealRequest = z.infer<typeof AppealRequestSchema>;

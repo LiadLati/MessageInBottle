@@ -9,6 +9,7 @@ import type { Clock } from '../lib/clock.js';
 import { OutboxMailer } from '../lib/mail.js';
 import type { createApp } from '../http/app.js';
 import type { AppContext, AuthUser } from '../services/context.js';
+import { RETENTION_OFF } from '../services/retention.js';
 
 export class ManualClock implements Clock {
   constructor(private current: number) {}
@@ -45,6 +46,15 @@ export function testConfig(overrides: Partial<AppConfig> = {}): AppConfig {
       smtp: { host: '', port: 587, secure: false, user: '', pass: '' },
     },
     riskPolicyVersion: RISK_POLICY_VERSION,
+    ai: {
+      enabled: true,
+      endpoint: 'http://ai.test',
+      model: 'test-model',
+      timeoutMs: 1000,
+      tickMs: 1000,
+      autoDecide: false,
+    },
+    retention: RETENTION_OFF,
     ...overrides,
   };
 }
@@ -86,6 +96,7 @@ export function createTestWorld(overrides: Partial<AppConfig> = {}): TestWorld {
         shoreId: row.shoreId,
         email: row.email,
         timeZone: row.timeZone,
+        role: row.role,
       };
     },
   };
