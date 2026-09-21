@@ -1,6 +1,7 @@
 import { eq } from 'drizzle-orm';
 import {
   POLICY_DOCUMENTS,
+  SUPPORT_EMAIL,
   RISK_POLICY_VERSION,
   currentPolicyVersions,
   policySetStatus,
@@ -47,6 +48,7 @@ export function testConfig(overrides: Partial<AppConfig> = {}): AppConfig {
     corsOrigin: '*',
     trustProxy: true,
     appUrl: 'http://app.test',
+    supportEmail: SUPPORT_EMAIL,
     mail: {
       provider: 'outbox',
       from: 'test <no-reply@test>',

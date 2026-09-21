@@ -1,4 +1,5 @@
 import { useState, type FormEvent } from 'react';
+import { SupportLink } from '../components/SupportLink.js';
 import type { AccountStandingDto, ViolationNoticeDto } from '@mib/shared';
 import { api } from '../api/client.js';
 import { REPORT_REASON_LABELS } from '../components/ReportSheet.js';
@@ -35,9 +36,12 @@ export function StandingScreen({ standing, onChanged, onBack }: Props) {
         onBack ? (
           <BackButton onClick={onBack} />
         ) : (
-          <button type="button" className="btn-ghost" onClick={() => void logout()}>
-            Sign out
-          </button>
+          <div className="row" style={{ gap: 8 }}>
+            <SupportLink className="btn-ghost" />
+            <button type="button" className="btn-ghost" onClick={() => void logout()}>
+              Sign out
+            </button>
+          </div>
         )
       }
     >

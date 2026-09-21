@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { SUPPORT_EMAIL, SUPPORT_NAME, SUPPORT_PATH } from './support.js';
 
 // The legal documents of the App, in one place. The API serves them from here, validates
 // acceptances against the versions here, renders the public web pages from here, and the app
@@ -202,7 +203,7 @@ export const TERMS_OF_USE: PolicyDocument = {
     { type: 'h2', text: '3. Accounts' },
     {
       type: 'p',
-      text: 'You must provide accurate account information, protect your password, and use the Support option promptly if you believe your account has been accessed without permission. You may not impersonate another person, create an account for someone without their permission, evade a restriction, or use multiple accounts to harass others.',
+      text: `You must provide accurate account information, protect your password, and write to ${SUPPORT_NAME} promptly, through the support page at ${SUPPORT_PATH}, if you believe your account has been accessed without permission. You may not impersonate another person, create an account for someone without their permission, evade a restriction, or use multiple accounts to harass others.`,
     },
     {
       type: 'p',
@@ -277,7 +278,7 @@ export const TERMS_OF_USE: PolicyDocument = {
     { type: 'h2', text: '9. Contact' },
     {
       type: 'p',
-      text: 'Questions, safety concerns, privacy requests and account-deletion requests can be submitted through the Support and Privacy Request options in the App and on its public support page.',
+      text: `Questions, safety concerns, privacy requests and account-deletion requests reach ${SUPPORT_NAME} through the support page at ${SUPPORT_PATH}, which is also linked from Help & Support in the App. Support will never ask you for a password, a verification code, payment details or an identity document.`,
     },
   ],
 };
@@ -423,7 +424,7 @@ export const PRIVACY_POLICY: PolicyDocument = {
     { type: 'h2', text: '9. Security' },
     {
       type: 'p',
-      text: 'Passwords are stored only as salted hashes and cannot be recovered. Sign-in and password-reset tokens are stored as hashes; a reset token can be used once and expires after 30 minutes. Administrative functions are restricted by a role that is granted only on the server and checked on every request. Production deployments serve the App over encrypted network transport. No system can guarantee absolute security; suspected security issues can be reported through the Security or Support option on the public support page.',
+      text: `Passwords are stored only as salted hashes and cannot be recovered. Sign-in and password-reset tokens are stored as hashes; a reset token can be used once and expires after 30 minutes. Administrative functions are restricted by a role that is granted only on the server and checked on every request. Production deployments serve the App over encrypted network transport. No system can guarantee absolute security; suspected security issues can be reported to ${SUPPORT_NAME} at ${SUPPORT_EMAIL}, through the support page at ${SUPPORT_PATH}.`,
     },
     { type: 'h2', text: '10. Changes to this Policy' },
     {
@@ -433,7 +434,7 @@ export const PRIVACY_POLICY: PolicyDocument = {
     { type: 'h2', text: '11. Contact' },
     {
       type: 'p',
-      text: 'Privacy questions, requests and complaints can be submitted through the Privacy Request option in the App or through the public support page linked from the store listing.',
+      text: `Privacy questions, requests and complaints reach ${SUPPORT_NAME}, the support contact for the App, at ${SUPPORT_EMAIL}. The support page at ${SUPPORT_PATH} opens a message with the subject already set, and is linked from Help & Support in the App and from the store listing. Support will never ask you for a password, a verification code, payment details or an identity document.`,
     },
   ],
 };
@@ -473,7 +474,7 @@ export const CHILD_SAFETY_STANDARDS: PolicyDocument = {
     { type: 'h2', text: 'Contact' },
     {
       type: 'p',
-      text: 'Child-safety concerns can be raised through the Support and Privacy Request options in the App and through the public support page linked from the store listing. Reports made in the App reach the same review process and are the fastest way to have content examined. If a child may be in immediate danger, contact your local emergency service first.',
+      text: `Child-safety concerns reach ${SUPPORT_NAME}, the support contact for the App, at ${SUPPORT_EMAIL}; the support page at ${SUPPORT_PATH} opens a message with the subject already set, and is linked from Help & Support in the App and from the store listing. Reporting a letter inside the App reaches the same review process and is the fastest way to have content examined. If a child may be in immediate danger, contact your local emergency service first.`,
     },
   ],
 };

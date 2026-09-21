@@ -10,6 +10,7 @@ import {
 } from '@mib/shared';
 import { ApiError, UNREACHABLE, api, type HealthResponse } from '../api/client.js';
 import { EMPTY_CONSENT, PolicyConsent, consentProblems } from '../components/PolicyConsent.js';
+import { SupportLink } from '../components/SupportLink.js';
 import { Icon } from '../design/Icon.js';
 import { useSession } from '../state/session.js';
 
@@ -500,7 +501,8 @@ export function LoginScreen({ resetToken, onResetDone, onOpenPolicy }: Props) {
           A shore is an app anchor, not a real location — no GPS is ever collected. Letters can
           strand or be lost.
         </p>
-        <nav className="policy-links" aria-label="Terms and privacy">
+        <nav className="policy-links" aria-label="Terms, privacy and support">
+          <SupportLink />
           {PUBLISHED_DOCUMENTS.map((d) => (
             <button
               key={d.id}

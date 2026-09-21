@@ -5,11 +5,14 @@ import react from '@vitejs/plugin-react';
 // reordered, so on some systems (Windows in particular) `localhost` resolves to ::1 first and a
 // proxy hop can fail even though the API is running. The API binds dual-stack, so the explicit
 // IPv4 address always reaches it. Override with MIB_API_URL when the API lives elsewhere.
+const apiTarget = process.env.MIB_API_URL ?? 'http://127.0.0.1:3001';
+// The public legal pages and the support page are server-rendered by the API. Proxying them
+// here gives development the single origin a production deployment serves, so an in-app link
+// to /support resolves the same way in both.
 const apiProxy = {
-  '/api': {
-    target: process.env.MIB_API_URL ?? 'http://127.0.0.1:3001',
-    changeOrigin: true,
-  },
+  '/api': { target: apiTarget, changeOrigin: true },
+  '/legal': { target: apiTarget, changeOrigin: true },
+  '/support': { target: apiTarget, changeOrigin: true },
 };
 
 export default defineConfig({

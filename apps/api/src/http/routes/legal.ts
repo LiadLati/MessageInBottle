@@ -1,7 +1,12 @@
 import { Hono } from 'hono';
 import type { Context } from 'hono';
 import { getConnInfo } from '@hono/node-server/conninfo';
-import { PUBLISHED_DOCUMENTS, normalizeUsername, publishedDocumentBySlug } from '@mib/shared';
+import {
+  PUBLISHED_DOCUMENTS,
+  SUPPORT_NAME,
+  normalizeUsername,
+  publishedDocumentBySlug,
+} from '@mib/shared';
 import { AppError } from '../../lib/errors.js';
 import { RateLimiter, type RateLimitRule } from '../../lib/rate-limit.js';
 import { login } from '../../services/auth.js';
@@ -33,7 +38,8 @@ export function legalRoutes(limiter = new RateLimiter()) {
 <ul>${PUBLISHED_DOCUMENTS.map(
           (d) => `<li><a href="/legal/${d.slug}">${d.title}</a> — ${d.summary}</li>`,
         ).join('')}
-<li><a href="/legal/delete-account">Delete your account</a> — remove your account and its associated data without reinstalling the App.</li></ul>`,
+<li><a href="/legal/delete-account">Delete your account</a> — remove your account and its associated data without reinstalling the App.</li>
+<li><a href="/support">Support</a> — how to reach ${SUPPORT_NAME} about your account, your privacy, safety or a technical problem.</li></ul>`,
       }),
     ),
   );

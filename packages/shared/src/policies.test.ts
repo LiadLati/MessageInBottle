@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { SUPPORT_EMAIL, SUPPORT_NAME, SUPPORT_PATH, supportMailto } from './support.js';
 import {
   CHILD_SAFETY_STANDARDS,
   COMMUNITY_RULES,
@@ -90,11 +91,13 @@ describe('the published documents', () => {
       /\bjurisdiction\b/i,
       /\bcourts? of\b/i,
       /\bcompany number\b/i,
-      /@[a-z0-9.-]+\.[a-z]{2,}/i, // no e-mail address of any kind
       /Message in a Bottle/,
     ]) {
       expect(everything, String(pattern)).not.toMatch(pattern);
     }
+    // The only address anywhere is the project's support contact — never a personal one.
+    const addresses = new Set(everything.match(/[\w.+-]+@[\w.-]+\.[a-z]{2,}/gi) ?? []);
+    expect([...addresses]).toEqual([SUPPORT_EMAIL]);
     // The product is referred to only as "the App".
     expect(everything).toMatch(/\bthe App\b/);
   });
@@ -151,6 +154,43 @@ describe('the published documents', () => {
     expect(cs).toMatch(/support page/i);
     // It is published but never part of what a person accepts.
     expect(POLICY_IDS).not.toContain('child-safety' as never);
+  });
+
+  it('send people to the project support contact, and name it where it matters', () => {
+    const terms = textOf(TERMS_OF_USE);
+    const privacy = textOf(PRIVACY_POLICY);
+    const child = textOf(CHILD_SAFETY_STANDARDS);
+    // Every document that used to say "the public support page" now gives the real path.
+    for (const [name, body] of [
+      ['terms', terms],
+      ['privacy', privacy],
+      ['child safety', child],
+    ] as const) {
+      expect(body, name).toContain(SUPPORT_PATH);
+    }
+    // Privacy and Child Safety identify the address itself.
+    expect(privacy).toContain(SUPPORT_EMAIL);
+    expect(child).toContain(SUPPORT_EMAIL);
+    expect(privacy).toContain(SUPPORT_NAME);
+    expect(child).toContain(SUPPORT_NAME);
+    // Nothing vague survives.
+    expect(everything).not.toMatch(/public support page linked from the store listing/);
+    expect(everything).not.toMatch(/Support and Privacy Request options/);
+    // No promise about how quickly anyone answers, and no jurisdiction.
+    expect(everything).not.toMatch(/within \d+ (hours|days|business)/i);
+    expect(everything).not.toMatch(/response time/i);
+  });
+
+  it('tell people support never asks for credentials', () => {
+    expect(textOf(PRIVACY_POLICY)).toMatch(/never ask you for a password/i);
+    expect(textOf(TERMS_OF_USE)).toMatch(/never ask you for a password/i);
+  });
+
+  it('builds a support mailto with an encoded subject', () => {
+    const link = supportMailto(SUPPORT_EMAIL, 'Sea You Support — Account help');
+    expect(link.startsWith(`mailto:${SUPPORT_EMAIL}?subject=`)).toBe(true);
+    expect(link).not.toContain(' ');
+    expect(link).toContain(encodeURIComponent('Sea You Support — Account help'));
   });
 
   it('accepts only explicit, literal acceptances carrying the versions shown', () => {

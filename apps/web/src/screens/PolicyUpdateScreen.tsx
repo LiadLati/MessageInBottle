@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { currentPolicyVersions, type DocumentId } from '@mib/shared';
 import { ApiError, api } from '../api/client.js';
 import { EMPTY_CONSENT, PolicyConsent, consentProblems } from '../components/PolicyConsent.js';
+import { SupportLink } from '../components/SupportLink.js';
 import { useSession } from '../state/session.js';
 
 // Shown instead of the app when a released version of the documents is one this account has
@@ -95,6 +96,7 @@ export function PolicyUpdateScreen({ onOpen }: { onOpen: (doc: DocumentId) => vo
           <button type="button" className="btn-text" disabled={busy} onClick={() => void logout()}>
             Sign out instead
           </button>
+          <SupportLink />
         </div>
       </div>
     </main>

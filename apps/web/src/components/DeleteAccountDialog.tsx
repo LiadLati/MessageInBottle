@@ -2,6 +2,7 @@ import { useEffect, useId, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { ApiError, api } from '../api/client.js';
 import { focusableIn, nextTabTarget } from '../lib/focusTrap.js';
+import { SupportLink } from './SupportLink.js';
 
 // Settings → Delete account. Deletion is permanent, so it asks for the password again (a
 // borrowed session is not enough) and for an explicit confirmation, and it says plainly what
@@ -122,6 +123,9 @@ export function DeleteAccountDialog({
             {failure}
           </p>
         ) : null}
+        <p className="t-meta">
+          Not sure? <SupportLink label="Ask Help & Support first" className="link-inline" />
+        </p>
         <div className="confirm-actions">
           <button type="button" className="btn-secondary" disabled={busy} onClick={onCancel}>
             Keep my account

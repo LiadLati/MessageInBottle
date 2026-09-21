@@ -1,6 +1,6 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { POLICY_DOCUMENTS, RISK_POLICY_VERSION, policySetStatus } from '@mib/shared';
+import { POLICY_DOCUMENTS, RISK_POLICY_VERSION, SUPPORT_EMAIL, policySetStatus } from '@mib/shared';
 import type { PoliciesConfig } from './services/policies.js';
 import type { RetentionPolicy } from './services/retention.js';
 
@@ -51,6 +51,9 @@ export interface AppConfig {
   trustProxy: boolean;
   // Public URL of the web app, used to build links in e-mails.
   appUrl: string;
+  // The published support address shown on /support and in the legal documents. A public
+  // contact point, never a credential: nothing in the App holds a password or token for it.
+  supportEmail: string;
   mail: MailConfig;
   // Journey risk policy version applied to *new* journeys: 0 disables automatic outcomes,
   // RISK_POLICY_VERSION (3) enables the approved policy. Existing journeys keep the version
@@ -107,6 +110,7 @@ export function loadConfig(): AppConfig {
     corsOrigin: process.env.MIB_CORS_ORIGIN ?? 'http://localhost:5173',
     trustProxy: (process.env.MIB_TRUST_PROXY ?? 'false') === 'true',
     appUrl: process.env.MIB_APP_URL ?? 'http://localhost:5173',
+    supportEmail: process.env.MIB_SUPPORT_EMAIL ?? SUPPORT_EMAIL,
     mail: loadMailConfig(devMode),
     // The published set is the authority; there is no environment switch that can release
     // documents that are not released in code, or hold back ones that are.

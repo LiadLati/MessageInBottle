@@ -316,6 +316,13 @@ and the new `risk_decisions` table (one row per bottle per storm night, unique o
   survives anonymised with `deleted_at` set, because letters other people hold reference it.
   `login` and `resolveSession` already refuse a non-active account, so the status change alone
   ends access.
+- **Support.** `packages/shared/src/support.ts` holds the identity, the five categories and
+  their subjects, and `supportMailto` (percent-encoded subject). `http/legal-pages.ts` renders
+  `/support` from it with the address from `config.supportEmail` (`MIB_SUPPORT_EMAIL`), so an
+  override reaches every link on the page. It is a `mailto:` surface only: no form, no sender,
+  no store, and no credential anywhere. `SupportLink` in the web app is an ordinary link out to
+  the page, which is what keeps it reachable from the policy gate, a suspended account, an
+  appeal and the deletion dialog alike.
 - **No age data.** Nothing in the schema, the API or the interface collects or asserts an age;
   a test walks every production source file to keep it that way.
 

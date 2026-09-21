@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react';
 import { PUBLISHED_DOCUMENTS, type DocumentId } from '@mib/shared';
+import { SupportLink } from './SupportLink.js';
 import { useSession } from '../state/session.js';
 import { Avatar } from './ui.js';
 import { Icon } from '../design/Icon.js';
@@ -100,6 +101,7 @@ export function ProfileSheet({
           <button type="button" className="btn-text" onClick={onStanding}>
             Account standing
           </button>
+          <SupportLink className="btn-secondary" />
           <button type="button" className="btn-text" onClick={() => void logout()}>
             Sign out
           </button>

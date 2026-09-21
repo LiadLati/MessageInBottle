@@ -1,4 +1,12 @@
-import { PUBLISHED_DOCUMENTS, type PolicyBlock, type PolicyDocument } from '@mib/shared';
+import {
+  PUBLISHED_DOCUMENTS,
+  SUPPORT_CATEGORIES,
+  SUPPORT_NAME,
+  SUPPORT_NEVER_SEND,
+  supportMailto,
+  type PolicyBlock,
+  type PolicyDocument,
+} from '@mib/shared';
 
 // The public legal pages: plain server-rendered HTML at stable URLs, with no sign-in, no
 // JavaScript and no PDF, so a store reviewer, a search engine or a person on any device can
@@ -49,17 +57,35 @@ footer.site { border-top:1px solid var(--line); margin-top:2.5rem; padding-top:1
   color:var(--muted); font-size:.88rem; }
 a { color:var(--accent); }
 @media (min-width: 40rem) { .wrap { padding-top:2.5rem; } h1 { font-size:1.9rem; } }
+.address { display:flex; flex-wrap:wrap; align-items:center; gap:.6rem; margin:.4rem 0 0; }
+.address code { font-size:1.02rem; font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  background:var(--bg); border:1px solid var(--line); border-radius:8px; padding:.35rem .55rem;
+  user-select:all; -webkit-user-select:all; word-break:break-all; }
+.mail-btn { display:inline-block; padding:.7rem 1.1rem; border-radius:999px; font-weight:600;
+  text-decoration:none; color:#fff; background:var(--accent); }
+.mail-btn:hover, .mail-btn:focus { filter:brightness(1.08); text-decoration:none; }
+@media (prefers-color-scheme: dark) { .mail-btn { color:#06222c; } }
+ul.cats { list-style:none; padding:0; margin:.6rem 0 0; display:grid; gap:.7rem; }
+ul.cats li { margin:0; border:1px solid var(--line); border-radius:10px; padding:.7rem .85rem;
+  background:var(--panel); }
+ul.cats a { font-weight:600; }
+ul.cats p { margin:.2rem 0 0; color:var(--muted); font-size:.92rem; }
+.warn { border-left:4px solid #b3372f; background:var(--panel); border-radius:0 8px 8px 0;
+  padding:.75rem .95rem; margin:1.2rem 0; }
+.warn ul { margin:.4rem 0 0; }
+@media (min-width: 40rem) { ul.cats { grid-template-columns:1fr 1fr; } }
 `;
 
 function nav(currentSlug: string): string {
   const items = [
-    ...PUBLISHED_DOCUMENTS.map((d) => ({ slug: d.slug, title: d.title })),
-    { slug: 'delete-account', title: 'Delete your account' },
+    ...PUBLISHED_DOCUMENTS.map((d) => ({ href: `/legal/${d.slug}`, slug: d.slug, title: d.title })),
+    { href: '/legal/delete-account', slug: 'delete-account', title: 'Delete your account' },
+    { href: '/support', slug: 'support', title: 'Support' },
   ];
-  return `<nav aria-label="Legal documents"><ul class="docs">${items
+  return `<nav aria-label="Legal and support"><ul class="docs">${items
     .map(
       (i) =>
-        `<li><a href="/legal/${i.slug}"${
+        `<li><a href="${i.href}"${
           i.slug === currentSlug ? ' aria-current="page"' : ''
         }>${esc(i.title)}</a></li>`,
     )
@@ -188,5 +214,56 @@ export function deletionDonePage(): string {
 <div class="notice"><p>The account is gone and every session has ended. You can close this page.</p></div>
 ${WHAT_HAPPENS}
 <p>If you want to use the App again, you are welcome to create a new account at any time.</p>`,
+  });
+}
+
+// ---------- the public support page ----------
+
+// Support is a published e-mail address and nothing more: no form, no inbox integration, no
+// ticket store. The page therefore needs no JavaScript at all — every control is a `mailto:`
+// link, and the address is shown as selectable text so it can be copied by hand on a device
+// with no mail client configured.
+export function supportPage(email: string): string {
+  const categories = SUPPORT_CATEGORIES.map(
+    (c) => `<li>
+<a href="${esc(supportMailto(email, c.subject))}">${esc(c.label)}</a>
+<p>${esc(c.hint)}</p>
+</li>`,
+  ).join('');
+
+  return page({
+    title: 'Support',
+    description: `Contact ${SUPPORT_NAME} about the App: account help, privacy requests, safety reports and technical problems.`,
+    slug: 'support',
+    body: `<h1>Support</h1>
+<p>${esc(SUPPORT_NAME)} answers questions about the App — your account, your privacy, safety concerns and anything that is not working.</p>
+
+<div class="card">
+<h2>Contact ${esc(SUPPORT_NAME)}</h2>
+<p class="address">
+<a class="mail-btn" href="${esc(supportMailto(email, `${SUPPORT_NAME} — Other`))}">Contact Support</a>
+<code>${esc(email)}</code>
+</p>
+<p class="meta">If your device cannot open an email client, select the address above and copy it into the mail app you use.</p>
+</div>
+
+<h2>What are you writing about?</h2>
+<p>Each heading opens a message to the same address with the subject filled in, so it reaches the right place faster. You can also write without choosing one.</p>
+<ul class="cats">${categories}</ul>
+
+<div class="warn">
+<p><strong>Never send these to support, or to anyone claiming to be support:</strong></p>
+<ul>${SUPPORT_NEVER_SEND.map((i) => `<li>${esc(i)}</li>`).join('')}</ul>
+<p class="meta">Support will never ask you for any of them. A message that does is not from us.</p>
+</div>
+
+<h2>Reporting something inside the App</h2>
+<p>If a letter you can read breaks the rules, reporting it from the reader is faster than writing here: it opens a case an administrator reviews, and it hides the letter from your account straight away. If a person may be in immediate danger, contact your local emergency service first — the App is not an emergency service.</p>
+
+<h2>Documents</h2>
+<ul>
+${PUBLISHED_DOCUMENTS.map((d) => `<li><a href="/legal/${d.slug}">${esc(d.title)}</a> — ${esc(d.summary)}</li>`).join('\n')}
+<li><a href="/legal/delete-account">Delete your account</a> — remove your account and its associated data without reinstalling the App.</li>
+</ul>`,
   });
 }

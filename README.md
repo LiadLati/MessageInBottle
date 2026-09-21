@@ -361,8 +361,16 @@ asking for the password again and an explicit confirmation, and both running the
 transactional operation: sessions end at once, the profile and identifiers go, friendships and
 blocks go, letters still at sea are cancelled and cleared, letters already received stay with
 their recipient, and moderation evidence is kept only where an open report, a pending appeal or
-an active restriction still needs it. `docs/LEGAL_DOCUMENTS.md` has the detail and the
-remaining Play Console tasks.
+an active restriction still needs it. **Support** is a published address, `Sea You Support` at `seayou.support@gmail.com`, served as a
+public page at `/support` beside the legal pages: no sign-in, no JavaScript, five headings that
+open a message with the subject already set, the address shown as selectable text, and a plain
+warning never to send a password, a verification code, payment details or an identity document.
+It is a `mailto:` link only — no form, no inbox integration, no ticket store — and the address is
+configurable with `MIB_SUPPORT_EMAIL`. **Help & Support** in the account sheet opens it, and so do
+links on the sign-in screen, the policy-acceptance screen, the account-standing screen and the
+deletion dialog, so it stays reachable while signed out, gated, suspended, appealing or deleting.
+
+`docs/LEGAL_DOCUMENTS.md` has the detail and the remaining Play Console tasks.
 
 ## API overview
 

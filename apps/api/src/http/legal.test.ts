@@ -1,6 +1,6 @@
 import { eq } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
-import { PUBLISHED_DOCUMENTS } from '@mib/shared';
+import { PUBLISHED_DOCUMENTS, SUPPORT_EMAIL } from '@mib/shared';
 import { createApp } from './app.js';
 import * as t from '../db/schema.js';
 import { DEV_SEED_PASSWORD } from '../db/seed-data.js';
@@ -60,8 +60,12 @@ describe('public legal pages', () => {
     expect(cs).toMatch(/permanent ban/i);
     expect(cs).toMatch(/valid legal requests/i);
     expect(cs).toMatch(/support page/i);
-    // No personal identity or address of any kind is exposed.
-    expect(cs).not.toMatch(/@[a-z0-9.-]+\.[a-z]{2,}/i);
+    // It names the project support contact and nothing personal: one address on the page, and
+    // it is the support address.
+    expect(cs).toContain(SUPPORT_EMAIL);
+    expect(cs).toContain('/support');
+    const addresses = new Set(cs.match(/[\w.+-]+@[\w.-]+\.[a-z]{2,}/gi) ?? []);
+    expect([...addresses]).toEqual([SUPPORT_EMAIL]);
   });
 
   it('answer 404 for an unknown document', async () => {

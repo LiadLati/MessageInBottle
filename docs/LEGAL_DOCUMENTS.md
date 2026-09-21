@@ -18,8 +18,9 @@ address, company, registration number or jurisdiction, and refer to the product 
 | Privacy Policy | `/legal/privacy` | acknowledged |
 | Child Safety Standards | `/legal/child-safety` | published for reference |
 | Delete your account | `/legal/delete-account` | an interactive page, not a document |
+| Support | `/support` | a contact page, not a document |
 
-`/legal` lists them all. Every page is plain server-rendered HTML: no sign-in, no JavaScript,
+`/legal` lists them all, and every page links to `/support`. Every page is plain server-rendered HTML: no sign-in, no JavaScript,
 no PDF, indexable, and readable from a narrow phone upwards. They are served by the API so that
 the URL works on its own, which is what a store listing needs.
 
@@ -113,6 +114,36 @@ left-to-right, has no effective statement, or contains unfinished text (an unres
 field, "TBD", "TODO", "placeholder", "draft" or any Hebrew). It runs in the tests and at API
 boot, so an unfinished document cannot reach a person.
 
+## Support
+
+`Sea You Support` at `seayou.support@gmail.com`, served at `/support`: public, unauthenticated,
+server-rendered, and free of JavaScript, like the legal pages beside it. The address comes from
+`MIB_SUPPORT_EMAIL`, which defaults to that address in every environment and can be overridden
+in production; the page and all of its links follow the configured value.
+
+Support is a `mailto:` link and nothing else — there is no form, no inbox integration, no SMTP
+sender and no ticket store in the App, and nothing anywhere holds or asks for a password, an app
+password, an OAuth token, SMTP credentials or a verification code for the address. The page says
+plainly that support will never ask for a password, a verification code, Gmail credentials,
+payment details or identity documents.
+
+Five headings open the same address with the subject already set, percent-encoded so an em dash
+survives every mail client: Account help, Privacy request, Safety or abusive content (subject
+"Safety report"), Technical problem, and Other. The address is also shown as selectable text for
+a device with no mail client configured.
+
+**Reachable from everywhere it is needed.** `SupportLink` is one component rendering an ordinary
+link to `/support` in a new tab, so no gate or restriction can intercept it. It appears in the
+account sheet as **Help & Support**, on the sign-in screen, on the policy-acceptance screen, on
+the account-standing screen (suspended, banned, and while appealing) and in the account-deletion
+dialog. The development server proxies `/support` and `/legal` to the API, giving development
+the single origin production serves.
+
+The Terms of Use, Privacy Policy and Child Safety Standards point at `/support` instead of an
+unspecified page, and the Privacy Policy and Child Safety Standards name the address itself. No
+personal name, address, country, company detail, response-time promise or jurisdiction claim
+appears in any of them.
+
 ## Still to do in the Play Console (configuration, not code)
 
 These cannot be satisfied by wording or by this repository:
@@ -127,7 +158,6 @@ These cannot be satisfied by wording or by this repository:
    deletion URL; the in-app path already exists.
 5. **Developer account verification** — the account holder verifies their identity privately
    with Google. Deliberately not written into the in-app documents.
-6. **Store support contact** — supply an active project support address for the listing, not a
-   personal one. The documents point at "the Support and Privacy Request options in the App and
-   on its public support page"; that support page and its contact route still need to exist at
-   the deployed domain.
+6. **Store support contact** — give `seayou.support@gmail.com` as the listing's support address,
+   and the deployed `/support` as the support URL. Both now exist; only the Play Console entry
+   remains.
