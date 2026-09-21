@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { SentBottleDto } from '@mib/shared';
+import { POLICY_IDS, type PolicyId, type SentBottleDto } from '@mib/shared';
 import { api } from './api/client.js';
 import { Nav, type Tab } from './components/Nav.js';
+import { PolicyDialog } from './components/PolicyDialog.js';
 import { ProfileSheet } from './components/ProfileSheet.js';
 import { useAsync } from './lib/useAsync.js';
 import { useTopSlot } from './lib/useTopSlot.js';
@@ -12,6 +13,7 @@ import { LoginScreen } from './screens/LoginScreen.js';
 import { MyShoreScreen } from './screens/MyShoreScreen.js';
 import { NotificationsScreen } from './screens/NotificationsScreen.js';
 import { OceanScreen } from './screens/OceanScreen.js';
+import { PolicyUpdateScreen } from './screens/PolicyUpdateScreen.js';
 import { ShoreSetupScreen } from './screens/ShoreSetupScreen.js';
 import { WriteScreen } from './screens/WriteScreen.js';
 import { SessionProvider, useSession } from './state/session.js';
@@ -40,8 +42,39 @@ function readResetToken(): string | null {
   }
 }
 
+// A link such as /#privacy opens that document on load, signed in or not, so support replies
+// and the documents themselves can point at one another.
+function readPolicyHash(): PolicyId | null {
+  try {
+    const h = window.location.hash.replace(/^#/, '');
+    return (POLICY_IDS as readonly string[]).includes(h) ? (h as PolicyId) : null;
+  } catch {
+    return null;
+  }
+}
+
 function Shell() {
   const { user, loading } = useSession();
+  // The document dialog is owned here so it can open over the sign-in screen, over the app,
+  // and over the "updated terms" screen alike.
+  const [policyDoc, setPolicyDoc] = useState<PolicyId | null>(readPolicyHash);
+  const openPolicy = useCallback((doc: PolicyId) => setPolicyDoc(doc), []);
+  const closePolicy = useCallback(() => {
+    setPolicyDoc(null);
+    if (readPolicyHash()) window.history.replaceState({}, '', window.location.pathname);
+  }, []);
+  // A hash typed or followed while the app is already open opens the document too.
+  useEffect(() => {
+    const onHash = () => {
+      const doc = readPolicyHash();
+      if (doc) setPolicyDoc(doc);
+    };
+    window.addEventListener('hashchange', onHash);
+    return () => window.removeEventListener('hashchange', onHash);
+  }, []);
+  const policyDialog = policyDoc ? (
+    <PolicyDialog initial={policyDoc} onClose={closePolicy} />
+  ) : null;
   const { phase } = useWeather();
   const [resetToken, setResetToken] = useState<string | null>(readResetToken);
   const [tab, setTab] = useState<Tab>('ocean');
@@ -106,10 +139,33 @@ function Shell() {
   }, []);
 
   if (resetToken) {
-    return <LoginScreen resetToken={resetToken} onResetDone={() => setResetToken(null)} />;
+    return (
+      <>
+        <LoginScreen
+          resetToken={resetToken}
+          onResetDone={() => setResetToken(null)}
+          onOpenPolicy={openPolicy}
+        />
+        {policyDialog}
+      </>
+    );
   }
   if (loading) return <main className="deck-screen" aria-busy />;
-  if (!user) return <LoginScreen />;
+  if (!user)
+    return (
+      <>
+        <LoginScreen onOpenPolicy={openPolicy} />
+        {policyDialog}
+      </>
+    );
+  // A released version this account has not accepted: nothing else until it has, or signs out.
+  if (user.policies.required)
+    return (
+      <>
+        <PolicyUpdateScreen onOpen={openPolicy} />
+        {policyDialog}
+      </>
+    );
 
   const shoreName = chart.data?.shores.find((s) => s.id === user.shoreId)?.name ?? null;
 
@@ -210,8 +266,14 @@ function Shell() {
       </div>
       {immersive ? null : <DevPanel refreshKey={epoch} onChanged={() => setEpoch((e) => e + 1)} />}
       {profileOpen ? (
-        <ProfileSheet shoreName={shoreName} onChangeShore={chooseShore} onClose={closeProfile} />
+        <ProfileSheet
+          shoreName={shoreName}
+          onChangeShore={chooseShore}
+          onOpenPolicy={openPolicy}
+          onClose={closeProfile}
+        />
       ) : null}
+      {policyDialog}
       {immersive ? null : (
         <Nav
           active={tab}

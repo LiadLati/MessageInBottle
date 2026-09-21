@@ -10,7 +10,14 @@ import * as t from '../db/schema.js';
 import { DEV_SEED_PASSWORD } from '../db/seed-data.js';
 import { seedChart, seedUsers } from '../db/seed.js';
 import { DUMMY_PASSWORD_HASH, hashPassword, verifyPassword } from '../lib/password.js';
-import { T0, createTestWorld, loginAs, releaseInput, testConfig } from '../test/harness.js';
+import {
+  T0,
+  acceptCurrent,
+  createTestWorld,
+  loginAs,
+  releaseInput,
+  testConfig,
+} from '../test/harness.js';
 
 type App = ReturnType<typeof createApp>;
 const json = (body: unknown, token?: string) => ({
@@ -33,7 +40,7 @@ const register = (
     .replace(/[^a-z0-9_]/g, '')}@example.test`,
 ) =>
   app.request('/api/auth/register', {
-    ...json({ username, email, password }),
+    ...json({ username, email, password, policies: acceptCurrent() }),
     headers: { 'content-type': 'application/json', ...extra },
   });
 const login = (app: App, username: string, password: string, extra: Record<string, string> = {}) =>

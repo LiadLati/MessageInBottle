@@ -1,4 +1,5 @@
 import type {
+  AccountPoliciesDto,
   ChartResponse,
   DevStatus,
   FriendsResponse,
@@ -7,6 +8,7 @@ import type {
   NotificationDto,
   OpenedLetterDto,
   OutcomeVisibilityDto,
+  PolicyAcceptanceRequest,
   PublicOceanResponse,
   ReleasePreviewResponse,
   SentBottleDto,
@@ -91,8 +93,17 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
 
 export const api = {
   health: () => request<HealthResponse>('GET', '/health'),
-  register: (username: string, email: string, password: string) =>
-    request<SessionResponse>('POST', '/auth/register', { username, email, password }),
+  register: (
+    username: string,
+    email: string,
+    password: string,
+    policies: PolicyAcceptanceRequest,
+  ) => request<SessionResponse>('POST', '/auth/register', { username, email, password, policies }),
+  // Terms, guidelines and privacy: the standing of the signed-in account against the current
+  // versions, and accepting them from the "updated terms" screen.
+  policyStanding: () => request<AccountPoliciesDto>('GET', '/policies/me/standing'),
+  acceptPolicies: (policies: PolicyAcceptanceRequest) =>
+    request<AccountPoliciesDto>('POST', '/policies/accept', policies),
   forgotPassword: (email: string) =>
     request<{ ok: boolean }>('POST', '/auth/password/forgot', { email }),
   resetPassword: (token: string, password: string) =>

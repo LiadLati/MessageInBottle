@@ -1,6 +1,15 @@
 import { useEffect, useId, useState, type FormEvent } from 'react';
-import { confirmationProblem, emailProblem, passwordProblem, usernameProblem } from '@mib/shared';
+import {
+  POLICY_DOCUMENTS,
+  confirmationProblem,
+  currentPolicyVersions,
+  emailProblem,
+  passwordProblem,
+  usernameProblem,
+  type PolicyId,
+} from '@mib/shared';
 import { ApiError, UNREACHABLE, api, type HealthResponse } from '../api/client.js';
+import { EMPTY_CONSENT, PolicyConsent, consentProblems } from '../components/PolicyConsent.js';
 import { Icon } from '../design/Icon.js';
 import { useSession } from '../state/session.js';
 
@@ -10,6 +19,8 @@ interface Props {
   // Present when the app was opened from a password-reset link.
   resetToken?: string | undefined;
   onResetDone?: (() => void) | undefined;
+  // Opens one of the three documents over this screen (the shell owns the dialog).
+  onOpenPolicy: (doc: PolicyId) => void;
 }
 
 // Turns an API failure into one sentence for the person; sign-in failures stay generic on
@@ -20,6 +31,10 @@ function describeFailure(err: unknown, mode: Mode): string {
     if (err.status === 401) return 'Incorrect username or password.';
     if (err.code === 'username_taken') return 'That username is already taken. Choose another.';
     if (err.code === 'email_taken') return 'That email is already registered. Sign in instead.';
+    if (err.code === 'policy_version_stale')
+      return 'The Terms or Privacy Policy changed while this page was open. Reload and read them again.';
+    if (err.code === 'policies_not_released')
+      return 'Registration is closed until the Terms of Use and Privacy Policy are published.';
     if (err.code === 'reset_invalid')
       return 'This reset link is invalid or has expired. Request a new one.';
     if (err.status === 429) {
@@ -164,9 +179,10 @@ function DevMailNotice({ health }: { health: HealthResponse }) {
   );
 }
 
-export function LoginScreen({ resetToken, onResetDone }: Props) {
+export function LoginScreen({ resetToken, onResetDone, onOpenPolicy }: Props) {
   const { login, register } = useSession();
   const [mode, setMode] = useState<Mode>(resetToken ? 'reset' : 'signin');
+  const [consent, setConsent] = useState(EMPTY_CONSENT);
   const [username, setUsername] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -216,8 +232,10 @@ export function LoginScreen({ resetToken, onResetDone }: Props) {
   };
   const show = (field: keyof typeof problems) =>
     (touched[field] || submitted) && problems[field] ? problems[field] : null;
+  const consentOk =
+    !registering || (!consentProblems(consent).terms && !consentProblems(consent).privacy);
   const formValid =
-    !problems.username && !problems.email && !problems.password && !problems.confirm;
+    !problems.username && !problems.email && !problems.password && !problems.confirm && consentOk;
   const touch = (field: keyof typeof problems) => () =>
     setTouched((t) => ({ ...t, [field]: true }));
 
@@ -229,6 +247,7 @@ export function LoginScreen({ resetToken, onResetDone }: Props) {
     setTouched({});
     setPassword('');
     setConfirm('');
+    setConsent(EMPTY_CONSENT);
   };
 
   const submit = async (e: FormEvent) => {
@@ -238,7 +257,13 @@ export function LoginScreen({ resetToken, onResetDone }: Props) {
     if (!formValid) return;
     setBusy(true);
     try {
-      if (registering) await register(username.trim(), email.trim(), password);
+      if (registering)
+        await register(username.trim(), email.trim(), password, {
+          acceptTerms: true,
+          acceptGuidelines: true,
+          acknowledgePrivacy: true,
+          versions: currentPolicyVersions(),
+        });
       else if (forgot) {
         await api.forgotPassword(email.trim());
         setSuccess(
@@ -401,6 +426,15 @@ export function LoginScreen({ resetToken, onResetDone }: Props) {
               />
             </div>
           ) : null}
+          {registering ? (
+            <PolicyConsent
+              value={consent}
+              onChange={setConsent}
+              onOpen={onOpenPolicy}
+              showProblems={submitted}
+              disabled={busy}
+            />
+          ) : null}
           {failure ? (
             <p className="note error" role="alert">
               {failure}
@@ -466,6 +500,19 @@ export function LoginScreen({ resetToken, onResetDone }: Props) {
           A shore is an app anchor, not a real location — no GPS is ever collected. Letters can
           strand or be lost.
         </p>
+        <nav className="policy-links" aria-label="Terms and privacy">
+          {POLICY_DOCUMENTS.map((d) => (
+            <button
+              key={d.id}
+              type="button"
+              className="btn-text"
+              disabled={busy}
+              onClick={() => onOpenPolicy(d.id)}
+            >
+              {d.title}
+            </button>
+          ))}
+        </nav>
       </div>
     </main>
   );

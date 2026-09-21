@@ -1,5 +1,5 @@
 import { eq } from 'drizzle-orm';
-import { RISK_POLICY_VERSION } from '@mib/shared';
+import { RISK_POLICY_VERSION, currentPolicyVersions } from '@mib/shared';
 import type { AppConfig } from '../config.js';
 import { createDb, runMigrations, type Db } from '../db/client.js';
 import * as t from '../db/schema.js';
@@ -45,6 +45,7 @@ export function testConfig(overrides: Partial<AppConfig> = {}): AppConfig {
       smtp: { host: '', port: 587, secure: false, user: '', pass: '' },
     },
     riskPolicyVersion: RISK_POLICY_VERSION,
+    policies: { status: 'draft' },
     ...overrides,
   };
 }
@@ -116,5 +117,15 @@ export function releaseInput(recipientId: string, key = 'key-0000000001') {
     font: 'handwriting' as const,
     disclosureAcknowledged: true as const,
     idempotencyKey: key,
+  };
+}
+
+// The registration payload's acceptance block for the current documents.
+export function acceptCurrent() {
+  return {
+    acceptTerms: true as const,
+    acceptGuidelines: true as const,
+    acknowledgePrivacy: true as const,
+    versions: currentPolicyVersions(),
   };
 }

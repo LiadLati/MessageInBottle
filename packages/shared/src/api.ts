@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { AccountPoliciesSchema } from './policies.js';
 import { BOTTLE_STATES, JOURNEY_EVENT_TYPES, LOSS_REASONS } from './bottle-state.js';
 import { LETTER_FONTS } from './fonts.js';
 import { LETTER_MAX_BYTES, LETTER_MAX_CHARACTERS, countLetterCharacters } from './letter.js';
@@ -48,6 +49,9 @@ export const SessionResponseSchema = z.object({
     // The IANA zone the account's nights are counted in (spec §9.3): first learned from the
     // device and re-synced whenever the app starts or resumes. Null until a device has said.
     timeZone: z.string().nullable(),
+    // What this account has accepted against the current documents, and whether it must be
+    // asked again before using the app (policies.ts).
+    policies: AccountPoliciesSchema,
   }),
 });
 

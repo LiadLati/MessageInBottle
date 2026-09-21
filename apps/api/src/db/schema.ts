@@ -34,6 +34,28 @@ export const users = sqliteTable('users', {
   timeZoneSince: integer('time_zone_since'),
 });
 
+// What each account accepted or acknowledged, per document and version, and when. Append-only:
+// a newer version accepted later is a new row, so the history of what a person agreed to is
+// kept. The latest row per (user, document) is compared with the current version to decide
+// whether the person must be asked again. Accounts that predate this table have no rows and
+// are never treated as having accepted anything.
+export const policyAcceptances = sqliteTable(
+  'policy_acceptances',
+  {
+    id: text('id').primaryKey(),
+    userId: text('user_id')
+      .notNull()
+      .references(() => users.id),
+    document: text('document', { enum: ['terms', 'guidelines', 'privacy'] }).notNull(),
+    version: text('version').notNull(),
+    action: text('action', { enum: ['accepted', 'acknowledged'] }).notNull(),
+    // Where the person did it: the registration form, or the "updated terms" screen later.
+    source: text('source', { enum: ['registration', 'update'] }).notNull(),
+    acceptedAt: integer('accepted_at').notNull(),
+  },
+  (t) => [index('policy_acceptances_user_idx').on(t.userId, t.document, t.acceptedAt)],
+);
+
 // Password-reset tokens: only the SHA-256 of the token is stored, each token is single-use and
 // expires 30 minutes after it was requested. Rows are kept after use for auditing.
 export const passwordResets = sqliteTable(

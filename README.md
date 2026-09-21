@@ -261,6 +261,24 @@ instead of blaming the request. Check, in order:
 3. Nothing else already occupying port 3001 (the API reports `EADDRINUSE` if so; start it with a
    different `MIB_PORT`, and point the web app at it with `MIB_API_URL`).
 
+### Terms of Use, Community Guidelines and Privacy Policy
+
+The three documents are shown before registration (links on the sign-in screen and from the
+registration form) and again from the account sheet. Creating an account needs two separate,
+initially unchecked decisions — accepting the Terms and Community Guidelines, and acknowledging
+the Privacy Policy — and the server refuses anything less, recording the version of each document
+and the time of acceptance per account (`policy_acceptances`). Accounts that existed before the
+documents are never treated as having accepted them: once a released version exists they are
+asked on their next sign-in and can do nothing else until they accept or sign out, and the same
+happens after every later change.
+
+**The texts are a working draft (`0.1-draft`) and are not released.** They were checked against
+what the product does, but the operator's details, the minimum age, the legal basis, the
+deployment's providers, retention periods and a legal review are still open, and every such gap
+is a visible marker in the text. A production build refuses registration while the documents are
+drafts, so nobody is asked to agree to unfinished text. `docs/LEGAL_DOCUMENTS.md` has the
+comparison with the product, the full open list and the release steps.
+
 ## API overview
 
 Outcome-related endpoints (all require a session): `GET /api/ocean/public` (each entry carries

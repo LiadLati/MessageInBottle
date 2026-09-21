@@ -284,6 +284,37 @@ and the new `risk_decisions` table (one row per bottle per storm night, unique o
   opened, and clears when that bottle is opened — never by reading the inbox. The top strip
   remains an *arrival* banner and reacts to unread `received_arrived` events only.
 
+## Terms, guidelines and privacy: documents, acceptance and the release gate
+
+- **One source.** `packages/shared/src/policies.ts` holds the three documents as structured
+  blocks (headings, paragraphs, lists, tables — never HTML), their `version`, `status`
+  (`draft` | `released`) and `effectiveAt`, plus `[[…]]` inline markers for every fact still
+  to be decided. The API validates acceptances against the versions there and the web renders
+  from there, so what was shown and what was recorded cannot diverge. `openItemsOf` lists the
+  markers; `validatePolicySet` refuses a released document that still has one, and the API calls
+  it at boot.
+- **Acceptance.** `RegisterRequestSchema.policies` requires three literal `true` flags
+  (`acceptTerms`, `acceptGuidelines`, `acknowledgePrivacy`) and the versions the form showed;
+  `recordAcceptances` writes one `policy_acceptances` row per document (version, action, source,
+  real-clock time) inside the same transaction as the `users` row. `409 policy_version_stale`
+  when the versions are not current. Existing accounts accept through `POST /api/policies/accept`
+  with the same payload; rows are append-only, so history is kept.
+- **Standing and the gate.** `accountPolicies` derives, per document, the latest accepted version
+  beside the current one; `required` is true only when the set is released and any document
+  differs (never-accepted included). `requirePolicies` sits after `requireAuth` on chart,
+  friends, bottles, shore, ocean and notifications and answers `403 policies_required`; auth,
+  the documents, acceptance and sign-out stay open. The session DTO carries `policies`, and the
+  web shows `PolicyUpdateScreen` instead of the app while `required`.
+- **Release gate.** `assertAcceptancesAllowed`: in development, acceptances of a draft are taken
+  (that is how the flow is built and tested); in production, registration answers
+  `503 policies_not_released` until the set is released in code. `MIB_POLICIES_PREVIEW_RELEASED`
+  (development only) treats the draft as released to exercise the existing-account path.
+- **Web.** `PolicyDialog` (modal, focus-trapped, three tabs) over the sign-in screen, the app and
+  the update screen; `PolicyDocumentView` renders RTL Hebrew with a bilingual draft banner and
+  highlighted open fields; `PolicyConsent` is the pair of unchecked controls with inline links,
+  shared by registration and the update screen; `ProfileSheet` links the documents and states
+  what the account accepted and when. `/#terms` etc. deep-link a document.
+
 ## Deliberately not implemented (per task scope)
 
 AI writing/rewriting, random recipients, appended notes, chat, GPS-assisted shore suggestion,

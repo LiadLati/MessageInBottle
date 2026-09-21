@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { UsernameSchema } from './api.js';
+import { PolicyAcceptanceRequestSchema } from './policies.js';
 
 // Credential rules shared by the API (authoritative) and the client (early, friendly messages).
 export const PASSWORD_MIN_LENGTH = 8;
@@ -21,10 +22,14 @@ export function normalizeEmail(email: string): string {
 }
 export const EmailSchema = z.string().trim().max(EMAIL_MAX_LENGTH).email();
 
+// Creating an account requires accepting the Terms of Use and the Community Guidelines and
+// acknowledging the Privacy Policy, each as a literal true, with the versions that were shown.
+// There is no default and no way to register without them.
 export const RegisterRequestSchema = z.object({
   username: UsernameSchema,
   email: EmailSchema,
   password: PasswordSchema,
+  policies: PolicyAcceptanceRequestSchema,
 });
 
 export const ForgotPasswordRequestSchema = z.object({

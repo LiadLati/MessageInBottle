@@ -1,6 +1,7 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { RISK_POLICY_VERSION } from '@mib/shared';
+import { POLICY_DOCUMENTS, RISK_POLICY_VERSION, policySetStatus } from '@mib/shared';
+import type { PoliciesConfig } from './services/policies.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 export const API_ROOT = path.resolve(here, '..');
@@ -36,6 +37,9 @@ export interface AppConfig {
   // RISK_POLICY_VERSION (3) enables the approved policy. Existing journeys keep the version
   // they were released under.
   riskPolicyVersion: number;
+  // Terms, guidelines and privacy (services/policies.ts): whether the shipped set counts as
+  // released. Read from the documents themselves; overridable to 'released' in development only.
+  policies: PoliciesConfig;
 }
 
 export type MailProvider = 'outbox' | 'smtp' | 'disabled';
@@ -63,6 +67,12 @@ export function loadConfig(): AppConfig {
     trustProxy: (process.env.MIB_TRUST_PROXY ?? 'false') === 'true',
     appUrl: process.env.MIB_APP_URL ?? 'http://localhost:5173',
     mail: loadMailConfig(devMode),
+    policies: {
+      status:
+        devMode && (process.env.MIB_POLICIES_PREVIEW_RELEASED ?? 'false') === 'true'
+          ? 'released'
+          : policySetStatus(POLICY_DOCUMENTS),
+    },
     riskPolicyVersion: envInt('MIB_RISK_POLICY_VERSION', RISK_POLICY_VERSION),
   };
 }

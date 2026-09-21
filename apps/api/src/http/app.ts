@@ -11,6 +11,7 @@ import { devRoutes } from './routes/dev.js';
 import { friendRoutes } from './routes/friends.js';
 import { notificationRoutes } from './routes/notifications.js';
 import { oceanRoutes } from './routes/ocean.js';
+import { policyRoutes } from './routes/policies.js';
 import { shoreRoutes } from './routes/shore.js';
 
 export type AppEnv = { Variables: { ctx: AppContext; user: AuthUser; token: string } };
@@ -42,6 +43,7 @@ export function createApp(ctx: AppContext) {
     }),
   );
   app.route('/api/auth', authRoutes());
+  app.route('/api/policies', policyRoutes());
   app.route('/api/chart', chartRoutes());
   app.route('/api/friends', friendRoutes());
   app.route('/api/bottles', bottleRoutes());

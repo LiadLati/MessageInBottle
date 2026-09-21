@@ -5,11 +5,12 @@ import { acknowledgeOutcome, markOutcomeSeen } from '../../services/outcomes.js'
 import { previewRelease, releaseBottle } from '../../services/release.js';
 import type { AppEnv } from '../app.js';
 import { requireAuth } from '../middleware/auth.js';
+import { requirePolicies } from '../middleware/policies.js';
 import { jsonBody } from '../validate.js';
 
 export function bottleRoutes() {
   const r = new Hono<AppEnv>();
-  r.use('*', requireAuth);
+  r.use('*', requireAuth, requirePolicies);
   r.get('/sent', (c) => c.json({ bottles: listSentBottles(c.get('ctx'), c.get('user')) }));
   r.get('/sent/:id', (c) =>
     c.json({ bottle: getSentBottle(c.get('ctx'), c.get('user'), c.req.param('id')) }),

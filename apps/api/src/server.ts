@@ -20,8 +20,11 @@ async function main(): Promise<void> {
   const { runJourneyTick } = await import('./services/journey.js');
   const { activatePublicListings } = await import('./services/risk.js');
   const { serve } = await import('@hono/node-server');
+  const { assertPolicySetServeable } = await import('./services/policies.js');
 
   const config = loadConfig();
+  // A released document set that still carries an unresolved field must never be served.
+  assertPolicySetServeable();
   const { db } = createDb(config.databasePath);
   runMigrations(db);
   seedChart(db, config.defaultShoreCapacity, Date.now());

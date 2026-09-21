@@ -7,7 +7,7 @@ import {
   useState,
   type ReactNode,
 } from 'react';
-import type { MeResponse, SessionResponse } from '@mib/shared';
+import type { MeResponse, PolicyAcceptanceRequest, SessionResponse } from '@mib/shared';
 import { api, setAuthToken } from '../api/client.js';
 
 const STORAGE_KEY = 'mib.session.token';
@@ -18,7 +18,12 @@ interface SessionState {
   user: MeResponse | null;
   loading: boolean;
   login: (username: string, password: string) => Promise<void>;
-  register: (username: string, email: string, password: string) => Promise<void>;
+  register: (
+    username: string,
+    email: string,
+    password: string,
+    policies: PolicyAcceptanceRequest,
+  ) => Promise<void>;
   logout: () => Promise<void>;
   refresh: () => Promise<void>;
   /** Replace the signed-in user with a fresher copy from the server (e.g. after a zone sync). */
@@ -78,8 +83,8 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     [start],
   );
   const register = useCallback(
-    async (username: string, email: string, password: string) =>
-      start(await api.register(username, email, password)),
+    async (username: string, email: string, password: string, policies: PolicyAcceptanceRequest) =>
+      start(await api.register(username, email, password, policies)),
     [start],
   );
 

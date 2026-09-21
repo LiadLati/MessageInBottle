@@ -17,7 +17,7 @@ import { ManualClock, T0, createTestWorld, releaseInput, testConfig } from '../t
 
 type Row = Record<string, unknown>;
 // The migrations an older installation does not have yet: everything from this branch.
-const NEWEST = new Set(['0008_journey_rules', '0009_account_time_zone']);
+const NEWEST = new Set(['0008_journey_rules', '0009_account_time_zone', '0010_policy_acceptances']);
 
 function tableNames(sqlite: Database.Database): string[] {
   return sqlite
@@ -90,6 +90,7 @@ describe('migrating a populated database', () => {
     expect(tableNames(sqlite)).not.toContain('risk_decisions');
     expect(columnsOf(sqlite, 'bottles')).not.toContain('risk_policy_version');
     expect(columnsOf(sqlite, 'users')).not.toContain('time_zone');
+    expect(tableNames(sqlite)).not.toContain('policy_acceptances');
     sqlite.pragma('foreign_keys = OFF');
     for (const [table, rows] of Object.entries(dump(sourceSqlite))) {
       if (!tableNames(sqlite).includes(table)) continue;
@@ -112,6 +113,7 @@ describe('migrating a populated database', () => {
     expect(columnsOf(sqlite, 'bottles')).toContain('public_deadline_at');
     expect(columnsOf(sqlite, 'public_openings')).toContain('session_expires_at');
     expect(columnsOf(sqlite, 'users')).toContain('time_zone_since');
+    expect(tableNames(sqlite)).toContain('policy_acceptances');
     expect(columnsOf(sqlite, 'bottles')).toContain('outcome_at');
     seedChart(db, testConfig().defaultShoreCapacity, T0);
 

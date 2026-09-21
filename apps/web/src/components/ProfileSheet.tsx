@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react';
+import { POLICY_DOCUMENTS, type PolicyId } from '@mib/shared';
 import { useSession } from '../state/session.js';
 import { Avatar } from './ui.js';
 import { Icon } from '../design/Icon.js';
@@ -6,11 +7,36 @@ import { Icon } from '../design/Icon.js';
 interface Props {
   shoreName: string | null;
   onChangeShore: () => void;
+  onOpenPolicy: (doc: PolicyId) => void;
   onClose: () => void;
 }
 
+// One line saying what this account accepted and when — or that it never has, which is the
+// truthful state of every account that predates the documents.
+function acceptanceLine(p: {
+  status: 'draft' | 'released';
+  documents: Array<{
+    acceptedVersion: string | null;
+    acceptedAt: string | null;
+    currentVersion: string;
+  }>;
+}): string {
+  const latest = p.documents
+    .map((d) => d.acceptedAt)
+    .filter((a): a is string => a !== null)
+    .sort()
+    .at(-1);
+  if (!latest) return 'You have not accepted a version of these documents yet.';
+  const current = p.documents.every((d) => d.acceptedVersion === d.currentVersion);
+  const when = new Date(latest).toLocaleDateString();
+  const version = p.documents[0]?.acceptedVersion ?? '';
+  return current
+    ? `Accepted version ${version} on ${when}.${p.status === 'draft' ? ' The documents are still a working draft.' : ''}`
+    : `You accepted version ${version} on ${when}; a newer version is waiting for you.`;
+}
+
 // The header avatar opens this instead of a permanent "signed in as" row (IA note on S1).
-export function ProfileSheet({ shoreName, onChangeShore, onClose }: Props) {
+export function ProfileSheet({ shoreName, onChangeShore, onOpenPolicy, onClose }: Props) {
   const { user, logout } = useSession();
   const first = useRef<HTMLButtonElement>(null);
   useEffect(() => {
@@ -68,6 +94,24 @@ export function ProfileSheet({ shoreName, onChangeShore, onClose }: Props) {
           <p className="t-meta">
             A shore is only an anchor in the app. It says nothing about where you live.
           </p>
+          <section aria-labelledby="profile-legal" className="stack" style={{ gap: 6 }}>
+            <h2 id="profile-legal" className="t-label">
+              Terms and privacy
+            </h2>
+            <div className="policy-links" style={{ justifyContent: 'flex-start' }}>
+              {POLICY_DOCUMENTS.map((d) => (
+                <button
+                  key={d.id}
+                  type="button"
+                  className="btn-text"
+                  onClick={() => onOpenPolicy(d.id)}
+                >
+                  {d.title}
+                </button>
+              ))}
+            </div>
+            <p className="t-meta">{acceptanceLine(user.policies)}</p>
+          </section>
         </div>
       </div>
     </div>

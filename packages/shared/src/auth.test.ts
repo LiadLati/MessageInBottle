@@ -10,6 +10,7 @@ import {
   passwordProblem,
   usernameProblem,
 } from './auth.js';
+import { currentPolicyVersions } from './policies.js';
 
 describe('credential rules', () => {
   it('normalizes usernames case-insensitively', () => {
@@ -39,8 +40,22 @@ describe('credential rules', () => {
         username: 'new_user',
         email: 'new@example.com',
         password: 'long enough',
+        policies: {
+          acceptTerms: true,
+          acceptGuidelines: true,
+          acknowledgePrivacy: true,
+          versions: currentPolicyVersions(),
+        },
       }).success,
     ).toBe(true);
+    // Without the acceptances there is no registration at all.
+    expect(
+      RegisterRequestSchema.safeParse({
+        username: 'new_user',
+        email: 'new@example.com',
+        password: 'long enough',
+      }).success,
+    ).toBe(false);
   });
 
   it('validates e-mail addresses and normalizes them', () => {
