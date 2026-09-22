@@ -89,6 +89,15 @@ export const SEED_USERS = [
   { username: 'dee', displayName: 'Dee', shoreId: null },
 ];
 
+// No seeded account holds a role. The two roles are disjoint, so exercising both locally means
+// two accounts, and both are granted the way they are granted in production:
+//
+//   pnpm --filter @mib/api admin:grant     -- --username ada --confirm <id>
+//   pnpm --filter @mib/api developer:grant -- --username bo  --confirm <id>
+//
+// Seeding them instead would be one fewer command and one more way for a role to appear
+// without anyone granting it.
+
 export const SEED_FRIENDSHIPS: Array<{ a: string; b: string; status: 'accepted' | 'pending' }> = [
   { a: 'ada', b: 'bo', status: 'accepted' },
   { a: 'ada', b: 'cy', status: 'accepted' },

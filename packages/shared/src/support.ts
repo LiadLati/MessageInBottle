@@ -1,13 +1,13 @@
 // The project's support identity, in one place. The public support page, the legal documents
-// and the App all read it from here, so the address a person is told to write to is the same
-// everywhere it appears.
+// and SeaYou itself all read it from here, so the address a person is told to write to is the
+// same everywhere it appears.
 //
 // The address is a public contact point, not a secret: nothing here holds or asks for a
 // password, an app password, an OAuth token, SMTP credentials or a verification code. Support
 // is a `mailto:` link and nothing more — there is no form, no inbox integration and no ticket
-// store in the App.
+// store in SeaYou.
 
-export const SUPPORT_NAME = 'Sea You Support';
+export const SUPPORT_NAME = 'SeaYou Support';
 export const SUPPORT_EMAIL = 'seayou.support@gmail.com';
 
 // Where the public support page lives. Same origin as the legal pages.
@@ -39,7 +39,7 @@ export const SUPPORT_CATEGORIES: readonly SupportCategory[] = [
     id: 'safety',
     label: 'Safety or abusive content',
     subject: `${SUPPORT_NAME} — Safety report`,
-    hint: 'Harassment, threats, or content that endangers someone. Reporting a letter inside the App is faster.',
+    hint: 'Harassment, threats, or content that endangers someone. Reporting a letter inside SeaYou is faster.',
   },
   {
     id: 'technical',
@@ -70,3 +70,9 @@ export const SUPPORT_NEVER_SEND = [
   'payment card or bank details',
   'identity documents, or photographs of them',
 ];
+
+// The one-sentence warning, shown wherever the support address is offered.
+export const SUPPORT_WARNING =
+  'Do not send passwords, verification codes, payment details or identity documents through ' +
+  'ordinary support requests. SeaYou Support will not request your password or verification ' +
+  'codes.';

@@ -205,11 +205,11 @@ export async function requestPasswordReset(ctx: AppContext, email: string): Prom
   const link = `${ctx.config.appUrl.replace(/\/$/, '')}/?reset=${token}`;
   await ctx.mailer.send({
     to: user.email!,
-    subject: 'Reset your Message in a Bottle password',
+    subject: 'Reset your SeaYou password',
     text: [
       `Hello ${user.displayName},`,
       '',
-      'Someone asked to reset the password for your Message in a Bottle account.',
+      'Someone asked to reset the password for your SeaYou account.',
       'If that was you, open this link within 30 minutes:',
       '',
       link,

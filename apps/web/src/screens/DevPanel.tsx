@@ -4,15 +4,24 @@ import { ErrorNote } from '../components/ui.js';
 import { formatDate } from '../lib/format.js';
 import { useAsync } from '../lib/useAsync.js';
 import { useTopSlot } from '../lib/useTopSlot.js';
+import { useSession } from '../state/session.js';
 import { useWeather, type WeatherOverride } from '../state/weather.js';
 
-// Development-only time-travel controls. They exist only in development builds
-// (`import.meta.env.DEV`) and only while the API reports dev mode; production bundles never
-// render them. The bar sits in the top stack so it pushes content down instead of covering it.
+// Development-only simulation controls, behind three independent gates:
+//
+//   • the bundle: they exist only in development builds (`import.meta.env.DEV`);
+//   • the account: only the `developer` role sees them. An administrator does not — deciding
+//     real reports and fabricating test events are different jobs, and the roles are disjoint;
+//   • the server: every endpoint behind this panel requires the developer role *and* dev mode,
+//     so this check is a courtesy to the UI and not the control. In production the API answers
+//     403 even to a developer-role account.
+//
+// The bar sits in the top stack so it pushes content down instead of covering it.
 const DEV_CONTROLS_ENABLED: boolean = import.meta.env.DEV;
 
 export function DevPanel(props: { onChanged: () => void; refreshKey: number }) {
-  if (!DEV_CONTROLS_ENABLED) return null;
+  const { user } = useSession();
+  if (!DEV_CONTROLS_ENABLED || user?.role !== 'developer') return null;
   return <DevPanelInner {...props} />;
 }
 

@@ -31,14 +31,14 @@ export function legalRoutes(limiter = new RateLimiter()) {
       page({
         title: 'Legal and safety',
         description:
-          'Terms of Use, Community Rules, Privacy Policy, Child Safety Standards and account deletion for the App.',
+          'Terms of Use, Community Rules, Privacy Policy, Child Safety Standards and account deletion for SeaYou.',
         slug: '',
         body: `<h1>Legal and safety</h1>
-<p>These documents apply to everyone who uses the App. They are published here so they can be read before creating an account, and at any time afterwards.</p>
+<p>These documents apply to everyone who uses SeaYou. They are published here so they can be read before creating an account, and at any time afterwards.</p>
 <ul>${PUBLISHED_DOCUMENTS.map(
           (d) => `<li><a href="/legal/${d.slug}">${d.title}</a> — ${d.summary}</li>`,
         ).join('')}
-<li><a href="/legal/delete-account">Delete your account</a> — remove your account and its associated data without reinstalling the App.</li>
+<li><a href="/legal/delete-account">Delete your account</a> — remove your account and its associated data without reinstalling SeaYou.</li>
 <li><a href="/support">Support</a> — how to reach ${SUPPORT_NAME} about your account, your privacy, safety or a technical problem.</li></ul>`,
       }),
     ),

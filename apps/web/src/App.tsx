@@ -7,7 +7,7 @@ import { PolicyDialog } from './components/PolicyDialog.js';
 import { ProfileSheet } from './components/ProfileSheet.js';
 import { useAsync } from './lib/useAsync.js';
 import { useTopSlot } from './lib/useTopSlot.js';
-import { WarningAlert } from './components/WarningAlert.js';
+import { DecisionNotice } from './components/DecisionNotice.js';
 import { AdminScreen, type AdminSection } from './screens/AdminScreen.js';
 import { StandingScreen } from './screens/StandingScreen.js';
 import { DevPanel } from './screens/DevPanel.js';
@@ -132,7 +132,6 @@ function Shell() {
   );
   const reloadStanding = standing.reload;
   const [standingOpen, setStandingOpen] = useState(false);
-  const [warningDismissed, setWarningDismissed] = useState<string | null>(null);
   const [admin, setAdmin] = useState<AdminSection | null>(null);
 
   // Visiting My Shore refreshes its count (a bottle opened there clears the badge); it no
@@ -183,22 +182,26 @@ function Shell() {
       </>
     );
 
+  // The decision notice still owed an answer. It is server state, not client state: there is
+  // no local "dismissed" flag, because closing or reloading must not resolve it.
+  const pendingDecision = standing.data?.pendingDecision ?? null;
+
   const restricted =
     standing.data?.standing === 'suspended' || standing.data?.standing === 'banned';
-  // A suspended or banned account sees its standing, can appeal and can sign out — nothing else.
+  // A suspended or banned account sees its standing, can read the decision, appeal, waive,
+  // get support, delete the account and sign out — nothing else.
   if (restricted && standing.data) {
     return (
       <main className="app-viewport" data-daylight="night">
-        <StandingScreen standing={standing.data} onChanged={reloadStanding} />
+        <StandingScreen standing={standing.data} />
+        {pendingDecision ? (
+          <DecisionNotice notice={pendingDecision} onResolved={reloadStanding} />
+        ) : null}
       </main>
     );
   }
 
   const shoreName = chart.data?.shores.find((s) => s.id === user.shoreId)?.name ?? null;
-  const pendingWarning =
-    standing.data?.pendingWarning && standing.data.pendingWarning.id !== warningDismissed
-      ? standing.data.pendingWarning
-      : null;
 
   if (!user.shoreId || choosingShore) {
     return (
@@ -251,11 +254,7 @@ function Shell() {
         {admin && user.role === 'admin' ? (
           <AdminScreen section={admin} onSection={setAdmin} onBack={() => setAdmin(null)} />
         ) : standingOpen && standing.data ? (
-          <StandingScreen
-            standing={standing.data}
-            onChanged={reloadStanding}
-            onBack={() => setStandingOpen(false)}
-          />
+          <StandingScreen standing={standing.data} onBack={() => setStandingOpen(false)} />
         ) : null}
         {inboxOpen && !admin && !standingOpen ? (
           <NotificationsScreen
@@ -324,20 +323,8 @@ function Shell() {
           onClose={closeProfile}
         />
       ) : null}
-      {pendingWarning && !immersive ? (
-        <WarningAlert
-          warning={pendingWarning}
-          onAcknowledged={() => {
-            setWarningDismissed(pendingWarning.id);
-            void reloadStanding();
-          }}
-          onAppeal={() => {
-            setWarningDismissed(pendingWarning.id);
-            void api.acknowledgeWarning(pendingWarning.id).catch(() => {});
-            setStandingOpen(true);
-            void reloadStanding();
-          }}
-        />
+      {pendingDecision && !immersive ? (
+        <DecisionNotice notice={pendingDecision} onResolved={reloadStanding} />
       ) : null}
       {deletingAccount ? (
         <DeleteAccountDialog

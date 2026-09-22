@@ -277,6 +277,7 @@ function countPolicyRows(sqlite: Database.Database): number {
 // surface as a confusing runtime error much later.
 const REQUIRED_TABLES = [
   'users',
+  'moderation_audit',
   'sessions',
   'letters',
   'bottles',
@@ -293,6 +294,9 @@ const REQUIRED_COLUMNS: Array<[table: string, column: string]> = [
   ['users', 'role'],
   ['users', 'deleted_at'],
   ['moderation_cases', 'evidence_redacted_at'],
+  ['moderation_cases', 'hold_reason'],
+  ['violations', 'appeal_waived_at'],
+  ['violations', 'severity'],
   ['bottles', 'public_deadline_at'],
 ];
 

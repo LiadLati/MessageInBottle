@@ -1,7 +1,8 @@
 import { z } from 'zod';
-import { SUPPORT_EMAIL, SUPPORT_NAME, SUPPORT_PATH } from './support.js';
+import { PRODUCT_NAME } from './brand.js';
+import { SUPPORT_EMAIL, SUPPORT_NAME, SUPPORT_PATH, SUPPORT_WARNING } from './support.js';
 
-// The legal documents of the App, in one place. The API serves them from here, validates
+// The legal documents of SeaYou, in one place. The API serves them from here, validates
 // acceptances against the versions here, renders the public web pages from here, and the app
 // renders the in-app views from here — so the text a person was shown, the version recorded
 // against their account and the text on the public URL can never drift apart.
@@ -12,7 +13,13 @@ import { SUPPORT_EMAIL, SUPPORT_NAME, SUPPORT_PATH } from './support.js';
 // to, so it is not part of the acceptance set.
 //
 // Everything here is English and left-to-right, deliberately free of any operator name,
-// address, registration number or jurisdiction, and refers to the product only as "the App".
+// address, registration number or jurisdiction. Where the text needs to name a legal actor it
+// says "the operator of SeaYou" rather than treating the software itself as one.
+//
+// Nothing here may describe behaviour the code does not have. Every statement about journeys,
+// appeals, retention, enforcement, browser storage and deletion below is implemented and
+// covered by tests; the tests in policies.test.ts and the API's legal tests exist to keep it
+// that way.
 
 export const POLICY_IDS = ['terms', 'guidelines', 'privacy'] as const;
 export type PolicyId = (typeof POLICY_IDS)[number];
@@ -37,7 +44,7 @@ export type PolicyStatus = 'draft' | 'released';
 export const POLICY_VERSION = '1.0';
 // These texts take effect when the build carrying them is published; there is no separate date
 // to keep in step with a release, so the documents say exactly that.
-export const POLICY_EFFECTIVE = 'Effective when published in the App';
+export const POLICY_EFFECTIVE = `Effective when published in ${PRODUCT_NAME}`;
 
 // Content is structured, never raw HTML, so it renders through real headings, lists and tables
 // in the app and on the public pages alike, and a screen reader can navigate it.
@@ -184,101 +191,146 @@ export const TERMS_OF_USE: PolicyDocument = {
   id: 'terms',
   title: 'Terms of Use',
   slug: 'terms',
-  summary: 'The agreement between you and the App: accounts, letters, moderation and limits.',
+  summary: `The agreement between you and ${PRODUCT_NAME}: accounts, letters, journeys, moderation and limits.`,
   blocks: [
     { type: 'h2', text: '1. Accepting these Terms' },
     {
       type: 'p',
-      text: 'By creating an account or using the App, you agree to these Terms and to the Community Rules, which form part of them. If you do not agree, do not create an account or use the App.',
-    },
-    { type: 'h2', text: '2. What the App does' },
-    {
-      type: 'p',
-      text: 'The App lets you write letters, place them in virtual bottles, send them to other users, and follow simulated sea journeys between virtual harbours. Journeys, routes, weather, day and night, storms, loss at sea, sinking, arrival times and public-ocean appearances are simulated features. No physical item is transported, and the App does not claim to reproduce real ocean conditions.',
+      text: `By creating an account or using ${PRODUCT_NAME}, you agree to these Terms and to the Community Rules, which form part of them. If you do not agree, do not create an account or use ${PRODUCT_NAME}.`,
     },
     {
       type: 'p',
-      text: 'A bottle may arrive, be lost and appear in the public ocean, or sink. A lost public bottle may be opened by one eligible user and later disappears from the public map. Delivery, opening, continued availability and exact arrival times are not guaranteed.',
+      text: `These Terms are between you and the operator of ${PRODUCT_NAME}. Where they describe what is allowed, what is kept and what may be removed, the operator of ${PRODUCT_NAME} is the party responsible for those decisions.`,
     },
-    { type: 'h2', text: '3. Accounts' },
+    { type: 'h2', text: `2. What ${PRODUCT_NAME} does` },
     {
       type: 'p',
-      text: `You must provide accurate account information, protect your password, and write to ${SUPPORT_NAME} promptly, through the support page at ${SUPPORT_PATH}, if you believe your account has been accessed without permission. You may not impersonate another person, create an account for someone without their permission, evade a restriction, or use multiple accounts to harass others.`,
+      text: `${PRODUCT_NAME} lets you write letters, place them in virtual bottles, send them to people you are connected with, and follow simulated sea journeys between virtual harbours. Journeys, routes, weather, day and night, storms, loss at sea, sinking, arrival times and public-ocean appearances are simulated features. No physical item is transported, and ${PRODUCT_NAME} does not claim to reproduce real ocean conditions.`,
     },
+    { type: 'h2', text: '3. Your account' },
     {
       type: 'p',
-      text: 'You may delete your account and its associated data from the account settings in the App. The same can be done from the account-deletion page on the public support site, without reinstalling the App.',
-    },
-    { type: 'h2', text: '4. Your letters and content' },
-    {
-      type: 'p',
-      text: 'You remain responsible for the letters and other content you submit, and you keep any rights you have in that content.',
+      text: 'You are responsible for what is written and sent from your account, and for keeping your password to yourself. Tell support at once if you believe someone else has your account.',
     },
     {
       type: 'p',
-      text: 'You give the App a limited, non-exclusive licence to store, transmit, display, back up and review your content only as needed to operate, secure and moderate the service. This licence does not permit using your private letters for advertising or selling them to third parties.',
+      text: `${PRODUCT_NAME} is not marketed as a children's app and is not directed at children. There is no age-verification step, and ${PRODUCT_NAME} does not claim that its users have been age-verified.`,
     },
+    { type: 'h2', text: '4. How a journey works' },
     {
       type: 'p',
-      text: 'Send only content you have the right to send. Do not include sensitive personal information about yourself or anyone else unless you are prepared for an authorised recipient or finder to read it. A recipient may copy or capture a letter; removing it from the App cannot erase copies made outside the App.',
+      text: 'A journey takes as long as the simulated route between the two virtual harbours takes: the duration is derived from that route and its distance, and it is counted in elapsed time measured by the server.',
     },
-    { type: 'h2', text: '5. Community Rules' },
-    {
-      type: 'p',
-      text: 'The Community Rules set out what you may and may not do in the App. They are part of these Terms, and they are published as a separate document so that they are easy to find and read on their own.',
-    },
-    { type: 'h2', text: '6. Reports, blocking and moderation' },
-    {
-      type: 'p',
-      text: 'Eligible readers can report a letter and hide it from their own account, and users can block other users. Reports about the same letter are combined into a single case, so several reports never produce several violations.',
-    },
-    {
-      type: 'p',
-      text: 'A reported letter may be reviewed by an automated tool that returns a recommendation and its reasoning. The tool does not decide anything. An authorised human administrator reviews the report and decides whether to accept or reject it, and that decision is recorded with who made it, when and why. The identity of the person who reported a letter is not disclosed to its sender.',
-    },
-    {
-      type: 'p',
-      text: 'If a report is accepted, the letter is withdrawn from further reading in the App. The sender is notified and may submit one appeal against that decision. An accepted appeal reverses the violation and recalculates the standing of the account immediately. A rejected appeal is final within the App.',
-    },
-    { type: 'p', text: 'The standard enforcement sequence is:' },
     {
       type: 'ul',
       items: [
-        'First upheld violation: a warning.',
-        'Second active violation: a seven-day suspension, with a warning that another violation may result in a permanent ban.',
-        'Third active violation: a permanent ban.',
+        'Changing your device clock or time zone does not make a journey arrive sooner or later. The schedule is held by the server.',
+        'A letter sent to the harbour you are already at arrives immediately.',
+        'A bottle may arrive at its destination, be lost and go adrift in the public ocean, or sink.',
+        'A bottle adrift in the public ocean stays listed there until one eligible finder opens it, or until 72 hours after it was lost, whichever happens first.',
+        'The finder who opens an adrift bottle gets one reading session, which can be resumed for up to 15 minutes if it is interrupted. They do not keep a copy, and it does not appear in their archive afterwards.',
+        'You can still read your own letter under the ordinary rules that apply to you as its sender.',
+        'A bottle that sinks is not shown in the public ocean.',
       ],
     },
     {
       type: 'p',
-      text: 'Only upheld violations that are still active are counted; a rejected report, an undecided report and a violation reversed on appeal are not. A suspended or banned account can still sign in, see its status, appeal, delete the account and sign out. We may take a different proportionate action where needed to address an immediate safety risk, protect the service, or comply with applicable law.',
+      text: 'Processing and notification can be delayed — a worker may run a little late, or your device may be offline — but the planned timing of a journey remains the server’s, and a delay in telling you does not change when something happened.',
     },
-    { type: 'h2', text: '7. Availability and changes' },
+    { type: 'h2', text: '5. Your letters' },
     {
       type: 'p',
-      text: 'The App may change, be interrupted, or stop offering a feature. We do not promise uninterrupted availability, permanent storage, successful delivery, or the preservation of any particular experience.',
-    },
-    {
-      type: 'p',
-      text: 'The App is free and offers no subscriptions, purchases or paid features. If paid features are introduced, the price, billing, renewal, cancellation, refund and consumer information will be shown before any purchase.',
+      text: `You keep ownership of what you write. You grant the operator of ${PRODUCT_NAME} a limited, non-exclusive licence to store, transmit and display your letters for the purpose of running the service: delivering them to the person you sent them to, showing them to an eligible finder where a bottle goes adrift, and keeping the copies described in the Privacy Policy for moderation.`,
     },
     {
       type: 'p',
-      text: 'These Terms may be updated. Each version carries a version number, and a material change is presented in the App and requires acceptance of the new version before continued ordinary use.',
+      text: 'This licence exists only so that the service can work. It is not a licence to publish, sell or advertise with what you write.',
     },
-    { type: 'h2', text: '8. Responsibility and legal limits' },
+    { type: 'h2', text: '6. Rules of use' },
     {
       type: 'p',
-      text: 'The App is provided for personal, recreational correspondence. It is not professional, medical or legal advice, and it is not an emergency service. If someone may be in immediate danger, contact your local emergency service rather than relying on a report in the App.',
+      text: `The Community Rules say what may and may not be sent. They are part of these Terms, and using ${PRODUCT_NAME} means agreeing to them.`,
+    },
+    { type: 'h2', text: '7. Blocking' },
+    {
+      type: 'ul',
+      items: [
+        'Blocking stops correspondence in both directions: neither account can write to the other.',
+        `Blocking also keeps the two accounts from encountering each other through public-ocean interactions in ${PRODUCT_NAME}.`,
+        `Blocking cannot reach anything already read, copied, photographed or saved outside ${PRODUCT_NAME}. It changes what happens next, not what has already left.`,
+      ],
+    },
+    { type: 'h2', text: '8. Reporting and moderation' },
+    {
+      type: 'p',
+      text: 'A letter that is available to you to read can be reported. Reporting it opens a moderation case, and a copy of the letter is kept as evidence so that a human reviewer can judge what was actually sent.',
+    },
+    {
+      type: 'ul',
+      items: [
+        'Several reports about one letter make a single case, and a single case can produce at most one violation.',
+        'Every case is decided by a person. Automated review, where it is used, produces a recommendation for a reviewer and never a decision.',
+        'The identity of whoever reported a letter is not disclosed to its sender through ' +
+          `${PRODUCT_NAME}, except where disclosure is required by law.`,
+        'Reports that are rejected, and reports nobody has decided yet, count for nothing.',
+      ],
+    },
+    { type: 'h2', text: '9. Violations, appeals and enforcement' },
+    {
+      type: 'p',
+      text: 'When a report is upheld, the decision is shown to you, and that is when you can appeal it. You are offered two choices: appeal the decision, or continue without appealing. Choosing to continue asks you to confirm, because confirming means permanently giving up the appeal for that decision.',
+    },
+    {
+      type: 'ul',
+      items: [
+        'Closing, refreshing or leaving ' +
+          `${PRODUCT_NAME} without choosing does not give up anything. The decision is shown to you again the next time you can act on it.`,
+        'Each violation can be appealed once.',
+        `An appeal that is rejected is final inside ${PRODUCT_NAME}.`,
+        'An appeal that is accepted withdraws the violation, and your account standing is recalculated immediately.',
+      ],
     },
     {
       type: 'p',
-      text: 'Nothing in these Terms excludes rights or responsibilities that cannot lawfully be excluded. To the fullest extent permitted by applicable law, the App is not responsible for indirect losses, for loss of content outside its reasonable control, or for user conduct it could not reasonably have prevented.',
+      text: 'Upheld violations remain counted unless they are reversed on appeal. They do not expire and are not removed by the passing of time.',
     },
-    { type: 'h2', text: '9. Contact' },
+    {
+      type: 'ul',
+      items: [
+        'A first upheld violation is a warning.',
+        'A second is a seven-day suspension.',
+        'A third is a permanent ban.',
+        'Serving a suspension does not remove that violation from the count: when the suspension ends you can use your account again, but the violation still stands.',
+        'A confirmed critical child-safety violation results in an immediate permanent ban, without the steps above. It can still be appealed once, like any other decision.',
+      ],
+    },
     {
       type: 'p',
-      text: `Questions, safety concerns, privacy requests and account-deletion requests reach ${SUPPORT_NAME} through the support page at ${SUPPORT_PATH}, which is also linked from Help & Support in the App. Support will never ask you for a password, a verification code, payment details or an identity document.`,
+      text: `While an account is suspended or banned it can still sign in to read the decision, appeal it, get support, delete the account and sign out. ${PRODUCT_NAME} does not lock a person away from the decision made about them.`,
+    },
+    { type: 'h2', text: '10. Deleting your account' },
+    {
+      type: 'p',
+      text: 'You can delete your account from Settings, and from the public account-deletion page, which is reachable without signing in. Deleting asks for your password again and for an explicit confirmation, and it signs out every session at once.',
+    },
+    {
+      type: 'p',
+      text: 'Your account data is then deleted or anonymised as described in the Privacy Policy. Limited records may remain where they are needed for an active moderation case, for documented security and abuse prevention, or to meet a legal obligation.',
+    },
+    { type: 'h2', text: '11. Availability' },
+    {
+      type: 'p',
+      text: `${PRODUCT_NAME} is provided as it is. Features may change, and the service may be interrupted for maintenance or for reasons outside the operator’s control. Simulated outcomes — including a bottle being lost or sinking — are part of the design and are not faults.`,
+    },
+    { type: 'h2', text: '12. Changes to these Terms' },
+    {
+      type: 'p',
+      text: `A material change means a new version of these documents, and you are asked to accept it before continuing to use ${PRODUCT_NAME}. Accounts that accepted an earlier version are asked again; nobody is treated as having agreed to something they were never shown.`,
+    },
+    { type: 'h2', text: '13. Support' },
+    {
+      type: 'p',
+      text: `${SUPPORT_NAME} can be reached at ${SUPPORT_EMAIL}, and the support page at ${SUPPORT_PATH} opens a message with the subject already filled in. ${SUPPORT_WARNING}`,
     },
   ],
 };
@@ -288,44 +340,87 @@ export const COMMUNITY_RULES: PolicyDocument = {
   id: 'guidelines',
   title: 'Community Rules',
   slug: 'community-rules',
-  summary: 'What you may and may not write in the App, and what happens when a letter is reported.',
+  summary: `What may and may not be sent in ${PRODUCT_NAME}, and what happens when a letter is reported.`,
   blocks: [
+    { type: 'h2', text: '1. The idea' },
     {
       type: 'p',
-      text: 'A letter may reach someone who does not know the person who wrote it. You may write sadly, personally, critically or fictionally. You may not use the App to hurt people, expose them, or exploit them.',
+      text: `${PRODUCT_NAME} is for letters. A letter can be slow, personal and unguarded — that is the point of it. You may write about sad, personal, critical or fictional subjects. You may not use ${PRODUCT_NAME} to harm, expose or exploit others.`,
     },
-    { type: 'h2', text: 'What you may do' },
+    { type: 'h2', text: '2. What is not allowed' },
     {
       type: 'ul',
       items: [
-        'Share personal writing, opinions, stories, humour, poetry and criticism that do not break these rules. Context matters: an unpleasant opinion, a fictional passage, irony, slang, or supportive words to someone in distress are not violations in themselves.',
-        'Report a letter in good faith and hide it from your own account, even if the review later rejects the report.',
-        'Block another user. A block stops correspondence in both directions.',
-        'Appeal once against a decision that upheld a violation, and give the context that may change it.',
+        'Harassment, bullying, stalking, or repeated unwanted contact.',
+        'Threats of violence, or encouraging anyone to harm another person.',
+        'Hate directed at people for who they are.',
+        'Sexual content involving a minor, in any form, and any attempt to groom, solicit or sexualise a child.',
+        'Sharing another person’s private information, or intimate images of anyone, without their consent.',
+        'Content that is illegal to possess or distribute.',
+        'Fraud, scams, phishing, or asking others for passwords, verification codes or payment details.',
+        'Spam, bulk or automated sending.',
+        'Impersonating another person in order to deceive.',
       ],
     },
-    { type: 'h2', text: 'What you may not do' },
+    { type: 'h2', text: '3. Distress, self-harm and asking for help' },
     {
-      type: 'ol',
+      type: 'p',
+      text: 'Writing about despair, self-harm or suicide is not a violation. Saying that you are struggling, asking for help, or supporting someone who is struggling is not a violation either, and difficult language alone is not a reason to remove a letter.',
+    },
+    {
+      type: 'p',
+      text: 'What is not allowed is encouraging, instructing or pressuring another person to hurt themselves. If you are in danger now, contact your local emergency service: this is a letter-writing service and cannot reach anyone on your behalf.',
+    },
+    { type: 'h2', text: '4. Child safety' },
+    {
+      type: 'p',
+      text: 'Material that sexualises or exploits a child, and any attempt to groom or solicit a child, are prohibited absolutely and are treated as critical.',
+    },
+    {
+      type: 'p',
+      text: 'Describing abuse is not the same as committing it. A good-faith disclosure by a victim, a request for help, and a serious discussion of abuse are not violations, and will not be treated as such merely because of what they describe. What they may never do is contain, request, facilitate or link to abusive material.',
+    },
+    {
+      type: 'p',
+      text: 'Where child-safety material is confirmed, it is reported to the appropriate authorities where applicable law requires that, and after a person has reviewed it. Reports are not forwarded to an authority automatically.',
+    },
+    { type: 'h2', text: '5. Reporting and blocking' },
+    {
+      type: 'p',
+      text: 'Report and Block are separate actions and do different things.',
+    },
+    {
+      type: 'ul',
       items: [
-        'Make credible threats, extort someone, encourage violence, or instruct others how to harm a person.',
-        'Target someone with harassment, repeated humiliation or abusive conduct, or attack a protected group with hatred.',
-        'Send unwanted sexual content or pressure, facilitate sexual exploitation, or create, request or distribute any sexual content involving minors. Grooming a minor, or any child sexual abuse or exploitation material, is prohibited absolutely and is reported and acted upon.',
-        "Reveal, or threaten to reveal, another person's address, phone number, credentials, private communications or other identifying or sensitive information without permission.",
-        'Impersonate others, commit fraud, request passwords or payment credentials, distribute phishing links, send spam, or advertise without permission.',
-        'Evade a block, suspension, ban, safety control, rate limit or other restriction.',
-        'Submit knowingly false or abusive reports in order to harm another user.',
-        "Infringe another person's intellectual-property, privacy or other legal rights, or use the App for unlawful conduct.",
+        'Reporting a letter opens a moderation case for a human reviewer, and hides the letter from your own reading straight away.',
+        'Blocking stops correspondence in both directions and keeps the two accounts from encountering each other through public-ocean interactions. It does not, by itself, report anything.',
       ],
     },
-    { type: 'h2', text: 'What happens after a report' },
     {
       type: 'p',
-      text: 'A report opens a single case for that letter and hides the letter from the reader who reported it. An automated tool may add a recommendation with its reasoning and with whatever it was unsure about; it never decides. An authorised administrator reads the letter and decides. If the report is accepted, the letter is withdrawn from further reading in the App, the sender is notified without learning who reported it, and one appeal is available. Section 6 of the Terms of Use sets out the warning, suspension and ban sequence.',
+      text: 'A letter can be reported by the person it was sent to, and by an eligible finder who has opened it after it went adrift in the public ocean — the people who can actually read it. Several reports about one letter make a single case, and that case can produce at most one violation.',
     },
     {
       type: 'p',
-      text: 'The App is not an emergency service. If someone may be in immediate danger, contact your local emergency service.',
+      text: `Whoever reported a letter is not identified to its sender through ${PRODUCT_NAME}, except where disclosure is required by law.`,
+    },
+    { type: 'h2', text: '6. False and abusive reports' },
+    {
+      type: 'p',
+      text: 'Reporting in good faith is always welcome, and being wrong is not an offence. Knowingly false reports, and reporting used as a way to harass someone, are not allowed. The number of reports one account may make is limited, and reporting records are kept so that a pattern of abuse can be seen and acted on.',
+    },
+    { type: 'h2', text: '7. When a report is upheld' },
+    {
+      type: 'p',
+      text: 'Every case is decided by a person. Automated review, where it is used, only produces a recommendation for that person to consider.',
+    },
+    {
+      type: 'p',
+      text: 'When a report against you is upheld, the decision is put in front of you and that is when you can appeal it. You can appeal the decision, or continue without appealing — and continuing asks you to confirm, because it permanently gives up the appeal for that decision. Closing or reloading without choosing gives up nothing; the decision comes back the next time you can act on it. Each violation may be appealed once. A rejected appeal is final here; an accepted appeal withdraws the violation and your standing is recalculated at once.',
+    },
+    {
+      type: 'p',
+      text: 'Upheld violations remain counted unless they are reversed on appeal: one is a warning, two a seven-day suspension, three a permanent ban. Serving a suspension does not reduce the count. A confirmed critical child-safety violation bans immediately, and can still be appealed once.',
     },
   ],
 };
@@ -335,106 +430,129 @@ export const PRIVACY_POLICY: PolicyDocument = {
   id: 'privacy',
   title: 'Privacy Policy',
   slug: 'privacy',
-  summary:
-    'What information the App processes, who can see it, how long it is kept, and how to delete it.',
+  summary: `What ${PRODUCT_NAME} stores, why, how long it is kept and how to have it deleted.`,
   blocks: [
     { type: 'h2', text: '1. Scope' },
     {
       type: 'p',
-      text: 'This Privacy Policy explains what information the App processes, why it is used, when others may see it, and how you can request access, correction or deletion.',
+      text: `This policy describes what ${PRODUCT_NAME} stores about you, why, and for how long. It covers the app and the public pages at ${SUPPORT_PATH} and /legal.`,
     },
-    { type: 'h2', text: '2. Information the App processes' },
+    { type: 'h2', text: '2. What is stored' },
     {
       type: 'ul',
       items: [
-        'Account information: username, display name, email address, password hash, account identifier, account status, and password-recovery records.',
-        'Policy records: which version of the Terms of Use, Community Rules and Privacy Policy the account accepted, and when.',
-        'Profile and preferences: the selected virtual harbour, the time zone reported by your device, and settings you choose in the App.',
-        'Letters and journeys: letter text, sender and authorised recipient identifiers, virtual harbours, simulated routes, timestamps, delivery and opening events, and loss or sinking outcomes.',
-        'Friends and safety relationships: friend requests, friendships, blocks and their state.',
-        'Moderation information: reports and their reasons, the reported letter, automated recommendations, administrator decisions, violations, warnings, suspensions, bans and appeals.',
-        'Security and technical information: authentication records and rate-limit counters needed to secure the service. Network addresses are used in memory for rate limiting and are not written to the database.',
-        'Support information: messages you send through support, privacy, safety or deletion requests.',
+        'Account details: your username, display name, the email address you registered with, a hashed password (never the password itself), and the time zone your device reports, which is used to decide when your night falls.',
+        'Letters you write, their recipient, and the journey and outcome of each bottle.',
+        'Your connections, and the accounts you have blocked.',
+        'Notifications generated for you.',
+        'The versions of these documents you accepted, and when.',
+        'Moderation records: reports you make, cases about letters you sent, decisions, appeals and violations.',
+      ],
+    },
+    { type: 'h2', text: '3. Moderation evidence and how long it is kept' },
+    {
+      type: 'p',
+      text: 'When a letter is reported, a copy of it is kept as evidence so that a reviewer can judge what was sent, and so that an appeal is decided on the same text. That copy is kept only as long as it can still be needed.',
+    },
+    {
+      type: 'ul',
+      items: [
+        'Content evidence — the copied letter and the explanations reporters wrote — is redacted seven days after the case becomes final.',
+        'A case becomes final when the report is rejected, when an upheld sender explicitly gives up the appeal, or when an appeal they submitted has been decided.',
+        'While a report is undecided, while the sender has not yet seen and resolved the decision, or while an appeal is pending, the case is not final and the evidence is kept.',
+        'Records of the decision itself are kept after that: the case identity, the decision and its reason, which administrator made it, the timestamps, the violation and its enforcement count, the relationship to the report for abuse prevention, and your account standing history. These are kept because upheld violations do not expire.',
+        'Evidence is kept longer than seven days only under a documented legal or immediate child-safety hold, which records why it was placed and by whom. Releasing the hold returns the case to the ordinary calculation.',
       ],
     },
     {
       type: 'p',
-      text: 'The App does not request precise device location, contacts, camera, microphone or payment information. It contains no advertising trackers or analytics services, and it does not sell personal information.',
+      text: `Whoever reported a letter is not identified to its sender through ${PRODUCT_NAME}, except where disclosure is required by law.`,
     },
-    { type: 'h2', text: '3. How information is used' },
+    { type: 'h2', text: '4. Automated review' },
+    {
+      type: 'p',
+      text: 'Reported letters may be examined by an automated review that runs on infrastructure the operator controls, in order to produce a recommendation — with its reasoning, a translation where the letter is not in the reviewer’s language, and a statement of its uncertainty — for a human reviewer. It never decides a case, and an uncertain result never decides anything at all.',
+    },
+    {
+      type: 'p',
+      text: 'If an external provider is ever used for this, this policy and the store Data Safety declaration will be updated before any report content is sent to it.',
+    },
+    { type: 'h2', text: '5. What is on your device' },
+    {
+      type: 'p',
+      text: 'Nothing is stored in your browser except these three things:',
+    },
     {
       type: 'ul',
       items: [
-        'To create and secure accounts and to recover passwords.',
-        'To operate virtual harbours, letters, bottle journeys, arrivals and notifications.',
-        'To show content to authorised recipients and to an eligible public-ocean finder.',
-        'To maintain friend and block relationships.',
-        'To prevent spam, abuse, fraud and unauthorised access.',
-        'To investigate reports, decide appeals and enforce the Community Rules.',
-        'To answer support, privacy, safety and deletion requests.',
-        'To maintain, troubleshoot and improve the reliability of the App.',
-        'To comply with applicable legal obligations and to protect users, the service and others.',
+        'Your session token, in sessionStorage. It is removed when you sign out, when the server rejects it, and by the browser when the tab is closed.',
+        'The letter you are still writing and have not sent, in sessionStorage, so that a reload does not lose it. It is removed as soon as the letter is sent, and by the browser when the tab is closed.',
+        'The time zone your device last reported, in localStorage, so the app can tell when it changes and tell the server. It is removed when you sign out.',
       ],
     },
-    { type: 'h2', text: '4. Who may see information' },
     {
       type: 'p',
-      text: 'A letter can be seen by its sender, by its authorised recipient, and, when a bottle is lost and shown in the public ocean, by the single eligible finder who opens it. A marker on the public map shows only a simulated position and the time the bottle was lost; it does not disclose the sender, the recipient, the harbours or the text.',
+      text: `${PRODUCT_NAME} sets no cookies, and uses no IndexedDB. It contains no advertising trackers, no analytics SDKs and no advertising pixels. Like any modern application it is built with third-party software libraries; what it does not contain is anything that follows you.`,
     },
     {
       type: 'p',
-      text: 'Authorised administrators can access what they need in order to investigate reports, appeals, security issues and support requests. A reported letter and the reasons given for reporting it may be sent to an automated review tool for a recommendation; that tool has no access to the database and no authority to decide, and an authorised human administrator makes the decision.',
+      text: 'If analytics, crash reporting or any other tracking is added later, this policy and the store Data Safety declaration will be reviewed and updated before it is switched on.',
+    },
+    { type: 'h2', text: '6. Network and hosting data' },
+    {
+      type: 'p',
+      text: `Network addresses may be processed for security and rate limiting. ${PRODUCT_NAME} does not intentionally store them in its application database, although hosting and security providers may retain limited technical logs under their own retention controls.`,
+    },
+    { type: 'h2', text: '7. Support messages' },
+    {
+      type: 'p',
+      text: `The support page opens a message to ${SUPPORT_EMAIL} in your own mail application. Messages therefore reach the project mailbox and its email provider, and are held there under that provider’s terms. Support messages are not stored in the ${PRODUCT_NAME} application database, unless information from one has to be recorded as part of a security, privacy or moderation action.`,
     },
     {
       type: 'p',
-      text: 'Service providers may process limited information only as needed to host, secure or operate the App or to deliver account email on its behalf. Information may also be disclosed where required by applicable law or reasonably necessary to protect users, the service or legal rights. The App does not sell letters or personal information and does not use private letters for advertising.',
+      text: SUPPORT_WARNING,
     },
-    { type: 'h2', text: '5. The public ocean and one-time reading' },
+    { type: 'h2', text: '8. Deleting your account' },
     {
       type: 'p',
-      text: 'A lost bottle may appear in the public ocean for up to 72 hours, or until an eligible user opens it, whichever comes first. The finder receives a single reading session, which can be resumed for up to 15 minutes if the connection drops; it creates no lasting archive of the letter for that finder. Removal from the public map, or the end of a reading session, does not by itself delete the sender’s letter or journey history.',
-    },
-    { type: 'h2', text: '6. Retention' },
-    {
-      type: 'p',
-      text: 'Account, letter and journey information is kept while the account is active and as needed to provide the service. When an account deletion is completed, the account is de-identified and its personal information is removed, except for the limited information that must reasonably be kept to resolve an open report or appeal, to enforce an active safety restriction, to prevent fraud or abuse, to maintain security, or to comply with applicable law.',
+      text: 'You can delete your account from Settings, or from the public account-deletion page without signing in first. It asks for your password and an explicit confirmation, and it is carried out as one operation. This is what happens:',
     },
     {
+      type: 'ul',
+      items: [
+        'Profile identifiers — your username, display name and email address — are removed or replaced with anonymous values, and your password is cleared so the account cannot be signed in to again.',
+        'Every session is revoked immediately.',
+        'Friend and block relationships are removed.',
+        'Bottles still travelling are cancelled, and their reserved space is released.',
+        'Letters you wrote are removed from future reading in the app, and their text is cleared — except where a copy is still held as evidence for a moderation case that is not finished, or under a documented hold. Those copies follow the retention rules in section 3.',
+        'Letters other people wrote to you are not deleted: they belong to their authors, who can still see what became of what they sent.',
+        'Your notifications are removed.',
+        'The account row itself is kept in an anonymised form, so that records which legitimately refer to it — a letter someone else wrote, a moderation case still open — do not lose their references. It holds no personal details.',
+        'Minimal anonymised journey and audit metadata remains, because moderation records and account standing history must survive the account they describe.',
+      ],
+    },
+    { type: 'h2', text: '9. Your requests' },
+    {
       type: 'p',
-      text: 'Moderation evidence is kept while it is needed for an open case, a possible or pending appeal, or a violation that is still in force, and is then removed or de-identified under the retention rules of the App. Expired authentication and password-recovery records, operational logs and support records are kept only for a period appropriate to their purpose.',
+      text: `Write to ${SUPPORT_NAME} at ${SUPPORT_EMAIL} to ask what is held about you, to have it corrected, or to have it deleted.`,
     },
     {
       type: 'p',
-      text: 'Backups may retain deleted information for a limited recovery period before being overwritten. Copies made independently by a recipient outside the App cannot be controlled or deleted by the App.',
+      text: 'A request is verified before it is acted on, because acting on an unverified request would itself be a breach. Verification may be an authenticated session in the app, your password, demonstrated control of the account’s email address, or a one-time verification link. A government identity document is not required and will not be requested for this service.',
     },
-    { type: 'h2', text: '7. Account deletion and privacy requests' },
+    { type: 'h2', text: '10. Security' },
     {
       type: 'p',
-      text: 'You can delete your account from the account settings in the App, or from the account-deletion page on the public support site without reinstalling the App. Deletion asks for your password and an explicit final confirmation. When it completes, every session is revoked immediately, your profile and identifiers are removed or replaced with an anonymous label, and your account disappears from search, friends and the rest of the App.',
+      text: 'Passwords are stored only as salted hashes. Sessions expire and can be revoked. Moderation evidence is readable only by administrators, and every moderation action that changes what a person may do is recorded in an audit trail. A production deployment is configured to require HTTPS, so traffic between your device and the server is encrypted in transit.',
     },
     {
       type: 'p',
-      text: 'You may also use the Privacy Request option to ask for access to, or correction of, your account information. Reasonable identity verification may be required first. Some information may be kept where necessary for an open safety matter, the rights of another person, security, fraud prevention or a legal obligation.',
+      text: 'No service can promise that nothing will ever go wrong. What is described here is what the system does, not a guarantee of the outcome.',
     },
-    { type: 'h2', text: '8. Device storage and permissions' },
+    { type: 'h2', text: '11. Changes' },
     {
       type: 'p',
-      text: 'The App stores your sign-in token and any unsent letter in the storage of the browser tab, which is cleared when you sign out, and remembers the time zone reported by your device so that a change is noticed on the next start. It uses no cookies, no third-party code, no analytics and no advertising pixels, and it requests no device permissions for its current features.',
-    },
-    { type: 'h2', text: '9. Security' },
-    {
-      type: 'p',
-      text: `Passwords are stored only as salted hashes and cannot be recovered. Sign-in and password-reset tokens are stored as hashes; a reset token can be used once and expires after 30 minutes. Administrative functions are restricted by a role that is granted only on the server and checked on every request. Production deployments serve the App over encrypted network transport. No system can guarantee absolute security; suspected security issues can be reported to ${SUPPORT_NAME} at ${SUPPORT_EMAIL}, through the support page at ${SUPPORT_PATH}.`,
-    },
-    { type: 'h2', text: '10. Changes to this Policy' },
-    {
-      type: 'p',
-      text: 'This Policy may be updated when the App or its data practices change. Each version carries a version number, and a material change is shown in the App and requires a renewed acknowledgement before continued ordinary use.',
-    },
-    { type: 'h2', text: '11. Contact' },
-    {
-      type: 'p',
-      text: `Privacy questions, requests and complaints reach ${SUPPORT_NAME}, the support contact for the App, at ${SUPPORT_EMAIL}. The support page at ${SUPPORT_PATH} opens a message with the subject already set, and is linked from Help & Support in the App and from the store listing. Support will never ask you for a password, a verification code, payment details or an identity document.`,
+      text: 'A material change means a new version, and you are asked to acknowledge it before continuing. Accounts that acknowledged an earlier version are asked again.',
     },
   ],
 };
@@ -444,37 +562,79 @@ export const CHILD_SAFETY_STANDARDS: PolicyDocument = {
   id: 'child-safety',
   title: 'Child Safety Standards',
   slug: 'child-safety',
-  summary:
-    'How the App prohibits child sexual abuse and exploitation, and how reports of it are handled.',
+  summary: `How ${PRODUCT_NAME} prohibits child sexual abuse and exploitation, how to report it, and how reports are handled.`,
   blocks: [
-    { type: 'h2', text: 'Our standard' },
+    { type: 'h2', text: '1. Our standard' },
     {
       type: 'p',
-      text: 'Child sexual abuse and exploitation have no place in the App. Creating, requesting, sharing, or linking to child sexual abuse material, sexualising a minor in any way, and grooming or attempting to make sexual contact with a minor are prohibited absolutely. There is no context, no fiction and no private exchange in which they are permitted.',
+      text: `${PRODUCT_NAME} prohibits child sexual abuse and exploitation absolutely. Material that sexualises or exploits a child, and any attempt to groom, solicit or sexually approach a child, are forbidden for every user without exception, and are treated as critical.`,
     },
     {
       type: 'p',
-      text: 'This standard applies to every user, to every letter, and to every part of the App, including letters sent directly to a recipient and letters found in the public ocean.',
+      text: `${PRODUCT_NAME} is not marketed as a children's app and is not directed at children.`,
     },
-    { type: 'h2', text: 'Reporting inside the App' },
+    { type: 'h2', text: '2. Good-faith disclosure is protected' },
     {
       type: 'p',
-      text: 'Anyone who can read a letter can report it from the reader itself: the recipient of a letter that arrived at their harbour, and a finder during their one-time reading of a lost bottle. Reporting takes a reason and an optional explanation, and hides the letter from the person who reported it straight away. Users can also block other users, which stops correspondence in both directions.',
+      text: 'Describing abuse is not the same as committing it. A victim disclosing what happened to them, a person asking for help, and a serious discussion of abuse are not violations, and are not treated as such merely because of what they describe.',
     },
-    { type: 'h2', text: 'How we respond' },
     {
       type: 'p',
-      text: 'A report opens a case that an authorised administrator reviews. An automated tool may add a recommendation, but it never decides. Where a report of child sexual abuse or exploitation is upheld, the content is withdrawn from further reading in the App and the account is sanctioned, up to and including a permanent ban, and the evidence is preserved for the investigation. Material of this kind is treated as an immediate safety risk, so we may act at once rather than following the ordinary warning sequence.',
+      text: 'What such a letter may never do is contain, request, facilitate or link to abusive material.',
     },
-    { type: 'h2', text: 'Legal requests and cooperation' },
+    { type: 'h2', text: '3. Reporting inside the app' },
     {
       type: 'p',
-      text: 'Valid legal requests from competent authorities relating to child safety are reviewed and handled appropriately, and information is disclosed where required by applicable law or reasonably necessary to protect a child from harm. Evidence relevant to such a matter is retained for as long as it is needed for that purpose.',
+      text: `Reporting from inside ${PRODUCT_NAME} is the fastest route and the one to use where it is available. Every report opens a moderation case for a human reviewer, and the reported letter is hidden from your own reading immediately.`,
     },
-    { type: 'h2', text: 'Contact' },
+    {
+      type: 'ul',
+      items: [
+        'The person a letter was sent to can report it.',
+        'An eligible finder who has opened a bottle adrift in the public ocean can report it.',
+        'In other words, the people who can read a letter can report it. A sender cannot report their own letter through this flow.',
+      ],
+    },
     {
       type: 'p',
-      text: `Child-safety concerns reach ${SUPPORT_NAME}, the support contact for the App, at ${SUPPORT_EMAIL}; the support page at ${SUPPORT_PATH} opens a message with the subject already set, and is linked from Help & Support in the App and from the store listing. Reporting a letter inside the App reaches the same review process and is the fastest way to have content examined. If a child may be in immediate danger, contact your local emergency service first.`,
+      text: 'Report and Block are separate actions. Reporting opens a case; blocking stops correspondence in both directions and also prevents the two accounts encountering each other through public-ocean interactions. Blocking on its own does not report anything.',
+    },
+    { type: 'h2', text: '4. Reporting by email' },
+    {
+      type: 'p',
+      text: `${SUPPORT_NAME} is the child-safety point of contact and can be reached at ${SUPPORT_EMAIL}. The support page at ${SUPPORT_PATH} opens a message with the subject already set, and needs no account.`,
+    },
+    {
+      type: 'p',
+      text: `Email is for concerns that cannot be reported from inside ${PRODUCT_NAME} — because you no longer have access to the letter, because you are not the person it was sent to, or because it concerns something outside a single letter. An email is read by a person; it does not automatically create the same moderation case that in-app reporting does.`,
+    },
+    {
+      type: 'p',
+      text: 'If a child may be in immediate danger, contact your local emergency service first. This service cannot reach anyone on your behalf.',
+    },
+    { type: 'h2', text: '5. How a confirmed case is enforced' },
+    {
+      type: 'p',
+      text: 'Every case is decided by a person; automated review only produces a recommendation. When a child-safety case is confirmed, an administrator may classify it as a critical child-safety violation, which is a permanent ban applied immediately, rather than the ordinary sequence of a warning, then a suspension, then a ban.',
+    },
+    {
+      type: 'ul',
+      items: [
+        'The classification requires an administrator, a recorded reason and an explicit confirmation.',
+        'The administrator, the timestamp, the classification and the action are recorded in an audit trail.',
+        'Automated review can never apply it.',
+        'The letter is withdrawn from any further reading in the app.',
+        'The single appeal opportunity still applies: the person is shown the decision and may appeal it once.',
+      ],
+    },
+    { type: 'h2', text: '6. Evidence and external reporting' },
+    {
+      type: 'p',
+      text: 'A copy of the reported letter is kept as evidence so the case and any appeal are judged on what was actually sent. Content evidence is redacted seven days after the case becomes final, and is kept longer only under a documented legal or immediate child-safety hold, which records why it was placed and by whom. Releasing the hold returns the case to the ordinary calculation. Records of the decision itself are kept.',
+    },
+    {
+      type: 'p',
+      text: 'Confirmed material is reported to the appropriate authorities where applicable law requires it, and following review by a person. Reports are not forwarded to an authority automatically.',
     },
   ],
 };

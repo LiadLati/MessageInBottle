@@ -14,6 +14,7 @@
     "db:reset": "tsx src/db/reset.ts",
     "db:generate": "drizzle-kit generate",
     "admin:grant": "tsx src/tools/grant-admin.ts",
+    "developer:grant": "tsx src/tools/grant-developer.ts",
     "ai:eval": "tsx src/tools/ai-eval.ts",
     "retention:plan": "tsx src/tools/retention.ts"
   },

@@ -12,6 +12,7 @@ import { newId } from '../lib/ids.js';
 import { badRequest, conflict, forbidden, notFound, tooManyRequests } from '../lib/errors.js';
 import type { AppContext, AuthUser } from './context.js';
 import { enqueueNotification } from './notifications.js';
+import { writeAudit } from './audit.js';
 
 // Reporting and account standing (spec §16). Everything here runs on the real clock: a
 // suspension is seven elapsed days of a person's life, not seven days of journey time.
@@ -247,12 +248,20 @@ export interface Standing {
   violationsInForce: number;
 }
 
-// Derived, never stored. The count of distinct accepted violations still in force decides:
+// Derived, never stored. The count of upheld violations decides:
 // one warns, two suspend for seven elapsed days from the second decision, three ban for good.
-// After the seven days the account is usable again but still one violation from a ban.
+//
+// Upheld violations never expire. The only thing that removes one from the count is an
+// accepted appeal, which revokes it. Serving a suspension does not: once the seven days are
+// over the account is usable again, but it is still two violations in and one from a ban.
+//
+// A confirmed critical child-safety violation is the one exception to the ladder: it bans on
+// its own, immediately, however few violations came before it.
 export function standingOf(db: DbOrTx, userId: string, now: number): Standing {
   const inForce = violationsInForce(db, userId);
   const n = inForce.length;
+  if (inForce.some((v) => v.severity === 'critical'))
+    return { standing: 'banned', suspendedUntil: null, violationsInForce: n };
   if (n === 0) return { standing: 'good', suspendedUntil: null, violationsInForce: 0 };
   if (n === 1) return { standing: 'warned', suspendedUntil: null, violationsInForce: 1 };
   if (n === 2) {
@@ -262,6 +271,15 @@ export function standingOf(db: DbOrTx, userId: string, now: number): Standing {
       : { standing: 'warned', suspendedUntil: null, violationsInForce: 2 };
   }
   return { standing: 'banned', suspendedUntil: null, violationsInForce: n };
+}
+
+// May this person still appeal this decision? The single opportunity is spent by appealing or
+// by explicitly waiving it, and a revoked violation has nothing left to appeal. Time is not a
+// factor: the offer stands until they answer it.
+export function appealAvailable(db: DbOrTx, v: ViolationRow): boolean {
+  if (v.revokedAt !== null) return false;
+  if (v.appealWaivedAt !== null) return false;
+  return db.select().from(t.appeals).where(eq(t.appeals.violationId, v.id)).get() === undefined;
 }
 
 // May this account use the app beyond signing in, reading its status, appealing and signing out?
@@ -280,6 +298,10 @@ function noticeOf(db: DbOrTx, v: ViolationRow, ordinal: number): ViolationNotice
     decidedAt: iso(v.decidedAt),
     revokedAt: isoOrNull(v.revokedAt),
     acknowledgedAt: isoOrNull(v.acknowledgedAt),
+    severity: v.severity,
+    appealAvailable: appealAvailable(db, v),
+    appealWaivedAt: isoOrNull(v.appealWaivedAt),
+    noticePresentedAt: isoOrNull(v.noticePresentedAt),
     bottle: {
       id: bottle.id,
       recipientDisplayName: bottle.recipientNameSnapshot,
@@ -314,13 +336,103 @@ export function accountStanding(ctx: AppContext, userId: string): AccountStandin
   const inForce = notices.filter((n) => n.revokedAt === null);
   const pendingWarning =
     inForce.length >= 1 && inForce[0]!.acknowledgedAt === null ? inForce[0]! : null;
+  // The decision notice still owed an answer: the oldest upheld violation whose single appeal
+  // is neither spent nor waived. It reappears on every eligible visit, so closing SeaYou,
+  // reloading, or losing the connection resolves nothing.
+  const pendingDecision = inForce.find((n) => n.appealAvailable) ?? null;
   return {
     standing: s.standing,
     suspendedUntil: isoOrNull(s.suspendedUntil),
     violationsInForce: s.violationsInForce,
     pendingWarning,
+    pendingDecision,
     violations: notices,
   };
+}
+
+// Records that the decision notice was actually put in front of the sender. This is what opens
+// the appeal: a decision the person never saw is never quietly treated as one they declined to
+// appeal. Idempotent — the first presentation is the one kept — and it never resolves
+// anything by itself.
+export function presentDecisionNotice(
+  ctx: AppContext,
+  user: AuthUser,
+  violationId: string,
+): ViolationNoticeDto {
+  const now = ctx.realClock.now();
+  return ctx.db.transaction((tx) => {
+    const v = tx.select().from(t.violations).where(eq(t.violations.id, violationId)).get();
+    if (!v || v.userId !== user.id) throw notFound('violation');
+    const first = tx
+      .update(t.violations)
+      .set({ noticePresentedAt: now })
+      .where(and(eq(t.violations.id, v.id), isNull(t.violations.noticePresentedAt)))
+      .run().changes;
+    if (first === 1)
+      writeAudit(
+        tx,
+        {
+          action: 'notice_presented',
+          caseId: v.caseId,
+          violationId: v.id,
+          subjectUserId: v.userId,
+          actorUserId: null,
+          actorRole: 'system',
+        },
+        now,
+      );
+    const fresh = tx.select().from(t.violations).where(eq(t.violations.id, v.id)).get()!;
+    const ordinal = violationsInForce(tx, user.id).findIndex((x) => x.id === v.id) + 1;
+    return noticeOf(tx, fresh, ordinal);
+  });
+}
+
+// The explicit waiver: the sender confirmed, in a second dialog, that they are giving up the
+// appeal. It is permanent, and it is the only thing besides appealing that closes the offer.
+//
+// Idempotent by design: confirming twice (a double tap, a retried request) is not an error and
+// keeps the first instant. It refuses outright once an appeal exists — a submitted appeal is
+// not something a waiver may overwrite.
+export function waiveAppeal(
+  ctx: AppContext,
+  user: AuthUser,
+  violationId: string,
+): ViolationNoticeDto {
+  const now = ctx.realClock.now();
+  return ctx.db.transaction((tx) => {
+    const v = tx.select().from(t.violations).where(eq(t.violations.id, violationId)).get();
+    if (!v || v.userId !== user.id) throw notFound('violation');
+    if (v.revokedAt !== null) throw badRequest('already_revoked', 'this violation was revoked');
+    const appeal = tx.select().from(t.appeals).where(eq(t.appeals.violationId, v.id)).get();
+    if (appeal)
+      throw conflict(
+        'already_appealed',
+        'This decision has already been appealed; the appeal cannot be withdrawn here.',
+      );
+    const first = tx
+      .update(t.violations)
+      .set({ appealWaivedAt: now, acknowledgedAt: v.acknowledgedAt ?? now })
+      .where(and(eq(t.violations.id, v.id), isNull(t.violations.appealWaivedAt)))
+      .run().changes;
+    if (first === 1)
+      writeAudit(
+        tx,
+        {
+          action: 'appeal_waived',
+          caseId: v.caseId,
+          violationId: v.id,
+          subjectUserId: v.userId,
+          // The sender waived their own appeal; no administrator was involved.
+          actorUserId: user.id,
+          actorRole: 'member',
+          detail: 'confirmed in the second confirmation dialog',
+        },
+        now,
+      );
+    const fresh = tx.select().from(t.violations).where(eq(t.violations.id, v.id)).get()!;
+    const ordinal = violationsInForce(tx, user.id).findIndex((x) => x.id === v.id) + 1;
+    return noticeOf(tx, fresh, ordinal);
+  });
 }
 
 export function acknowledgeWarning(ctx: AppContext, user: AuthUser, violationId: string): void {
@@ -357,17 +469,12 @@ export function submitAppeal(
     const v = tx.select().from(t.violations).where(eq(t.violations.id, input.violationId)).get();
     if (!v || v.userId !== user.id) throw notFound('violation');
     if (v.revokedAt !== null) throw badRequest('already_revoked', 'this violation was revoked');
-    // An appeal deadline, when one is configured at all (it is not by default), never closes
-    // while the account is still suspended or banned: appealing is its only remaining move.
-    const window = ctx.config.retention.appealWindowMs;
-    if (window !== null && now >= v.decidedAt + window) {
-      const standing = standingOf(tx, user.id, now).standing;
-      if (standing !== 'suspended' && standing !== 'banned')
-        throw badRequest(
-          'appeal_window_closed',
-          'the time allowed to appeal this decision has passed',
-        );
-    }
+    // The single opportunity, once given up, is gone. There is no time limit — only this.
+    if (v.appealWaivedAt !== null)
+      throw conflict(
+        'appeal_waived',
+        'You chose to continue without appealing this decision, so it can no longer be appealed.',
+      );
     const existing = tx.select().from(t.appeals).where(eq(t.appeals.violationId, v.id)).get();
     if (existing) {
       throw conflict(
@@ -388,6 +495,20 @@ export function submitAppeal(
       })
       .onConflictDoNothing()
       .run();
+    const stored = tx.select().from(t.appeals).where(eq(t.appeals.violationId, v.id)).get()!;
+    writeAudit(
+      tx,
+      {
+        action: 'appeal_submitted',
+        caseId: v.caseId,
+        violationId: v.id,
+        appealId: stored.id,
+        subjectUserId: v.userId,
+        actorUserId: user.id,
+        actorRole: 'member',
+      },
+      now,
+    );
     // A concurrent duplicate lost the unique index race: report the one that won.
     const ordinal = violationsInForce(tx, user.id).findIndex((x) => x.id === v.id) + 1;
     return noticeOf(tx, v, ordinal);

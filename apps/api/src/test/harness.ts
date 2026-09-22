@@ -17,7 +17,7 @@ import type { Clock } from '../lib/clock.js';
 import { OutboxMailer } from '../lib/mail.js';
 import type { createApp } from '../http/app.js';
 import type { AppContext, AuthUser } from '../services/context.js';
-import { RETENTION_OFF } from '../services/retention.js';
+import { RETENTION_DEFAULT } from '../services/retention.js';
 
 export class ManualClock implements Clock {
   constructor(private current: number) {}
@@ -65,7 +65,8 @@ export function testConfig(overrides: Partial<AppConfig> = {}): AppConfig {
       tickMs: 1000,
       autoDecide: false,
     },
-    retention: RETENTION_OFF,
+    retention: RETENTION_DEFAULT,
+    retentionTickMs: 60 * 60 * 1000,
     ...overrides,
   };
 }
@@ -127,6 +128,17 @@ export async function loginAs(
   if (res.status !== 200) throw new Error(`login ${username} failed: ${res.status}`);
   const body = (await res.json()) as { token: string; user: { id: string } };
   return { token: body.token, id: body.user.id };
+}
+
+// Grants a seeded account the developer role, which is what the DEV simulation controls
+// require. A test that drives /api/dev/* has to do this, exactly as a person would have to be
+// granted the role by CLI: the controls are not open to ordinary members or to administrators.
+export function makeDeveloper(w: TestWorld, username: string): void {
+  w.db
+    .update(t.users)
+    .set({ role: 'developer', roleGrantedAt: w.clock.now(), roleGrantedBy: 'test' })
+    .where(eq(t.users.id, w.user(username).id))
+    .run();
 }
 
 export const SAMPLE_TEXT = 'Dear friend,\nthe tide was gentle this morning. — A';

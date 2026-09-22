@@ -41,7 +41,7 @@ describe('public legal pages', () => {
       expect(html).not.toMatch(/[֐-׿]/);
       expect(html).not.toMatch(/\bdraft\b/i);
       expect(html).not.toMatch(/\b18\b/);
-      expect(html).not.toMatch(/age[- ]?verif/i);
+      expect(html).not.toMatch(/you must be at least/i);
     }
   });
 
@@ -55,10 +55,10 @@ describe('public legal pages', () => {
 
     const cs = await (await app.request('/legal/child-safety')).text();
     expect(cs).toMatch(/child sexual abuse/i);
-    expect(cs).toMatch(/grooming/i);
-    expect(cs).toMatch(/report it from the reader/i);
+    expect(cs).toMatch(/groom/i);
+    expect(cs).toMatch(/Reporting from inside SeaYou is the fastest route/i);
     expect(cs).toMatch(/permanent ban/i);
-    expect(cs).toMatch(/valid legal requests/i);
+    expect(cs).toMatch(/where applicable law requires it/i);
     expect(cs).toMatch(/support page/i);
     // It names the project support contact and nothing personal: one address on the page, and
     // it is the support address.

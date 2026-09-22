@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { PRODUCT_NAME, RETIRED_PRODUCT_PHRASES } from './brand.js';
 import { SUPPORT_EMAIL, SUPPORT_NAME, SUPPORT_PATH, supportMailto } from './support.js';
 import {
   CHILD_SAFETY_STANDARDS,
@@ -32,7 +33,7 @@ describe('the published documents', () => {
       expect(d.version).toBe(POLICY_VERSION);
       expect(POLICY_VERSION).toBe('1.0');
       expect(d.effective).toBe(POLICY_EFFECTIVE);
-      expect(d.effective).toBe('Effective when published in the App');
+      expect(d.effective).toBe('Effective when published in SeaYou');
       expect(d.lang).toBe('en');
       expect(d.dir).toBe('ltr');
       expect(d.blocks.length).toBeGreaterThan(3);
@@ -71,7 +72,8 @@ describe('the published documents', () => {
   it('state no age requirement and make no claim that users are adults or age-verified', () => {
     for (const pattern of [
       /\b18\b/,
-      /\bage[- ]?verif/i,
+      /\byou must be at least\b/i,
+      /\bwe verify (the )?age\b/i,
       /\bdate of birth\b/i,
       /\bbirth ?date\b/i,
       /\badults only\b/i,
@@ -82,6 +84,11 @@ describe('the published documents', () => {
     ]) {
       expect(everything, String(pattern)).not.toMatch(pattern);
     }
+    // Saying plainly that there is no age verification is the point, and is not a claim that
+    // anyone has been verified.
+    expect(textOf(TERMS_OF_USE)).toMatch(/does not claim that its users have been age-verified/i);
+    expect(textOf(TERMS_OF_USE)).toMatch(/not marketed as a children's app/i);
+    expect(textOf(CHILD_SAFETY_STANDARDS)).toMatch(/not marketed as a children's app/i);
   });
 
   it('name no operator, address, company, registration number or jurisdiction', () => {
@@ -91,67 +98,208 @@ describe('the published documents', () => {
       /\bjurisdiction\b/i,
       /\bcourts? of\b/i,
       /\bcompany number\b/i,
-      /Message in a Bottle/,
     ]) {
       expect(everything, String(pattern)).not.toMatch(pattern);
     }
-    // The only address anywhere is the project's support contact — never a personal one.
+    // The only address anywhere is the project's support contact — never a personal one, and
+    // never escaped: a rendered backslash before the @ would make it uncopyable.
     const addresses = new Set(everything.match(/[\w.+-]+@[\w.-]+\.[a-z]{2,}/gi) ?? []);
     expect([...addresses]).toEqual([SUPPORT_EMAIL]);
-    // The product is referred to only as "the App".
-    expect(everything).toMatch(/\bthe App\b/);
+    expect(everything).not.toContain('\\@');
+    // Where the text needs a legal actor it says "the operator of SeaYou", never treating the
+    // software itself as one and never naming a person or a company.
+    expect(textOf(TERMS_OF_USE)).toContain(`the operator of ${PRODUCT_NAME}`);
   });
 
-  it('describe the moderation system the App actually implements', () => {
+  it('call the product SeaYou, everywhere, and never by a retired name', () => {
+    expect(PRODUCT_NAME).toBe('SeaYou');
+    expect(everything).toContain('SeaYou');
+    for (const phrase of RETIRED_PRODUCT_PHRASES) expect(everything, phrase).not.toContain(phrase);
+    for (const d of PUBLISHED_DOCUMENTS)
+      expect(`${d.title}\n${d.summary}`, d.slug).not.toMatch(/\bthe App\b/i);
+    expect(SUPPORT_NAME).toBe('SeaYou Support');
+  });
+
+  it('describe the moderation system SeaYou actually implements', () => {
     const terms = textOf(TERMS_OF_USE);
-    expect(terms).toMatch(/recommendation/i);
-    expect(terms).toMatch(/does not decide anything/i);
-    expect(terms).toMatch(/human administrator/i);
+    const rules = textOf(COMMUNITY_RULES);
+
+    // Automated review recommends; a person decides. Nothing here may imply otherwise.
+    for (const body of [terms, rules]) {
+      expect(body).toMatch(/recommendation/i);
+      expect(body).toMatch(/decided by a person/i);
+    }
     expect(terms).toMatch(/not disclosed to its sender/i);
-    expect(terms).toMatch(/First upheld violation: a warning/);
+    expect(terms).toMatch(/required by law/i);
+
+    // The ladder, and the fact that it never resets.
+    expect(terms).toMatch(/A first upheld violation is a warning/);
     expect(terms).toMatch(/seven-day suspension/);
     expect(terms).toMatch(/permanent ban/);
-    expect(terms).toMatch(/one appeal/i);
-    expect(terms).toMatch(/accepted appeal reverses the violation/i);
-    const rules = textOf(COMMUNITY_RULES);
+    expect(terms).toMatch(/remain counted unless they are reversed on appeal/i);
+    expect(terms).toMatch(/does not remove that violation from the count/i);
+    expect(rules).toMatch(/stay counted unless an appeal reverses them|remain counted unless/i);
+
+    // Nothing may suggest a violation ages out. Denying it is required; claiming it is a bug.
+    for (const body of [terms, rules])
+      for (const pattern of [
+        /violations? (will )?expire/i,
+        /age out/i,
+        /removed after \d+ (months|years)/i,
+        /expire after/i,
+      ])
+        expect(body, String(pattern)).not.toMatch(pattern);
+    expect(terms).toMatch(/They do not expire/i);
+
+    // The immediate appeal and the explicit waiver.
+    expect(terms).toMatch(/appeal the decision, or continue without appealing/i);
+    expect(terms).toMatch(/permanently giving up the appeal/i);
+    expect(terms).toMatch(/without choosing does not give up anything/i);
+    expect(terms).toMatch(/can be appealed once/i);
+    expect(terms).toMatch(/rejected is final/i);
+    expect(terms).toMatch(/accepted withdraws the violation/i);
+    expect(terms).toMatch(/recalculated immediately/i);
+    expect(rules).toMatch(/closing or reloading without choosing gives up nothing/i);
+
+    // One case, one violation.
+    expect(rules).toMatch(/single case/i);
+    expect(rules).toMatch(/at most one violation/i);
+
+    // Critical child-safety enforcement, which the admin console can actually apply.
+    expect(terms).toMatch(/critical child-safety violation results in an immediate permanent ban/i);
+    expect(terms).toMatch(/can still be appealed once/i);
+
     for (const prohibited of [
-      /grooming/i,
-      /child sexual abuse/i,
+      /groom/i,
+      /sexual content involving a minor/i,
       /threats/i,
       /harassment/i,
-      /hatred/i,
+      /hate/i,
       /phishing/i,
       /spam/i,
-      /unlawful/i,
+      /illegal/i,
     ]) {
       expect(rules, String(prohibited)).toMatch(prohibited);
     }
-    // The public-ocean finder gets one reading and no archive.
-    expect(textOf(PRIVACY_POLICY)).toMatch(/single reading session/i);
-    expect(textOf(PRIVACY_POLICY)).toMatch(/no lasting archive/i);
-    expect(textOf(PRIVACY_POLICY)).toMatch(/72 hours/);
-    expect(textOf(PRIVACY_POLICY)).toMatch(/15 minutes/);
+
+    // Distress and good-faith disclosure are protected, in both documents that judge conduct.
+    expect(rules).toMatch(/self-harm or suicide is not a violation/i);
+    expect(rules).toMatch(/difficult language alone/i);
+    expect(rules).toMatch(/good-faith disclosure/i);
+    for (const body of [rules, textOf(CHILD_SAFETY_STANDARDS)]) {
+      expect(body).toMatch(/Describing abuse is not the same as committing it/i);
+      expect(body).toMatch(/contain, request, facilitate or link to abusive material/i);
+    }
+    // External reporting is conditional, never automatic.
+    for (const body of [rules, textOf(CHILD_SAFETY_STANDARDS)]) {
+      expect(body).toMatch(/where (applicable )?law requires/i);
+      expect(body).toMatch(/not (automatically )?forwarded to an authority automatically/i);
+    }
   });
 
-  it('promise account deletion only in the terms the App implements', () => {
+  it('describe journeys the way the server actually runs them', () => {
+    const terms = textOf(TERMS_OF_USE);
+    expect(terms).toMatch(/derived from that route and its distance/i);
+    expect(terms).toMatch(/elapsed time measured by the server/i);
+    expect(terms).toMatch(/device clock or time zone does not make a journey arrive/i);
+    expect(terms).toMatch(/harbour you are already at arrives immediately/i);
+    expect(terms).toMatch(/adrift in the public ocean/i);
+    expect(terms).toMatch(/72 hours/);
+    expect(terms).toMatch(/one reading session/i);
+    expect(terms).toMatch(/15 minutes/);
+    expect(terms).toMatch(/do not keep a copy/i);
+    expect(terms).toMatch(/sinks is not shown in the public ocean/i);
+    expect(terms).toMatch(/can be delayed/i);
+  });
+
+  it('describe blocking as both directions and the public ocean', () => {
+    for (const body of [textOf(TERMS_OF_USE), textOf(COMMUNITY_RULES)]) {
+      expect(body).toMatch(/both directions/i);
+      expect(body).toMatch(/public-ocean/i);
+    }
+    expect(textOf(TERMS_OF_USE)).toMatch(/cannot reach anything already read, copied/i);
+  });
+
+  it('describe evidence retention exactly as it is implemented', () => {
     const privacy = textOf(PRIVACY_POLICY);
-    expect(privacy).toMatch(/delete your account from the account settings/i);
-    expect(privacy).toMatch(/account-deletion page on the public support site/i);
-    expect(privacy).toMatch(/asks for your password and an explicit final confirmation/i);
-    expect(privacy).toMatch(/every session is revoked immediately/i);
-    expect(textOf(TERMS_OF_USE)).toMatch(/delete your account/i);
+    expect(privacy).toMatch(/redacted seven days after the case becomes final/i);
+    expect(privacy).toMatch(/report is rejected/i);
+    expect(privacy).toMatch(/explicitly gives up the appeal/i);
+    expect(privacy).toMatch(/appeal they submitted has been decided/i);
+    expect(privacy).toMatch(/while an appeal is pending, the case is not final/i);
+    expect(privacy).toMatch(/upheld violations do not expire/i);
+    expect(privacy).toMatch(/documented legal or immediate child-safety hold/i);
+    expect(privacy).toMatch(/Releasing the hold returns the case to the ordinary calculation/i);
   });
 
-  it('publish child safety standards covering prohibition, reporting, removal and legal requests', () => {
+  it('describe browser storage exactly, and claim no more', () => {
+    const privacy = textOf(PRIVACY_POLICY);
+    // Every mechanism the implementation uses, named, with when it is cleared.
+    expect(privacy).toMatch(/session token, in sessionStorage/i);
+    expect(privacy).toMatch(/in sessionStorage, so that a reload does not lose it/i);
+    expect(privacy).toMatch(/time zone your device last reported, in localStorage/i);
+    expect(privacy).toMatch(/removed when you sign out/i);
+    // And the ones it does not.
+    expect(privacy).toMatch(/sets no cookies, and uses no IndexedDB/i);
+    // No absolute "no third-party code" claim; the honest narrower one instead.
+    expect(privacy).not.toMatch(/no third-party code/i);
+    expect(privacy).toMatch(
+      /no advertising trackers, no analytics SDKs and no advertising pixels/i,
+    );
+    expect(privacy).toMatch(/third-party software libraries/i);
+    expect(privacy).toMatch(/Data Safety declaration will be reviewed and updated/i);
+  });
+
+  it('describe network and support data without absolute claims', () => {
+    const privacy = textOf(PRIVACY_POLICY);
+    expect(privacy).toMatch(/Network addresses may be processed for security and rate limiting/i);
+    expect(privacy).toMatch(/does not intentionally store them in its application database/i);
+    expect(privacy).toMatch(/hosting and security providers may retain limited technical logs/i);
+    expect(privacy).not.toMatch(/never stores? (your )?IP/i);
+    expect(privacy).toMatch(/not stored in the SeaYou application database/i);
+    expect(privacy).toMatch(/security, privacy or moderation action/i);
+  });
+
+  it('require verification for a privacy request, but never an identity document', () => {
+    const privacy = textOf(PRIVACY_POLICY);
+    expect(privacy).toMatch(/authenticated session/i);
+    expect(privacy).toMatch(/one-time verification link/i);
+    expect(privacy).toMatch(
+      /government identity document is not required and will not be requested/i,
+    );
+  });
+
+  it('publish child safety standards that match the enforcement that exists', () => {
     const cs = textOf(CHILD_SAFETY_STANDARDS);
-    expect(cs).toMatch(/child sexual abuse material/i);
-    expect(cs).toMatch(/grooming/i);
-    expect(cs).toMatch(/prohibited absolutely/i);
-    expect(cs).toMatch(/report it from the reader/i);
-    expect(cs).toMatch(/withdrawn from further reading/i);
-    expect(cs).toMatch(/permanent ban/i);
-    expect(cs).toMatch(/valid legal requests/i);
-    expect(cs).toMatch(/support page/i);
+    expect(cs).toMatch(/prohibits child sexual abuse and exploitation absolutely/i);
+    expect(cs).toMatch(/forbidden for every user without exception/i);
+    expect(cs).toMatch(/groom/i);
+    expect(cs).toContain(PRODUCT_NAME);
+    // Who can report, stated so it cannot be read as "anyone who can read it" when the sender
+    // has no such flow.
+    expect(cs).toMatch(/The person a letter was sent to can report it/i);
+    expect(cs).toMatch(/eligible finder/i);
+    expect(cs).toMatch(/sender cannot report their own letter through this flow/i);
+    expect(cs).not.toMatch(/anyone who can read/i);
+    // Report and Block are distinct, and blocking covers the public ocean.
+    expect(cs).toMatch(/Report and Block are separate actions/i);
+    expect(cs).toMatch(/public-ocean interactions/i);
+    // In-app reporting opens a case; email is for what cannot be reported in app, and makes no
+    // claim to create the same case.
+    expect(cs).toMatch(/opens a moderation case/i);
+    expect(cs).toMatch(/cannot be reported from inside/i);
+    expect(cs).toMatch(/does not automatically create the same moderation case/i);
+    // The enforcement it describes is the one the admin console can actually apply.
+    expect(cs).toMatch(/critical child-safety violation/i);
+    expect(cs).toMatch(/permanent ban applied immediately/i);
+    expect(cs).toMatch(
+      /requires an administrator, a recorded reason and an explicit confirmation/i,
+    );
+    expect(cs).toMatch(/Automated review can never apply it/i);
+    expect(cs).toMatch(/single appeal opportunity still applies/i);
+    // Retention and the hold.
+    expect(cs).toMatch(/seven days after the case becomes final/i);
+    expect(cs).toMatch(/documented legal or immediate child-safety hold/i);
     // It is published but never part of what a person accepts.
     expect(POLICY_IDS).not.toContain('child-safety' as never);
   });
@@ -181,9 +329,14 @@ describe('the published documents', () => {
     expect(everything).not.toMatch(/response time/i);
   });
 
-  it('tell people support never asks for credentials', () => {
-    expect(textOf(PRIVACY_POLICY)).toMatch(/never ask you for a password/i);
-    expect(textOf(TERMS_OF_USE)).toMatch(/never ask you for a password/i);
+  it('tell people support never asks for credentials, in the agreed words', () => {
+    for (const body of [textOf(PRIVACY_POLICY), textOf(TERMS_OF_USE)]) {
+      expect(body).toContain(
+        'Do not send passwords, verification codes, payment details or identity documents ' +
+          'through ordinary support requests. SeaYou Support will not request your password ' +
+          'or verification codes.',
+      );
+    }
   });
 
   it('builds a support mailto with an encoded subject', () => {

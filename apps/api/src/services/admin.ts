@@ -13,9 +13,12 @@ import type { DbOrTx } from '../db/client.js';
 import * as t from '../db/schema.js';
 import { newId } from '../lib/ids.js';
 import { conflict, notFound } from '../lib/errors.js';
+import { badRequest } from '../lib/errors.js';
 import type { AppContext, AuthUser } from './context.js';
-import { notifyStanding, standingOf } from './moderation.js';
+import { appealAvailable, notifyStanding, standingOf } from './moderation.js';
 import { enqueueNotification } from './notifications.js';
+import { writeAudit } from './audit.js';
+import { finalityOf, holdOf } from './retention.js';
 
 // The admin side of moderation: reading cases with their evidence, deciding them, and deciding
 // appeals. Every state change here is one transaction guarded by the row's current status, so
@@ -90,7 +93,7 @@ function summaryOf(db: DbOrTx, c: CaseRow): AdminCaseSummaryDto {
   };
 }
 
-function detailOf(db: DbOrTx, c: CaseRow): AdminCaseDetailDto {
+function detailOf(db: DbOrTx, c: CaseRow, finalAfterMs: number): AdminCaseDetailDto {
   const bottle = db.select().from(t.bottles).where(eq(t.bottles.id, c.bottleId)).get()!;
   const reports = db
     .select()
@@ -128,6 +131,35 @@ function detailOf(db: DbOrTx, c: CaseRow): AdminCaseDetailDto {
           createdAt: iso(appeal.createdAt),
         }
       : null,
+    retention: (() => {
+      const { finalAt, hold } = finalityOf(db, c);
+      const held = holdOf(c);
+      return {
+        finalAt: isoOrNull(finalAt),
+        redactableAt: finalAt === null ? null : iso(finalAt + finalAfterMs),
+        hold:
+          c.evidenceRedactedAt !== null ? 'already_redacted' : (held ?? hold ?? 'within_window'),
+      };
+    })(),
+    hold:
+      c.holdReason === null
+        ? null
+        : {
+            reason: c.holdReason,
+            note: c.holdNote ?? '',
+            placedAt: iso(c.holdAt!),
+            placedBy: c.holdByUserId === null ? null : person(db, c.holdByUserId),
+            releasedAt: isoOrNull(c.holdReleasedAt),
+          },
+    violation: violation
+      ? {
+          id: violation.id,
+          severity: violation.severity,
+          appealAvailable: appealAvailable(db, violation),
+          appealWaivedAt: isoOrNull(violation.appealWaivedAt),
+          noticePresentedAt: isoOrNull(violation.noticePresentedAt),
+        }
+      : null,
   };
 }
 
@@ -145,7 +177,7 @@ export function listCases(ctx: AppContext, status: CaseStatus | 'all'): AdminCas
 export function getCase(ctx: AppContext, caseId: string): AdminCaseDetailDto {
   const c = ctx.db.select().from(t.moderationCases).where(eq(t.moderationCases.id, caseId)).get();
   if (!c) throw notFound('case');
-  return detailOf(ctx.db, c);
+  return detailOf(ctx.db, c, ctx.config.retention.finalAfterMs);
 }
 
 // Decides a pending case. `admin` is null when the model decides under MIB_AI_AUTO_DECIDE.
@@ -182,7 +214,22 @@ export function decideCase(
       .where(and(eq(t.moderationCases.id, caseId), eq(t.moderationCases.status, 'pending')))
       .run();
     if (moved.changes !== 1) throw conflict('already_decided', 'This case was decided meanwhile.');
-    if (outcome === 'rejected') return true;
+    if (outcome === 'rejected') {
+      writeAudit(
+        tx,
+        {
+          action: 'case_decided',
+          caseId,
+          subjectUserId: c.senderId,
+          actorUserId: admin?.id ?? null,
+          actorRole: admin ? 'admin' : 'system',
+          reason: reason ?? null,
+          detail: 'rejected; no violation recorded',
+        },
+        now,
+      );
+      return true;
+    }
 
     const firstReport = tx
       .select()
@@ -213,6 +260,20 @@ export function decideCase(
       .where(eq(t.bottles.id, c.bottleId))
       .run();
     const bottle = tx.select().from(t.bottles).where(eq(t.bottles.id, c.bottleId)).get()!;
+    writeAudit(
+      tx,
+      {
+        action: 'case_decided',
+        caseId,
+        violationId,
+        subjectUserId: c.senderId,
+        actorUserId: admin?.id ?? null,
+        actorRole: admin ? 'admin' : 'system',
+        reason: reason ?? null,
+        detail: `upheld (${admin ? 'administrator' : 'automatic'})`,
+      },
+      now,
+    );
     const standing = standingOf(tx, c.senderId, now);
     notifyStanding(
       tx,
@@ -227,7 +288,11 @@ export function decideCase(
 
 // ---------- appeals ----------
 
-function appealOf(db: DbOrTx, a: typeof t.appeals.$inferSelect): AdminAppealDto {
+function appealOf(
+  db: DbOrTx,
+  a: typeof t.appeals.$inferSelect,
+  finalAfterMs: number,
+): AdminAppealDto {
   const v = db.select().from(t.violations).where(eq(t.violations.id, a.violationId)).get()!;
   const c = db.select().from(t.moderationCases).where(eq(t.moderationCases.id, v.caseId)).get()!;
   return {
@@ -242,7 +307,7 @@ function appealOf(db: DbOrTx, a: typeof t.appeals.$inferSelect): AdminAppealDto 
       decidedAt: iso(v.decidedAt),
       revokedAt: isoOrNull(v.revokedAt),
     },
-    case: detailOf(db, c),
+    case: detailOf(db, c, finalAfterMs),
     decision:
       a.decidedAt && a.decidedByUserId && a.status !== 'pending'
         ? {
@@ -266,13 +331,13 @@ export function listAppeals(
     .orderBy(desc(t.appeals.createdAt))
     .limit(200)
     .all()
-    .map((a) => appealOf(ctx.db, a));
+    .map((a) => appealOf(ctx.db, a, ctx.config.retention.finalAfterMs));
 }
 
 export function getAppeal(ctx: AppContext, appealId: string): AdminAppealDto {
   const a = ctx.db.select().from(t.appeals).where(eq(t.appeals.id, appealId)).get();
   if (!a) throw notFound('appeal');
-  return appealOf(ctx.db, a);
+  return appealOf(ctx.db, a, ctx.config.retention.finalAfterMs);
 }
 
 // Accepting an appeal revokes the violation (it stops counting at once, which is what lifts an
@@ -307,6 +372,24 @@ export function decideAppeal(
       throw conflict('already_decided', 'This appeal was decided meanwhile.');
     const v = tx.select().from(t.violations).where(eq(t.violations.id, a.violationId)).get()!;
     const bottle = tx.select().from(t.bottles).where(eq(t.bottles.id, v.bottleId)).get()!;
+    writeAudit(
+      tx,
+      {
+        action: 'appeal_decided',
+        caseId: v.caseId,
+        violationId: v.id,
+        appealId: a.id,
+        subjectUserId: a.userId,
+        actorUserId: admin.id,
+        actorRole: 'admin',
+        reason: reason ?? null,
+        detail:
+          outcome === 'accepted'
+            ? 'accepted; violation revoked and standing recalculated'
+            : 'rejected; the decision is final and cannot be appealed again',
+      },
+      now,
+    );
     if (outcome === 'accepted') {
       tx.update(t.violations)
         .set({ revokedAt: now, revokedByUserId: admin.id })
@@ -347,4 +430,196 @@ export function decideAppeal(
     }
     return true;
   });
+}
+
+// ---------- confirmed critical child-safety enforcement ----------
+
+// Upholds a report as a confirmed critical child-safety violation, which bans the account
+// immediately instead of walking the warning ladder (one warns, two suspend, three ban).
+//
+// Every guard here is deliberate:
+//
+//   • `admin` is a required administrator, not `AuthUser | null` as an ordinary decision is.
+//     There is no code path that reaches this from the AI review worker, and none that can be
+//     added by flipping a configuration flag: the model can only ever recommend.
+//   • the reason is mandatory and is validated before it gets here, so no account is ever
+//     banned this way without an administrator writing down why.
+//   • the classification is recorded on the violation (`severity = 'critical'`), so the ban
+//     survives an accepted appeal being reasoned about later, and the audit row survives the
+//     evidence itself being redacted.
+//   • the single appeal opportunity is untouched. A critical decision is still appealable
+//     exactly once, and an accepted appeal revokes it and recalculates standing like any
+//     other — a ban is not a way around review.
+//
+// The UI puts this behind a strong confirmation, but that is a courtesy, not the control:
+// the authority lives here.
+export function decideCaseCritical(
+  ctx: AppContext,
+  admin: AuthUser,
+  caseId: string,
+  reason: string,
+): AdminCaseDetailDto {
+  const trimmed = reason.trim();
+  if (!trimmed)
+    throw badRequest('reason_required', 'a critical child-safety decision requires a reason');
+  const now = ctx.realClock.now();
+  ctx.db.transaction((tx) => {
+    const c = tx.select().from(t.moderationCases).where(eq(t.moderationCases.id, caseId)).get();
+    if (!c) throw notFound('case');
+    if (c.status === 'rejected')
+      throw conflict('already_decided', 'This case was already rejected.');
+
+    // Upholding it, if that has not happened yet. A case already accepted the ordinary way can
+    // still be escalated: the classification is what changes, not the outcome.
+    if (c.status === 'pending') {
+      tx.update(t.moderationCases)
+        .set({
+          status: 'accepted',
+          decidedOutcome: 'accepted',
+          decidedBy: 'admin',
+          decidedByUserId: admin.id,
+          decidedAt: now,
+          decisionReason: trimmed,
+          updatedAt: now,
+        })
+        .where(and(eq(t.moderationCases.id, caseId), eq(t.moderationCases.status, 'pending')))
+        .run();
+      const firstReport = tx
+        .select()
+        .from(t.letterReports)
+        .where(eq(t.letterReports.caseId, caseId))
+        .orderBy(t.letterReports.createdAt)
+        .get();
+      tx.insert(t.violations)
+        .values({
+          id: newId('vio'),
+          caseId,
+          userId: c.senderId,
+          bottleId: c.bottleId,
+          category: firstReport?.reason ?? 'child_safety',
+          decidedAt: now,
+          decidedBy: 'admin',
+          decidedByUserId: admin.id,
+          reason: trimmed,
+          severity: 'critical',
+          createdAt: now,
+        })
+        .onConflictDoNothing()
+        .run();
+      tx.update(t.bottles)
+        .set({ moderationStatus: 'removed' })
+        .where(eq(t.bottles.id, c.bottleId))
+        .run();
+    }
+
+    const violation = tx.select().from(t.violations).where(eq(t.violations.caseId, caseId)).get();
+    if (!violation) throw conflict('no_violation', 'This case has no violation to classify.');
+    if (violation.revokedAt !== null)
+      throw conflict('already_revoked', 'This violation was revoked on appeal.');
+    tx.update(t.violations)
+      .set({ severity: 'critical', reason: trimmed })
+      .where(eq(t.violations.id, violation.id))
+      .run();
+
+    writeAudit(
+      tx,
+      {
+        action: 'critical_child_safety',
+        caseId,
+        violationId: violation.id,
+        subjectUserId: c.senderId,
+        actorUserId: admin.id,
+        actorRole: 'admin',
+        reason: trimmed,
+        detail: 'classified as a confirmed critical child-safety violation; permanent ban applied',
+      },
+      now,
+    );
+    const bottle = tx.select().from(t.bottles).where(eq(t.bottles.id, c.bottleId)).get()!;
+    notifyStanding(
+      tx,
+      c.senderId,
+      { id: violation.id, recipientName: bottle.recipientNameSnapshot },
+      standingOf(tx, c.senderId, now),
+      ctx.clock.now(),
+    );
+  });
+  return getCase(ctx, caseId);
+}
+
+// ---------- legal and child-safety holds ----------
+
+// Keeps a case's evidence beyond the ordinary seven days, for a documented reason. A hold is
+// never implicit and never permanent by accident: it records why, who placed it and when, and
+// releasing it returns the case to the normal retention calculation immediately.
+export function placeHold(
+  ctx: AppContext,
+  admin: AuthUser,
+  caseId: string,
+  reason: 'legal' | 'child_safety',
+  note: string,
+): AdminCaseDetailDto {
+  const trimmed = note.trim();
+  if (!trimmed) throw badRequest('note_required', 'a hold requires a documented reason');
+  const now = ctx.realClock.now();
+  ctx.db.transaction((tx) => {
+    const c = tx.select().from(t.moderationCases).where(eq(t.moderationCases.id, caseId)).get();
+    if (!c) throw notFound('case');
+    if (c.evidenceRedactedAt !== null)
+      throw conflict('already_redacted', 'This case’s evidence has already been redacted.');
+    tx.update(t.moderationCases)
+      .set({
+        holdReason: reason,
+        holdNote: trimmed,
+        holdByUserId: admin.id,
+        holdAt: now,
+        // Placing a hold again clears any previous release: this is the live hold now.
+        holdReleasedAt: null,
+        holdReleasedByUserId: null,
+        updatedAt: now,
+      })
+      .where(eq(t.moderationCases.id, caseId))
+      .run();
+    writeAudit(
+      tx,
+      {
+        action: 'hold_placed',
+        caseId,
+        subjectUserId: c.senderId,
+        actorUserId: admin.id,
+        actorRole: 'admin',
+        reason: trimmed,
+        detail: `${reason} hold; evidence retained beyond the seven-day window`,
+      },
+      now,
+    );
+  });
+  return getCase(ctx, caseId);
+}
+
+export function releaseHold(ctx: AppContext, admin: AuthUser, caseId: string): AdminCaseDetailDto {
+  const now = ctx.realClock.now();
+  ctx.db.transaction((tx) => {
+    const c = tx.select().from(t.moderationCases).where(eq(t.moderationCases.id, caseId)).get();
+    if (!c) throw notFound('case');
+    if (c.holdReason === null || c.holdReleasedAt !== null)
+      throw conflict('no_hold', 'This case is not under a hold.');
+    tx.update(t.moderationCases)
+      .set({ holdReleasedAt: now, holdReleasedByUserId: admin.id, updatedAt: now })
+      .where(and(eq(t.moderationCases.id, caseId), isNull(t.moderationCases.holdReleasedAt)))
+      .run();
+    writeAudit(
+      tx,
+      {
+        action: 'hold_released',
+        caseId,
+        subjectUserId: c.senderId,
+        actorUserId: admin.id,
+        actorRole: 'admin',
+        detail: 'hold released; the case returns to the ordinary seven-day calculation',
+      },
+      now,
+    );
+  });
+  return getCase(ctx, caseId);
 }

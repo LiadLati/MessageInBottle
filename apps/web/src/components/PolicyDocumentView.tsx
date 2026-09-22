@@ -2,7 +2,7 @@ import type { PolicyBlock, PolicyDocument } from '@mib/shared';
 
 // Renders a legal document from its structured blocks: real headings and lists, English
 // left-to-right, readable measure. The same content is served on the public web pages, so what
-// a person reads in the App and what they read at the public URL are the same text.
+// a person reads in SeaYou and what they read at the public URL are the same text.
 
 function Block({ block }: { block: PolicyBlock }) {
   switch (block.type) {

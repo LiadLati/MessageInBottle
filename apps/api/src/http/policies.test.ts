@@ -41,7 +41,7 @@ describe('the documents', () => {
     expect(body.documents.map((d) => d.id)).toEqual(PUBLISHED_DOCUMENTS.map((d) => d.id));
     for (const d of body.documents) {
       expect(d.version).toBe('1.0');
-      expect(d.effective).toBe('Effective when published in the App');
+      expect(d.effective).toBe('Effective when published in SeaYou');
     }
 
     const terms = await app.request('/api/policies/terms');

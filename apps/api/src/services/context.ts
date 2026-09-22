@@ -1,3 +1,4 @@
+import type { AccountRole } from '@mib/shared';
 import type { AppConfig } from '../config.js';
 import type { Db } from '../db/client.js';
 import type { Clock } from '../lib/clock.js';
@@ -24,5 +25,5 @@ export interface AuthUser {
   // The zone the account's nights are counted in; null until a device has reported one.
   timeZone: string | null;
   // Read from the users row on every request; only the server-side grant tool changes it.
-  role: 'member' | 'admin';
+  role: AccountRole;
 }

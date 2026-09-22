@@ -10,7 +10,7 @@ import type { AppContext } from './context.js';
 
 // Deleting an account, at its owner's request, as one transactional and idempotent operation.
 //
-// The account row is kept and emptied rather than dropped. Every letter in the App is a row
+// The account row is kept and emptied rather than dropped. Every letter in SeaYou is a row
 // pointing at two accounts, and moderation cases point at a third; deleting the row would
 // either break those references or force the deletion of letters that belong to the people who
 // received them. So the row survives as an anonymous marker — no name, no address, no password,

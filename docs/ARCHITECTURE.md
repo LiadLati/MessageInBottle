@@ -307,7 +307,7 @@ and the new `risk_decisions` table (one row per bottle per storm night, unique o
   inline stylesheet, and `http/routes/legal.ts` serves them under `/legal` — unauthenticated,
   JavaScript-free, responsive, indexable. `/legal/delete-account` is a form post: credentials
   plus a required confirmation, rate-limited per address, reusing `login` and the same deletion
-  service as the App.
+  service as SeaYou.
 - **Deletion.** `services/deletion.ts` is one transaction and is idempotent. It revokes sessions,
   clears identifiers, drops friendships, blocks, notifications and idempotency records, cancels
   in-flight letters (releasing the harbour reservation, recording a `cancelled` event and
@@ -321,14 +321,44 @@ and the new `risk_decisions` table (one row per bottle per storm night, unique o
   `/support` from it with the address from `config.supportEmail` (`MIB_SUPPORT_EMAIL`), so an
   override reaches every link on the page. It is a `mailto:` surface only: no form, no sender,
   no store, and no credential anywhere. `SupportLink` in the web app is an ordinary link out to
-  the page, which is what keeps it reachable from the policy gate, a suspended account, an
-  appeal and the deletion dialog alike.
+  the page, which is what keeps it reachable from the policy gate, a suspended account, the
+  decision notice and the deletion dialog alike.
+- **Roles.** `users.role` holds exactly one of `member`, `admin`, `developer`, read from the row
+  on every request and never from anything a client sends. `requireAdmin` guards `/api/admin/*`;
+  `requireDeveloper` guards `/api/dev/*` and demands the role **and** `devMode`, so DEV controls
+  are unreachable in production even for a developer-role account, and an administrator gets 403
+  there. `tools/grant-role.ts` (behind `admin:grant` and `developer:grant`) is the only grant
+  surface: lookup, then `--confirm <stable id>`. Granting one role replaces the other, and no
+  account is seeded with either.
+- **The decision notice and the single appeal.** `violations.notice_presented_at` and
+  `appeal_waived_at` carry the one appeal opportunity. `presentDecisionNotice` records that the
+  notice reached the sender (idempotent; first value wins) — the server opens the appeal, the
+  client never asserts it. `waiveAppeal` is the only thing besides appealing that closes the
+  offer, is permanent and idempotent, and refuses once an appeal exists. Nothing about closing,
+  reloading or timing resolves a notice: `accountStanding.pendingDecision` is derived from the
+  rows, so an unanswered notice simply comes back. Every one of these writes a
+  `moderation_audit` row in the same transaction.
+- **Violations never expire.** `standingOf` counts violations with `revoked_at IS NULL` — an
+  accepted appeal is the only thing that removes one. Serving a suspension changes the standing
+  it produces, never the count. `severity = 'critical'` bans on its own: `decideCaseCritical`
+  takes a required `AuthUser`, so the review worker (which passes `null`) has no path to it, and
+  it records the administrator, the reason, the classification and the time.
+- **Evidence retention.** `services/retention.ts` redacts a case's content evidence seven days
+  after `finalityOf` says it is final — rejected, waived, or appeal decided — and is enabled by
+  default. `planRetention` is a pure dry run; `applyRetention` re-checks every case inside the
+  transaction, so an appeal or hold that arrived since the plan wins. A documented `legal` or
+  `child_safety` hold outranks the timer and is the only way past it; releasing it returns the
+  case to the ordinary calculation. Redaction clears the evidence copy and the reporters'
+  explanations only: the decision, the violation and the audit trail outlive them, because an
+  upheld violation does.
+- **Audit.** `moderation_audit` is append-only and written inside the transaction of the action
+  it describes, so there is no path that changes what a person may do without leaving a row —
+  and the trail survives the evidence it describes being redacted.
 - **No age data.** Nothing in the schema, the API or the interface collects or asserts an age;
   a test walks every production source file to keep it that way.
 
 ## Deliberately not implemented (per task scope)
 
 AI writing/rewriting, random recipients, appended notes, chat, GPS-assisted shore suggestion,
-island publication, rescue/discard, moderation console, push notifications,
-password reset / e-mail verification. Draft persistence is client-side (`sessionStorage`), as the
+island publication, rescue/discard, push notifications. Draft persistence is client-side (`sessionStorage`), as the
 specification's Draft state has no live journey.

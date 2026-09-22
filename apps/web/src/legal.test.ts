@@ -66,7 +66,12 @@ describe('production content', () => {
       /\bdateOfBirth\b/,
       /\bbirth[_ ]?date\b/i,
       /\bdob\b/i,
-      /age[_ -]?verif/i,
+      // Implementation shapes only. The documents themselves say, in prose, that there is no
+      // age-verification step — which is the opposite of a violation, so the plain phrase is
+      // not banned here; an identifier or a stored field would be.
+      /\bageVerifi/i,
+      /\bverifyAge\b/i,
+      /\bage_verif/i,
       /\bageConfirmed\b/i,
       /\bisAdult\b/i,
       /\bminimumAge\b/i,

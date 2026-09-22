@@ -1,13 +1,13 @@
 # Terms of Use, Community Rules, Privacy Policy and Child Safety Standards
 
-**Published at version `1.0`. Effective when published in the App.**
+**Published at version `1.0`. Effective when published in SeaYou.**
 
 The documents live in `packages/shared/src/policies.ts` as structured content, in English and
 left-to-right. One module serves three surfaces — the in-app reader, the public web pages and
 the acceptance records — so the text a person was shown, the version stored against their
 account and the text at the public URL cannot drift apart. The documents name no operator,
 address, company, registration number or jurisdiction, and refer to the product only as
-"the App".
+"SeaYou".
 
 ## What is published
 
@@ -35,7 +35,7 @@ Each document name is a link that opens the full-screen legal view without losin
 Both are required. The client explains what is missing and the server refuses independently:
 `RegisterRequestSchema.policies` demands three literal `true` flags plus the versions that were
 shown, and answers `409 policy_version_stale` if they are not current. There is no marketing
-consent, because the App does no marketing.
+consent, because SeaYou does no marketing.
 
 `policy_acceptances` (migration `0012`) records one row per document per acceptance: version,
 `accepted` or `acknowledged`, whether it happened at registration or later, and the real-clock
@@ -46,7 +46,7 @@ so history survives a version change.
 
 `accountPolicies` compares each document's latest accepted version with the current one.
 Anything different — including never accepted — gates the account: `requirePolicies` answers
-`403 policies_required` on chart, friends, bottles, shore, ocean and notifications, and the App
+`403 policies_required` on chart, friends, bottles, shore, ocean and notifications, and SeaYou
 shows the acceptance screen instead of the ocean. Authentication, reading the documents, the
 account's standing, appeals, signing out and **deleting the account** stay open throughout.
 Nothing is ever carried over silently; accounts that predate the documents have no rows and are
@@ -57,7 +57,7 @@ registration would, because they are new accounts rather than pre-existing ones.
 
 ## No age restriction
 
-The App has no age gate. There is no date-of-birth field, no age checkbox, no age verification,
+SeaYou has no age gate. There is no date-of-birth field, no age checkbox, no age verification,
 no stored verification timestamp and no underage registration block anywhere in the schema, the
 API or the interface, and the documents make no claim that users are adults or have been
 age-verified. A test walks every production source file and fails on any of those appearing.
@@ -67,14 +67,14 @@ grooming and child sexual abuse material are prohibited absolutely in the Commun
 the Child Safety Standards, which also set out in-app reporting, removal and sanctions, the
 handling of valid legal requests, and where to raise a concern.
 
-Not marketing the App to children is a Play Console target-audience and content-rating decision,
+Not marketing SeaYou to children is a Play Console target-audience and content-rating decision,
 not a registration restriction. See the list at the end of this file.
 
 ## Account deletion
 
 One transactional, idempotent server operation (`services/deletion.ts`), reachable two ways:
 
-- **In the App:** the account sheet → **Delete account**, which asks for the password again and
+- **In SeaYou:** the account sheet → **Delete account**, which asks for the password again and
   an explicit confirmation.
 - **On the web:** `/legal/delete-account`, which explains what happens, then takes the username,
   the password and a required confirmation, all as a plain form post.
@@ -102,6 +102,24 @@ The account row itself survives as an anonymous marker with `status = 'deleted'`
 belong to other people. Calling the operation again returns the original deletion and changes
 nothing.
 
+## What the documents promise about moderation
+
+Every statement the documents make about moderation is implemented, and has a test. The four
+that most often drift are worth naming here, because changing the code without changing these
+would make a published document false:
+
+- **The single appeal.** The appeal is offered when the decision notice is presented, and is
+  spent only by appealing or by explicitly confirming **Skip appeal**. Closing or reloading
+  resolves nothing: the notice is derived from the rows and comes back. See
+  `apps/api/src/http/appeals.test.ts`.
+- **Violations never expire.** Only an accepted appeal removes one from the count; serving a
+  suspension does not. `standingOf` has no time-based forgiveness in it.
+- **Seven-day evidence retention.** Content evidence is redacted seven days after the case
+  becomes final, automatically, and only a documented legal or child-safety hold goes past it.
+  See `apps/api/src/services/retention.test.ts`.
+- **Browser storage.** The Privacy Policy lists exactly three things, and
+  `apps/web/src/storage.test.ts` walks the source to prove there is no fourth.
+
 ## Releasing a new version
 
 1. Edit the documents in `packages/shared/src/policies.ts`.
@@ -122,7 +140,7 @@ server-rendered, and free of JavaScript, like the legal pages beside it. The add
 in production; the page and all of its links follow the configured value.
 
 Support is a `mailto:` link and nothing else — there is no form, no inbox integration, no SMTP
-sender and no ticket store in the App, and nothing anywhere holds or asks for a password, an app
+sender and no ticket store in SeaYou, and nothing anywhere holds or asks for a password, an app
 password, an OAuth token, SMTP credentials or a verification code for the address. The page says
 plainly that support will never ask for a password, a verification code, Gmail credentials,
 payment details or identity documents.
@@ -207,7 +225,7 @@ These cannot be satisfied by wording or by this repository:
 
 1. **Public policy URL** — point the listing at the deployed `/legal/privacy`. It is already a
    public, non-geofenced HTML page rather than a PDF.
-2. **Data Safety form** — complete it so it matches what the App actually collects, shares,
+2. **Data Safety form** — complete it so it matches what SeaYou actually collects, shares,
    secures and deletes. The Privacy Policy's section 2 is the inventory to copy from.
 3. **Target audience and content rating** — complete both declarations, and do not select
    children as a target audience for a service that shows letters between strangers.

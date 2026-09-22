@@ -196,16 +196,15 @@ function CaseView({
   onChanged: () => Promise<void>;
 }) {
   const res = useAsync(() => api.adminCase(id), [id]);
-  const [confirm, setConfirm] = useState<'accept' | 'reject' | null>(null);
+  const [confirm, setConfirm] = useState<'accept' | 'reject' | 'critical' | 'hold' | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<Error | null>(null);
   const c = res.data?.case;
-  const decide = async (reason: string) => {
-    if (!confirm) return;
+  const act = async (fn: () => Promise<unknown>) => {
     setBusy(true);
     setError(null);
     try {
-      await api.adminDecideCase(id, confirm, reason);
+      await fn();
       setConfirm(null);
       await Promise.all([res.reload(), onChanged()]);
     } catch (err) {
@@ -213,6 +212,11 @@ function CaseView({
     } finally {
       setBusy(false);
     }
+  };
+  const decide = (reason: string) => {
+    if (confirm !== 'accept' && confirm !== 'reject') return;
+    const outcome = confirm;
+    void act(() => api.adminDecideCase(id, outcome, reason));
   };
   return (
     <DeckScreen
@@ -232,6 +236,31 @@ function CaseView({
           </button>
         </div>
       ) : null}
+      {c && c.status !== 'rejected' && c.violation?.severity !== 'critical' ? (
+        <div className="row" style={{ justifyContent: 'flex-end', gap: 8 }}>
+          <button type="button" className="btn-destructive" onClick={() => setConfirm('critical')}>
+            Confirmed critical child safety…
+          </button>
+        </div>
+      ) : null}
+      {c ? (
+        <div className="row" style={{ justifyContent: 'flex-end', gap: 8 }}>
+          {c.hold && c.hold.releasedAt === null ? (
+            <button
+              type="button"
+              className="btn-ghost"
+              disabled={busy}
+              onClick={() => void act(() => api.adminReleaseHold(id))}
+            >
+              Release {c.hold.reason === 'legal' ? 'legal' : 'child-safety'} hold
+            </button>
+          ) : c.retention.hold !== 'already_redacted' ? (
+            <button type="button" className="btn-ghost" onClick={() => setConfirm('hold')}>
+              Place a legal hold…
+            </button>
+          ) : null}
+        </div>
+      ) : null}
       <ErrorNote error={res.error} />
       {confirm && c ? (
         <ConfirmDialog
@@ -246,7 +275,35 @@ function CaseView({
           destructive={confirm === 'accept'}
           busy={busy}
           error={error}
-          onConfirm={(reason) => void decide(reason)}
+          onConfirm={(reason) => decide(reason)}
+          onCancel={() => setConfirm(null)}
+        />
+      ) : null}
+      {confirm === 'critical' && c ? (
+        <ConfirmDialog
+          title="Confirmed critical child-safety violation"
+          body={`This permanently bans ${c.sender.displayName} immediately, without the usual warning and suspension steps, and withdraws the letter from every reader. It is recorded against your administrator account with the reason you give. ${c.sender.displayName} is shown the decision and may appeal it once.`}
+          confirmLabel="Ban permanently"
+          reasonLabel="Why (mandatory; recorded with your name and the time)"
+          requireReason
+          acknowledge="I have reviewed this case myself and confirm it is a critical child-safety violation."
+          destructive
+          busy={busy}
+          error={error}
+          onConfirm={(reason) => void act(() => api.adminDecideCritical(id, reason))}
+          onCancel={() => setConfirm(null)}
+        />
+      ) : null}
+      {confirm === 'hold' && c ? (
+        <ConfirmDialog
+          title="Keep this evidence beyond seven days"
+          body="Content evidence is redacted seven days after a case becomes final. A hold keeps it while a documented legal or immediate child-safety reason requires it, and records why and who placed it. Releasing the hold returns the case to the ordinary calculation."
+          confirmLabel="Place hold"
+          reasonLabel="The documented reason (mandatory)"
+          requireReason
+          busy={busy}
+          error={error}
+          onConfirm={(note) => void act(() => api.adminPlaceHold(id, 'legal', note))}
           onCancel={() => setConfirm(null)}
         />
       ) : null}

@@ -2,7 +2,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { POLICY_DOCUMENTS, RISK_POLICY_VERSION, SUPPORT_EMAIL, policySetStatus } from '@mib/shared';
 import type { PoliciesConfig } from './services/policies.js';
-import type { RetentionPolicy } from './services/retention.js';
+import { SEVEN_DAYS_MS, type RetentionPolicy } from './services/retention.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 export const API_ROOT = path.resolve(here, '..');
@@ -16,12 +16,14 @@ function envDays(name: string): number | null {
   return n * 24 * 60 * 60 * 1000;
 }
 
+// The published policy is seven days after a case becomes final, and it runs by default.
+// MIB_RETENTION_ENABLED=false stops it removing anything (the dry-run plan still works), and
+// MIB_RETENTION_FINAL_DAYS shortens or lengthens the window for a staging environment. Neither
+// is needed in an ordinary deployment.
 function loadRetentionPolicy(): RetentionPolicy {
   return {
-    enabled: (process.env.MIB_RETENTION_ENABLED ?? 'false') === 'true',
-    rejectedAfterMs: envDays('MIB_RETENTION_REJECTED_DAYS'),
-    acceptedAfterMs: envDays('MIB_RETENTION_ACCEPTED_DAYS'),
-    appealWindowMs: envDays('MIB_APPEAL_WINDOW_DAYS'),
+    enabled: (process.env.MIB_RETENTION_ENABLED ?? 'true') === 'true',
+    finalAfterMs: envDays('MIB_RETENTION_FINAL_DAYS') ?? SEVEN_DAYS_MS,
   };
 }
 
@@ -52,7 +54,7 @@ export interface AppConfig {
   // Public URL of the web app, used to build links in e-mails.
   appUrl: string;
   // The published support address shown on /support and in the legal documents. A public
-  // contact point, never a credential: nothing in the App holds a password or token for it.
+  // contact point, never a credential: nothing in SeaYou holds a password or token for it.
   supportEmail: string;
   mail: MailConfig;
   // Journey risk policy version applied to *new* journeys: 0 disables automatic outcomes,
@@ -65,9 +67,9 @@ export interface AppConfig {
   // Local AI review of reported letters (spec §16). The model is reached over HTTP at an
   // Ollama-compatible endpoint; nothing here is a paid API. Reports queue while it is away.
   ai: AiConfig;
-  // How long moderation evidence is kept. Disabled by default: nothing is ever removed until
-  // a policy is configured deliberately. See services/retention.ts.
+  // How long moderation evidence is kept, and how often the server checks. See retention.ts.
   retention: RetentionPolicy;
+  retentionTickMs: number;
 }
 
 export interface AiConfig {
@@ -117,6 +119,9 @@ export function loadConfig(): AppConfig {
     policies: { status: policySetStatus(POLICY_DOCUMENTS) },
     riskPolicyVersion: envInt('MIB_RISK_POLICY_VERSION', RISK_POLICY_VERSION),
     retention: loadRetentionPolicy(),
+    // Hourly. The pass is idempotent and the window is seven days, so the exact cadence only
+    // decides how soon after the boundary the evidence actually goes.
+    retentionTickMs: envInt('MIB_RETENTION_TICK_MS', 60 * 60 * 1000),
     ai: {
       enabled: (process.env.MIB_AI_ENABLED ?? 'true') === 'true',
       endpoint: (process.env.MIB_AI_ENDPOINT ?? 'http://127.0.0.1:11434').replace(/\/+$/, ''),
@@ -136,7 +141,7 @@ function loadMailConfig(devMode: boolean): MailConfig {
     throw new Error('MIB_MAIL_PROVIDER=outbox is development-only; use smtp or disabled');
   return {
     provider: raw,
-    from: process.env.MIB_MAIL_FROM ?? 'Message in a Bottle <no-reply@localhost>',
+    from: process.env.MIB_MAIL_FROM ?? 'SeaYou <no-reply@localhost>',
     smtp: {
       host: process.env.MIB_SMTP_HOST ?? '',
       port: envInt('MIB_SMTP_PORT', 587),

@@ -68,7 +68,7 @@ export function PolicyDialog({ initial, onClose }: { initial: DocumentId; onClos
           <Icon name="close" size={16} />
         </button>
         <div className="grow">
-          <span className="t-eyebrow">Message in a Bottle</span>
+          <span className="t-eyebrow">SeaYou</span>
         </div>
       </div>
       <div className="policy-tabs" role="tablist" aria-label="Documents">

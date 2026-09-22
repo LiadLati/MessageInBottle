@@ -24,6 +24,7 @@ const NEWEST = new Set([
   '0011_evidence_retention',
   '0012_policy_acceptances',
   '0013_account_deletion',
+  '0014_appeal_waiver_and_holds',
 ]);
 
 function tableNames(sqlite: Database.Database): string[] {

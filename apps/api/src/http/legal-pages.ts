@@ -10,7 +10,7 @@ import {
 
 // The public legal pages: plain server-rendered HTML at stable URLs, with no sign-in, no
 // JavaScript and no PDF, so a store reviewer, a search engine or a person on any device can
-// open them. They render the same document objects the App renders, so the public text and the
+// open them. They render the same document objects SeaYou renders, so the public text and the
 // in-app text cannot drift apart.
 
 const esc = (s: string) =>
@@ -105,20 +105,20 @@ export function page(options: {
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="description" content="${esc(options.description)}">
 <meta name="robots" content="index, follow">
-<title>${esc(options.title)} — the App</title>
+<title>${esc(options.title)} — SeaYou</title>
 <style>${STYLE}</style>
 </head>
 <body>
 <div class="wrap">
 <header class="site">
-<p class="meta">The App</p>
+<p class="meta">SeaYou</p>
 ${nav(options.slug)}
 </header>
 <main>
 ${options.body}
 </main>
 <footer class="site">
-<p>These pages are published for the App and are available without signing in.</p>
+<p>These pages are published for SeaYou and are available without signing in.</p>
 </footer>
 </div>
 </body>
@@ -158,16 +158,16 @@ const WHAT_HAPPENS = `<h2>What deleting your account does</h2>
 <ul>
 <li>every signed-in session ends at once, and the account can no longer sign in;</li>
 <li>your username, display name, email address, password, chosen harbour and time zone are removed;</li>
-<li>your friendships, friend requests and blocks are removed, so the account leaves other people's lists and no longer appears anywhere in the App;</li>
+<li>your friendships, friend requests and blocks are removed, so the account leaves other people's lists and no longer appears anywhere in SeaYou;</li>
 <li>your notifications and saved App state are removed;</li>
 <li>letters of yours that are still at sea, or adrift in the public ocean, are cancelled and their text is cleared, so nobody can find or open them afterwards.</li>
 </ul>
 <h2>What remains for a limited time, and why</h2>
 <ul>
 <li>Letters that already reached the person you sent them to stay with that person, as their correspondence. Your name is replaced with “Deleted account”.</li>
-<li>If a report, an appeal or a safety restriction involving the account is still open or still in force, the evidence for it is kept for as long as that matter needs it, and is then removed or de-identified under the retention rules of the App. It is not used for anything else.</li>
+<li>If a report, an appeal or a safety restriction involving the account is still open or still in force, the evidence for it is kept for as long as that matter needs it, and is then removed or de-identified under the retention rules of SeaYou. It is not used for anything else.</li>
 <li>Backups may still hold information for a limited recovery period before they are overwritten.</li>
-<li>Copies another person made outside the App cannot be reached or deleted by the App.</li>
+<li>Copies another person made outside SeaYou cannot be reached or deleted by SeaYou.</li>
 </ul>`;
 
 export function deletionPage(options: {
@@ -180,10 +180,10 @@ export function deletionPage(options: {
   return page({
     title: 'Delete your account',
     description:
-      'Delete your account of the App and its associated data, without reinstalling the App.',
+      'Delete your account of SeaYou and its associated data, without reinstalling SeaYou.',
     slug: 'delete-account',
     body: `<h1>Delete your account</h1>
-<p>You can delete your account here, or from <strong>Settings → Delete account</strong> inside the App. Both do exactly the same thing.</p>
+<p>You can delete your account here, or from <strong>Settings → Delete account</strong> inside SeaYou. Both do exactly the same thing.</p>
 ${WHAT_HAPPENS}
 <div class="card">
 <h2>Delete this account</h2>
@@ -213,7 +213,7 @@ export function deletionDonePage(): string {
     body: `<h1>Your account has been deleted</h1>
 <div class="notice"><p>The account is gone and every session has ended. You can close this page.</p></div>
 ${WHAT_HAPPENS}
-<p>If you want to use the App again, you are welcome to create a new account at any time.</p>`,
+<p>If you want to use SeaYou again, you are welcome to create a new account at any time.</p>`,
   });
 }
 
@@ -233,10 +233,10 @@ export function supportPage(email: string): string {
 
   return page({
     title: 'Support',
-    description: `Contact ${SUPPORT_NAME} about the App: account help, privacy requests, safety reports and technical problems.`,
+    description: `Contact ${SUPPORT_NAME} about SeaYou: account help, privacy requests, safety reports and technical problems.`,
     slug: 'support',
     body: `<h1>Support</h1>
-<p>${esc(SUPPORT_NAME)} answers questions about the App — your account, your privacy, safety concerns and anything that is not working.</p>
+<p>${esc(SUPPORT_NAME)} answers questions about SeaYou — your account, your privacy, safety concerns and anything that is not working.</p>
 
 <div class="card">
 <h2>Contact ${esc(SUPPORT_NAME)}</h2>
@@ -257,13 +257,13 @@ export function supportPage(email: string): string {
 <p class="meta">Support will never ask you for any of them. A message that does is not from us.</p>
 </div>
 
-<h2>Reporting something inside the App</h2>
-<p>If a letter you can read breaks the rules, reporting it from the reader is faster than writing here: it opens a case an administrator reviews, and it hides the letter from your account straight away. If a person may be in immediate danger, contact your local emergency service first — the App is not an emergency service.</p>
+<h2>Reporting something inside SeaYou</h2>
+<p>If a letter you can read breaks the rules, reporting it from the reader is faster than writing here: it opens a case an administrator reviews, and it hides the letter from your account straight away. If a person may be in immediate danger, contact your local emergency service first — SeaYou is not an emergency service.</p>
 
 <h2>Documents</h2>
 <ul>
 ${PUBLISHED_DOCUMENTS.map((d) => `<li><a href="/legal/${d.slug}">${esc(d.title)}</a> — ${esc(d.summary)}</li>`).join('\n')}
-<li><a href="/legal/delete-account">Delete your account</a> — remove your account and its associated data without reinstalling the App.</li>
+<li><a href="/legal/delete-account">Delete your account</a> — remove your account and its associated data without reinstalling SeaYou.</li>
 </ul>`,
   });
 }

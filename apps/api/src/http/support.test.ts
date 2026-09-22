@@ -52,11 +52,11 @@ describe('the public support page', () => {
     ];
     expect(SUPPORT_CATEGORIES.map((c) => c.label)).toEqual(labels);
     const subjects = [
-      'Sea You Support — Account help',
-      'Sea You Support — Privacy request',
-      'Sea You Support — Safety report',
-      'Sea You Support — Technical problem',
-      'Sea You Support — Other',
+      'SeaYou Support — Account help',
+      'SeaYou Support — Privacy request',
+      'SeaYou Support — Safety report',
+      'SeaYou Support — Technical problem',
+      'SeaYou Support — Other',
     ];
     expect(SUPPORT_CATEGORIES.map((c) => c.subject)).toEqual(subjects);
     for (const [i, label] of labels.entries()) {

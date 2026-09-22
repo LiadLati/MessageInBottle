@@ -291,7 +291,7 @@ export function LoginScreen({ resetToken, onResetDone, onOpenPolicy }: Props) {
         ? 'Forgot your password?'
         : mode === 'reset'
           ? 'Choose a new password'
-          : 'Message in a Bottle';
+          : 'SeaYou';
   const intro =
     mode === 'register'
       ? 'A username your friends will recognise, an email for recovery, and a password only you know.'

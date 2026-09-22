@@ -52,7 +52,7 @@ export function PolicyUpdateScreen({ onOpen }: { onOpen: (doc: DocumentId) => vo
         </h1>
         <p className="secondary">
           {firstTime
-            ? 'The App has published Terms of Use, Community Rules and a Privacy Policy. Please read them; using the App needs your acceptance.'
+            ? 'SeaYou has published Terms of Use, Community Rules and a Privacy Policy. Please read them; using SeaYou needs your acceptance.'
             : 'A document you accepted earlier has a new version. Please read it; continuing needs your acceptance of the current version.'}
         </p>
         <ul className="list policy-changes" aria-label="Documents to review">
