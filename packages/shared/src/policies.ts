@@ -272,7 +272,7 @@ export const TERMS_OF_USE: PolicyDocument = {
         'Every case is decided by a person. Automated review, where it is used, produces a recommendation for a reviewer and never a decision.',
         'The identity of whoever reported a letter is not disclosed to its sender through ' +
           `${PRODUCT_NAME}, except where disclosure is required by law.`,
-        'Reports that are rejected, and reports nobody has decided yet, count for nothing.',
+        'Rejected and undecided reports do not count as violations and do not affect account standing.',
       ],
     },
     { type: 'h2', text: '9. Violations, appeals and enforcement' },
@@ -447,6 +447,7 @@ export const PRIVACY_POLICY: PolicyDocument = {
         'Notifications generated for you.',
         'The versions of these documents you accepted, and when.',
         'Moderation records: reports you make, cases about letters you sent, decisions, appeals and violations.',
+        'Security and account-control records: a hashed form of your current session tokens and of any password-reset link you request, with the times they were created, expire, were used or were superseded; whether your account is active or deleted; the role it holds and when it was granted; and an audit record of each moderation action taken on it, which administrator took it and when. Sign-in and password-reset attempts are also counted, but only in the server\u2019s memory for a short window; how many letters you have reported recently is worked out from the reports themselves rather than kept as a separate count.',
       ],
     },
     { type: 'h2', text: '3. Moderation evidence and how long it is kept' },
