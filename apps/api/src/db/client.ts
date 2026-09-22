@@ -33,8 +33,9 @@ export function runMigrations(db: Db, migrationsFolder = MIGRATIONS_FOLDER) {
   const outcome = reconcileRenumberedMigrations(sqlite);
   if (outcome.action === 'released') {
     console.log(
-      `Upgrading a database from before the policy-acceptance migration was renumbered: ` +
-        `${outcome.rowsPreserved} acceptance row(s) kept, nothing recreated.`,
+      `Upgrading a database from before the policy-acceptance migration was renumbered ` +
+        `(recorded with ${outcome.recordedAs}): ${outcome.rowsPreserved} acceptance row(s) ` +
+        `kept, nothing recreated.`,
     );
   }
   migrate(db, { migrationsFolder });

@@ -6,6 +6,8 @@ import { describe, expect, it } from 'vitest';
 import { MIGRATIONS_FOLDER, createDb, runMigrations } from './client.js';
 import {
   LEGACY_POLICY_HASH,
+  LEGACY_POLICY_HASH_CRLF,
+  LEGACY_POLICY_HASH_LF,
   LEGACY_POLICY_WHEN,
   LegacyMigrationError,
   journalEntries,
@@ -47,7 +49,13 @@ const applied = (sqlite: Database.Database) =>
 // Builds the folder a database was migrated from at a given point in history: the journal
 // entries up to `upTo`, plus — when asked — the policy-acceptance migration under its old
 // number and old timestamp, exactly as the real legacy databases recorded it.
-function historicFolder(upTo: string, withLegacyPolicy: boolean): string {
+// How Git wrote the checked-out migration files to disk. Drizzle hashes their raw text, so a
+// database records different hashes for the same commit depending on this alone: 'lf' is a
+// macOS/Linux checkout, 'crlf' is the Git for Windows default (`core.autocrlf=true`).
+type Eol = 'lf' | 'crlf';
+const render = (sql: string, eol: Eol) => (eol === 'crlf' ? sql.replace(/\r?\n/g, '\r\n') : sql);
+
+function historicFolder(upTo: string, withLegacyPolicy: boolean, eol: Eol = 'lf'): string {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mib-historic-'));
   fs.mkdirSync(path.join(dir, 'meta'));
   const kept = entries.slice(0, entries.findIndex((e) => e.tag.startsWith(upTo)) + 1);
@@ -63,9 +71,12 @@ function historicFolder(upTo: string, withLegacyPolicy: boolean): string {
     })),
   };
   for (const e of kept)
-    fs.copyFileSync(path.join(MIGRATIONS_FOLDER, `${e.tag}.sql`), path.join(dir, `${e.tag}.sql`));
+    fs.writeFileSync(
+      path.join(dir, `${e.tag}.sql`),
+      render(fs.readFileSync(path.join(MIGRATIONS_FOLDER, `${e.tag}.sql`), 'utf8'), eol),
+    );
   if (withLegacyPolicy) {
-    fs.writeFileSync(path.join(dir, '0010_policy_acceptances.sql'), LEGACY_POLICY_SQL);
+    fs.writeFileSync(path.join(dir, '0010_policy_acceptances.sql'), render(LEGACY_POLICY_SQL, eol));
     journal.entries.push({
       idx: kept.length,
       version: '6',
@@ -238,37 +249,146 @@ describe('the renumbered policy-acceptance migration', () => {
       .prepare('INSERT INTO __drizzle_migrations (hash, created_at) VALUES (?, ?)')
       .run('a'.repeat(64), LEGACY_POLICY_WHEN);
     expect(() => reconcileRenumberedMigrations(sqlite)).toThrow(LegacyMigrationError);
-    expect(() => reconcileRenumberedMigrations(sqlite)).toThrow(/do not carry its content hash/);
+    expect(() => reconcileRenumberedMigrations(sqlite)).toThrow(
+      /do not carry any hash that migration has ever had/,
+    );
+    // The refusal names the hash it saw, so an unrecognised one can be reported without
+    // anybody having to open the database by hand.
+    expect(() => reconcileRenumberedMigrations(sqlite)).toThrow(new RegExp(`${'a'.repeat(64)}`));
   });
 
-  it('starts the API after the compatibility upgrade, with the acceptances intact', async () => {
-    const legacyFolder = historicFolder('0009_account_time_zone', true);
-    const { db, sqlite } = createDb(':memory:');
-    runMigrations(db, legacyFolder);
-    const seeded = seedAcceptances(sqlite);
-    runMigrations(db);
-
-    // Everything the API needs at boot, on the upgraded database.
-    const { createApp } = await import('../http/app.js');
-    const { seedChart } = await import('./seed.js');
-    const { testConfig, T0, ManualClock } = await import('../test/harness.js');
-    const { OutboxMailer } = await import('../lib/mail.js');
-    const config = testConfig();
-    seedChart(db, config.defaultShoreCapacity, T0);
-    const clock = new ManualClock(T0);
-    const app = createApp({
-      db,
-      clock,
-      realClock: clock,
-      config,
-      mailer: new OutboxMailer(),
+  // The database this was reported from: a Windows checkout, where Git's default
+  // `core.autocrlf=true` writes CRLF line endings, so Drizzle recorded a different hash for
+  // the very same migration and the guard — correctly — refused to touch it.
+  describe('recorded from a Windows (CRLF) checkout', () => {
+    it('derives both recognised hashes from the historical migration file itself', () => {
+      // Neither constant is a magic number: each is what Drizzle's own reader computes for
+      // the one historical content of the policy-acceptance migration, rendered the way Git
+      // writes it under each line-ending setting.
+      const lf = journalEntries(historicFolder('0009_account_time_zone', true, 'lf'));
+      const crlf = journalEntries(historicFolder('0009_account_time_zone', true, 'crlf'));
+      const policyHash = (es: ReturnType<typeof journalEntries>) =>
+        es.find((e) => e.tag === '0010_policy_acceptances')!.hash;
+      expect(policyHash(lf)).toBe(LEGACY_POLICY_HASH_LF);
+      expect(policyHash(crlf)).toBe(LEGACY_POLICY_HASH_CRLF);
+      expect(LEGACY_POLICY_HASH_CRLF).not.toBe(LEGACY_POLICY_HASH_LF);
+      expect(LEGACY_POLICY_HASH).toBe(LEGACY_POLICY_HASH_LF);
     });
-    expect((await app.request('/api/health')).status).toBe(200);
-    expect((await app.request('/support')).status).toBe(200);
-    expect((await app.request('/legal/privacy')).status).toBe(200);
-    // The rows that were there before the upgrade are still the rows the API reads.
-    expect(dumpAcceptances(sqlite)).toHaveLength(seeded.length);
+
+    it('creates exactly the same table, foreign key and index as the LF rendering', () => {
+      // Line endings change the file's bytes, not its meaning. This is what makes accepting
+      // the second hash safe rather than merely convenient.
+      const shape = (eol: Eol) => {
+        const { db, sqlite } = createDb(':memory:');
+        runMigrations(db, historicFolder('0009_account_time_zone', true, eol));
+        expect(policyTableMismatches(sqlite)).toEqual([]);
+        return JSON.stringify({
+          columns: sqlite.prepare('PRAGMA table_info(policy_acceptances)').all(),
+          keys: sqlite.prepare('PRAGMA foreign_key_list(policy_acceptances)').all(),
+          index: sqlite.prepare('PRAGMA index_info(policy_acceptances_user_idx)').all(),
+        });
+      };
+      expect(shape('crlf')).toBe(shape('lf'));
+    });
+
+    it('upgrades, keeping the acceptance rows byte for byte and skipping nothing', () => {
+      const { db, sqlite } = createDb(':memory:');
+      runMigrations(db, historicFolder('0009_account_time_zone', true, 'crlf'));
+      const seeded = seedAcceptances(sqlite);
+      const before = dumpAcceptances(sqlite);
+
+      // Exactly the reported state: the row at the legacy timestamp carries the CRLF hash.
+      const stale = applied(sqlite).filter((r) => r.created_at === LEGACY_POLICY_WHEN);
+      expect(stale).toHaveLength(1);
+      expect(stale[0]!.hash).toBe(LEGACY_POLICY_HASH_CRLF);
+      expect(tables(sqlite)).not.toContain('moderation_cases');
+
+      const outcome = reconcileRenumberedMigrations(sqlite);
+      expect(outcome).toMatchObject({ action: 'released', rowsPreserved: seeded.length });
+      expect(outcome.action === 'released' && outcome.recordedAs).toMatch(/CRLF/);
+
+      runMigrations(db);
+
+      // Acceptance rows untouched…
+      expect(dumpAcceptances(sqlite)).toEqual(before);
+      // …0010 and 0011 applied rather than silently skipped…
+      for (const t of ['moderation_cases', 'letter_reports', 'violations', 'appeals'])
+        expect(tables(sqlite), t).toContain(t);
+      // …0013 applied…
+      expect(
+        (sqlite.prepare('PRAGMA table_info(users)').all() as Array<{ name: string }>).map(
+          (c) => c.name,
+        ),
+      ).toContain('deleted_at');
+      // …and the bookkeeping matches a freshly migrated database.
+      expect(applied(sqlite).map((r) => r.created_at)).toEqual(entries.map((e) => e.when));
+
+      // A second run changes nothing.
+      const settled = applied(sqlite);
+      runMigrations(db);
+      expect(applied(sqlite)).toEqual(settled);
+      expect(dumpAcceptances(sqlite)).toEqual(before);
+      expect(reconcileRenumberedMigrations(sqlite).action).toBe('not-legacy');
+    });
+
+    it('still refuses a CRLF database whose table has the wrong schema', () => {
+      // Recognising the second hash must not weaken the schema check behind it.
+      const { db, sqlite } = createDb(':memory:');
+      runMigrations(db, historicFolder('0009_account_time_zone', true, 'crlf'));
+      seedAcceptances(sqlite);
+      sqlite.exec('ALTER TABLE policy_acceptances ADD COLUMN note text');
+      const before = dumpAcceptances(sqlite);
+      const bookkeeping = applied(sqlite);
+
+      expect(() => runMigrations(db)).toThrow(LegacyMigrationError);
+      expect(dumpAcceptances(sqlite)).toEqual(before);
+      expect(applied(sqlite)).toEqual(bookkeeping);
+      expect(tables(sqlite)).not.toContain('moderation_cases');
+    });
+
+    it('upgrades a CRLF database that had also applied the moderation migrations', () => {
+      const { db, sqlite } = createDb(':memory:');
+      runMigrations(db, historicFolder('0011_evidence_retention', true, 'crlf'));
+      const before = dumpAcceptances(seedAcceptancesAnd(sqlite));
+
+      runMigrations(db);
+
+      expect(dumpAcceptances(sqlite)).toEqual(before);
+      expect(applied(sqlite).map((r) => r.created_at)).toEqual(entries.map((e) => e.when));
+    });
   });
+
+  it.each(['lf', 'crlf'] as Eol[])(
+    'starts the API after the compatibility upgrade of a %s database, acceptances intact',
+    async (eol) => {
+      const legacyFolder = historicFolder('0009_account_time_zone', true, eol);
+      const { db, sqlite } = createDb(':memory:');
+      runMigrations(db, legacyFolder);
+      const seeded = seedAcceptances(sqlite);
+      runMigrations(db);
+
+      // Everything the API needs at boot, on the upgraded database.
+      const { createApp } = await import('../http/app.js');
+      const { seedChart } = await import('./seed.js');
+      const { testConfig, T0, ManualClock } = await import('../test/harness.js');
+      const { OutboxMailer } = await import('../lib/mail.js');
+      const config = testConfig();
+      seedChart(db, config.defaultShoreCapacity, T0);
+      const clock = new ManualClock(T0);
+      const app = createApp({
+        db,
+        clock,
+        realClock: clock,
+        config,
+        mailer: new OutboxMailer(),
+      });
+      expect((await app.request('/api/health')).status).toBe(200);
+      expect((await app.request('/support')).status).toBe(200);
+      expect((await app.request('/legal/privacy')).status).toBe(200);
+      // The rows that were there before the upgrade are still the rows the API reads.
+      expect(dumpAcceptances(sqlite)).toHaveLength(seeded.length);
+    },
+  );
 });
 
 // Seeds and returns the same handle, so a row dump can be taken inline.

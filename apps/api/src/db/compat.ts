@@ -34,13 +34,41 @@ import type Database from 'better-sqlite3';
 // migration created, column for column, key for key and index for index. If it does not match,
 // nothing is touched and the mismatch is reported.
 
-// The journal timestamp and content hash the renumbered migration was recorded under. Both are
-// historical constants: they identify that one entry and can never legitimately mean anything
-// else. (The hash is SHA-256 of the migration file exactly as it was then; the current 0012
-// file differs, because it is now idempotent.)
+// The journal timestamp the renumbered migration was recorded under. It identifies that one
+// entry and can never legitimately mean anything else.
 export const LEGACY_POLICY_WHEN = 1789859116404;
-export const LEGACY_POLICY_HASH =
+
+// The content hashes that same migration can legitimately have been recorded under.
+//
+// Drizzle hashes the migration file's raw text, not its meaning: `readMigrationFiles` computes
+// SHA-256 over `fs.readFileSync(path).toString()`. The repository has no `.gitattributes`, so
+// the bytes on disk depend on the checkout's line-ending setting, and the same commit yields
+// two different files — and therefore two different recorded hashes — depending only on the
+// machine it was checked out on:
+//
+//   • LF   — `core.autocrlf` false or `input` (macOS, Linux, and Windows configured that way);
+//   • CRLF — `core.autocrlf=true`, which is the Git for Windows default.
+//
+// Both are SHA-256 of blob 188b1e55be1bc1aea083b0084a65a340e5cd9e49 — the one and only
+// historical content of `0010_policy_acceptances.sql` (commit c411632) — as Git writes it to
+// disk under each setting. `compat.test.ts` reconstructs that blob's text and re-derives both
+// values through Drizzle's own reader, so neither is a magic number, and it proves the two
+// renderings create an identical table, foreign key and index.
+//
+// Nothing else is accepted. A hash recorded at this timestamp that is not one of these did not
+// come from this migration as the repository has ever contained it, and is refused.
+export const LEGACY_POLICY_HASH_LF =
   '66bde2c3bdf52af960c712c9988c15fd601f26406beb850fd5272bc80330286a';
+export const LEGACY_POLICY_HASH_CRLF =
+  '3c5b161396368aaed46df85e7bc752771af4cc47945e0cfd4fc0db80d0dd8354';
+
+// Kept as the canonical name for the LF rendering.
+export const LEGACY_POLICY_HASH = LEGACY_POLICY_HASH_LF;
+
+export const LEGACY_POLICY_HASHES: ReadonlyMap<string, string> = new Map([
+  [LEGACY_POLICY_HASH_LF, 'LF line endings'],
+  [LEGACY_POLICY_HASH_CRLF, 'CRLF line endings (Git for Windows default checkout)'],
+]);
 
 const MIGRATIONS_TABLE = '__drizzle_migrations';
 const POLICY_TABLE = 'policy_acceptances';
@@ -145,7 +173,14 @@ export function policyTableMismatches(sqlite: Database.Database): string[] {
 export type ReconcileOutcome =
   | { action: 'no-bookkeeping' }
   | { action: 'not-legacy' }
-  | { action: 'released'; rowsPreserved: number; tableExisted: boolean };
+  | {
+      action: 'released';
+      rowsPreserved: number;
+      tableExisted: boolean;
+      // Which rendering of the historical migration file this database recorded, so the log
+      // line says why a Windows checkout and a Linux one hash the same migration differently.
+      recordedAs: string;
+    };
 
 export class LegacyMigrationError extends Error {}
 
@@ -162,7 +197,7 @@ export function reconcileRenumberedMigrations(sqlite: Database.Database): Reconc
 
   // The timestamp belongs to one migration and one only. Anything else recorded under it is
   // not a database this code knows how to reason about, so it is left untouched.
-  const unknown = stale.filter((r) => r.hash !== LEGACY_POLICY_HASH);
+  const unknown = stale.filter((r) => !LEGACY_POLICY_HASHES.has(r.hash));
   if (unknown.length > 0 || stale.length !== 1) {
     throw new LegacyMigrationError(
       [
@@ -170,13 +205,22 @@ export function reconcileRenumberedMigrations(sqlite: Database.Database): Reconc
         ``,
         `${MIGRATIONS_TABLE} has ${stale.length} row(s) recorded at ${LEGACY_POLICY_WHEN}, the`,
         `timestamp of the policy-acceptance migration before it was renumbered, and`,
-        `${unknown.length} of them do not carry its content hash.`,
+        `${unknown.length} of them do not carry any hash that migration has ever had.`,
         ``,
-        `Nothing was changed. Please share the contents of ${MIGRATIONS_TABLE} rather than`,
-        `editing it by hand.`,
+        `Recorded at that timestamp:`,
+        ...stale.map(
+          (r) =>
+            `  • ${r.hash}${LEGACY_POLICY_HASHES.has(r.hash) ? ` (recognised: ${LEGACY_POLICY_HASHES.get(r.hash)})` : ' (unrecognised)'}`,
+        ),
+        `Recognised hashes for that migration:`,
+        ...[...LEGACY_POLICY_HASHES].map(([hash, note]) => `  • ${hash} — ${note}`),
+        ``,
+        `Nothing was changed. Please share the lines above rather than editing`,
+        `${MIGRATIONS_TABLE} by hand.`,
       ].join('\n'),
     );
   }
+  const staleRow = stale[0]!;
 
   const tableExisted = tableExists(sqlite, POLICY_TABLE);
   if (tableExisted) {
@@ -201,7 +245,7 @@ export function reconcileRenumberedMigrations(sqlite: Database.Database): Reconc
   const apply = sqlite.transaction(() => {
     const removed = sqlite
       .prepare(`DELETE FROM ${MIGRATIONS_TABLE} WHERE created_at = ? AND hash = ?`)
-      .run(LEGACY_POLICY_WHEN, LEGACY_POLICY_HASH).changes;
+      .run(LEGACY_POLICY_WHEN, staleRow.hash).changes;
     if (removed !== 1)
       throw new LegacyMigrationError(
         `Expected to release exactly one stale migration record, released ${removed}.`,
@@ -215,7 +259,12 @@ export function reconcileRenumberedMigrations(sqlite: Database.Database): Reconc
     throw new LegacyMigrationError(
       `Acceptance rows changed during the upgrade (${before} before, ${after} after). This is a bug.`,
     );
-  return { action: 'released', rowsPreserved: before, tableExisted };
+  return {
+    action: 'released',
+    rowsPreserved: before,
+    tableExisted,
+    recordedAs: LEGACY_POLICY_HASHES.get(staleRow.hash)!,
+  };
 }
 
 function countPolicyRows(sqlite: Database.Database): number {

@@ -168,6 +168,24 @@ index and its columns. Only if it matches exactly is the stale row released, whi
 replay the migrations it would otherwise skip and re-run `0012` harmlessly. If it does not match,
 nothing is touched and the differences are listed.
 
+### Why the same migration has two hashes
+
+Drizzle identifies a recorded migration by the SHA-256 of the migration file's **raw text**, not
+by what it does. The repository has no `.gitattributes`, so the bytes on disk depend on the
+checkout's line-ending setting, and one commit produces two different files:
+
+| Checkout | Recorded hash |
+| --- | --- |
+| LF (`core.autocrlf` false or `input` — macOS, Linux) | `66bde2c3…0330286a` |
+| CRLF (`core.autocrlf=true`, the Git for Windows default) | `3c5b1613…d0dd8354` |
+
+Both are the same historical file — blob `188b1e55` from commit `c411632`, the one and only
+content `0010_policy_acceptances.sql` ever had — so both are recognised, and `compat.test.ts`
+re-derives each one through Drizzle's own reader rather than trusting a constant. It also proves
+the two renderings create an identical table, foreign key and index, which is what makes accepting
+both safe. Any other hash recorded at that timestamp is refused, and the refusal prints the hash
+it found so it can be reported without opening the database by hand.
+
 Nothing is dropped, cleared or recreated, and the acceptance rows are counted before and after to
 prove they are untouched. Running it twice is a no-op, and a fresh database is unaffected. After
 migrating, `assertSchemaComplete` checks that every table and column the journal promises is
