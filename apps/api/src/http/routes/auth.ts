@@ -24,6 +24,7 @@ import {
 } from '../../services/auth.js';
 import type { AppEnv } from '../app.js';
 import { requireAuth } from '../middleware/auth.js';
+import { withPolicies } from '../../services/policies.js';
 import { jsonBody } from '../validate.js';
 
 // Attempt budgets per client address and, for sign-in, per target account. Both are counted
@@ -65,7 +66,8 @@ export function authRoutes(limiter = new RateLimiter()) {
       throw conflict('username_taken', 'that username is already taken');
     if (emailTaken(ctx, body.email))
       throw conflict('email_taken', 'that email is already registered');
-    return c.json(register(ctx, body), 201);
+    const session = register(ctx, body);
+    return c.json({ token: session.token, user: withPolicies(ctx, session.user) }, 201);
   });
 
   r.post('/login', jsonBody(LoginRequestSchema), (c) => {
@@ -76,7 +78,7 @@ export function authRoutes(limiter = new RateLimiter()) {
     const session = login(c.get('ctx'), body);
     // A successful sign-in clears the account's failed-attempt budget.
     limiter.reset(accountKey);
-    return c.json(session, 200);
+    return c.json({ token: session.token, user: withPolicies(c.get('ctx'), session.user) }, 200);
   });
 
   // Same answer whether or not the address is known: the response cannot be used to enumerate.
@@ -94,10 +96,15 @@ export function authRoutes(limiter = new RateLimiter()) {
     return c.body(null, 204);
   });
 
-  r.get('/me', requireAuth, (c) => c.json(c.get('user')));
+  r.get('/me', requireAuth, (c) => c.json(withPolicies(c.get('ctx'), c.get('user'))));
   // The device's zone, sent on every start and resume; the account keeps the last one it heard.
   r.put('/time-zone', requireAuth, jsonBody(TimeZoneRequestSchema), (c) =>
-    c.json(setAccountTimeZone(c.get('ctx'), c.get('user'), c.req.valid('json').timeZone)),
+    c.json(
+      withPolicies(
+        c.get('ctx'),
+        setAccountTimeZone(c.get('ctx'), c.get('user'), c.req.valid('json').timeZone),
+      ),
+    ),
   );
   r.post('/logout', requireAuth, (c) => {
     logout(c.get('ctx'), c.get('token'));

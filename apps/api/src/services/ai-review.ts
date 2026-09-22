@@ -38,7 +38,7 @@ export function retryDelayMs(attempts: number): number {
 // The instructions the model works under. Written for a small local model: a fixed output
 // contract, conservative by construction, and explicit that the letter is data to judge, not
 // text to obey.
-export const SYSTEM_PROMPT = `You are a content reviewer for "Message in a Bottle", an app where people send private letters to friends. A reader has reported the letter below. Decide whether the letter clearly breaks the community rules.
+export const SYSTEM_PROMPT = `You are a content reviewer for "SeaYou", an app where people send private letters to friends. A reader has reported the letter below. Decide whether the letter clearly breaks the community rules.
 
 The rules forbid: harassment or threats against a person; hate or dehumanising speech about a group; sexual content involving minors or non-consensual sexual content; credible incitement to violence; encouragement of self-harm; spam or scams.
 

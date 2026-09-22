@@ -1,15 +1,23 @@
 import { eq } from 'drizzle-orm';
-import { RISK_POLICY_VERSION } from '@mib/shared';
+import {
+  POLICY_DOCUMENTS,
+  SUPPORT_EMAIL,
+  RISK_POLICY_VERSION,
+  currentPolicyVersions,
+  policySetStatus,
+} from '@mib/shared';
 import type { AppConfig } from '../config.js';
 import { createDb, runMigrations, type Db } from '../db/client.js';
 import * as t from '../db/schema.js';
 import { DEV_SEED_PASSWORD } from '../db/seed-data.js';
+import { newId, newSecretToken, sha256 } from '../lib/ids.js';
+import { hashPassword } from '../lib/password.js';
 import { seedChart, seedUsers } from '../db/seed.js';
 import type { Clock } from '../lib/clock.js';
 import { OutboxMailer } from '../lib/mail.js';
 import type { createApp } from '../http/app.js';
 import type { AppContext, AuthUser } from '../services/context.js';
-import { RETENTION_OFF } from '../services/retention.js';
+import { RETENTION_DEFAULT } from '../services/retention.js';
 
 export class ManualClock implements Clock {
   constructor(private current: number) {}
@@ -40,12 +48,15 @@ export function testConfig(overrides: Partial<AppConfig> = {}): AppConfig {
     corsOrigin: '*',
     trustProxy: true,
     appUrl: 'http://app.test',
+    supportEmail: SUPPORT_EMAIL,
     mail: {
       provider: 'outbox',
       from: 'test <no-reply@test>',
       smtp: { host: '', port: 587, secure: false, user: '', pass: '' },
     },
     riskPolicyVersion: RISK_POLICY_VERSION,
+    // The same status production runs with: the shipped documents decide it.
+    policies: { status: policySetStatus(POLICY_DOCUMENTS) },
     ai: {
       enabled: true,
       endpoint: 'http://ai.test',
@@ -54,7 +65,8 @@ export function testConfig(overrides: Partial<AppConfig> = {}): AppConfig {
       tickMs: 1000,
       autoDecide: false,
     },
-    retention: RETENTION_OFF,
+    retention: RETENTION_DEFAULT,
+    retentionTickMs: 60 * 60 * 1000,
     ...overrides,
   };
 }
@@ -118,6 +130,17 @@ export async function loginAs(
   return { token: body.token, id: body.user.id };
 }
 
+// Grants a seeded account the developer role, which is what the DEV simulation controls
+// require. A test that drives /api/dev/* has to do this, exactly as a person would have to be
+// granted the role by CLI: the controls are not open to ordinary members or to administrators.
+export function makeDeveloper(w: TestWorld, username: string): void {
+  w.db
+    .update(t.users)
+    .set({ role: 'developer', roleGrantedAt: w.clock.now(), roleGrantedBy: 'test' })
+    .where(eq(t.users.id, w.user(username).id))
+    .run();
+}
+
 export const SAMPLE_TEXT = 'Dear friend,\nthe tide was gentle this morning. — A';
 
 export function releaseInput(recipientId: string, key = 'key-0000000001') {
@@ -128,4 +151,48 @@ export function releaseInput(recipientId: string, key = 'key-0000000001') {
     disclosureAcknowledged: true as const,
     idempotencyKey: key,
   };
+}
+
+// The registration payload's acceptance block for the current documents.
+export function acceptCurrent() {
+  return {
+    acceptTerms: true as const,
+    acceptGuidelines: true as const,
+    acknowledgePrivacy: true as const,
+    versions: currentPolicyVersions(),
+  };
+}
+
+// An account that existed before the documents did: a users row with no acceptance rows at
+// all, which is exactly what every account looks like after the migration. Returns a usable
+// session so the policy gate can be exercised the way a real person would meet it.
+export function legacyAccount(
+  w: TestWorld,
+  username = 'legacy_one',
+): { id: string; token: string } {
+  const id = newId('usr');
+  w.db
+    .insert(t.users)
+    .values({
+      id,
+      username,
+      displayName: username,
+      shoreId: 'shore_lantern_cove',
+      createdAt: w.clock.now(),
+      passwordHash: hashPassword(DEV_SEED_PASSWORD),
+      passwordUpdatedAt: w.clock.now(),
+      email: `${username}@example.test`,
+    })
+    .run();
+  const token = newSecretToken();
+  w.db
+    .insert(t.sessions)
+    .values({
+      tokenHash: sha256(token),
+      userId: id,
+      createdAt: w.realClock.now(),
+      expiresAt: w.realClock.now() + w.ctx.config.sessionTtlMs,
+    })
+    .run();
+  return { id, token };
 }

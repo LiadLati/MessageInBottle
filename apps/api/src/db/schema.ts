@@ -32,14 +32,48 @@ export const users = sqliteTable('users', {
   // effect. Nights are walked from that instant only, so a change never reaches into the past.
   timeZone: text('time_zone'),
   timeZoneSince: integer('time_zone_since'),
-  // `admin` is granted only by the server-side tool (tools/grant-admin.ts), by stable user id.
-  // Registration never sets it and no request body is ever read for it.
-  role: text('role', { enum: ['member', 'admin'] })
+  // Granted only by the server-side tools (tools/grant-admin.ts, tools/grant-developer.ts), by
+  // stable user id. Registration never sets a role and no request body is ever read for one.
+  //
+  //   member    — an ordinary account.
+  //   admin     — may review and decide reports and appeals. Gets no DEV controls.
+  //   developer — may use the DEV simulation panel, and only outside production. Has no
+  //               moderation authority whatsoever: admin routes answer 403.
+  //
+  // The two are deliberately disjoint: an account holds one role, so neither can quietly
+  // acquire the other's powers. Stored as plain text, so this list widens without a migration.
+  role: text('role', { enum: ['member', 'admin', 'developer'] })
     .notNull()
     .default('member'),
   roleGrantedAt: integer('role_granted_at'),
   roleGrantedBy: text('role_granted_by'),
+  // When the account was deleted at its owner's request. The row itself survives so that the
+  // letters other people legitimately hold, and any moderation record that must be kept, do
+  // not lose their foreign key; everything identifying it is cleared (services/deletion.ts).
+  deletedAt: integer('deleted_at'),
 });
+
+// What each account accepted or acknowledged, per document and version, and when. Append-only:
+// a newer version accepted later is a new row, so the history of what a person agreed to is
+// kept. The latest row per (user, document) is compared with the current version to decide
+// whether the person must be asked again. Accounts that predate this table have no rows and
+// are never treated as having accepted anything.
+export const policyAcceptances = sqliteTable(
+  'policy_acceptances',
+  {
+    id: text('id').primaryKey(),
+    userId: text('user_id')
+      .notNull()
+      .references(() => users.id),
+    document: text('document', { enum: ['terms', 'guidelines', 'privacy'] }).notNull(),
+    version: text('version').notNull(),
+    action: text('action', { enum: ['accepted', 'acknowledged'] }).notNull(),
+    // Where the person did it: the registration form, or the "updated terms" screen later.
+    source: text('source', { enum: ['registration', 'update'] }).notNull(),
+    acceptedAt: integer('accepted_at').notNull(),
+  },
+  (t) => [index('policy_acceptances_user_idx').on(t.userId, t.document, t.acceptedAt)],
+);
 
 // Password-reset tokens: only the SHA-256 of the token is stored, each token is single-use and
 // expires 30 minutes after it was requested. Rows are kept after use for auditing.
@@ -439,6 +473,16 @@ export const moderationCases = sqliteTable(
     decidedByUserId: text('decided_by_user_id').references(() => users.id),
     decidedAt: integer('decided_at'),
     decisionReason: text('decision_reason'),
+    // A documented legal or immediate child-safety reason to keep this case's evidence beyond
+    // the ordinary seven days (services/retention.ts). A hold is always explicit: it records
+    // why, who placed it and when, and releasing it returns the case to the normal
+    // calculation. There is no way to retain evidence indefinitely without one of these rows.
+    holdReason: text('hold_reason', { enum: ['legal', 'child_safety'] }),
+    holdNote: text('hold_note'),
+    holdByUserId: text('hold_by_user_id').references(() => users.id),
+    holdAt: integer('hold_at'),
+    holdReleasedAt: integer('hold_released_at'),
+    holdReleasedByUserId: text('hold_released_by_user_id').references(() => users.id),
   },
   (t) => [
     index('moderation_cases_status_idx').on(t.status, t.createdAt),
@@ -497,6 +541,22 @@ export const violations = sqliteTable(
     revokedByUserId: text('revoked_by_user_id').references(() => users.id),
     acknowledgedAt: integer('acknowledged_at'),
     createdAt: integer('created_at').notNull(),
+    // The single appeal opportunity (spec §16.4). The appeal is offered when the decision
+    // notice is actually put in front of the sender, and it stays offered until they resolve
+    // it one way or the other: closing the app or reloading decides nothing.
+    //
+    //   noticePresentedAt — first time the server handed the notice to the sender's client.
+    //   appealWaivedAt    — they explicitly confirmed "Skip appeal". Permanent.
+    //
+    // Both are written by the server alone, and both are idempotent: the first value wins.
+    noticePresentedAt: integer('notice_presented_at'),
+    appealWaivedAt: integer('appeal_waived_at'),
+    // `critical` is the confirmed child-safety classification, which bans immediately instead
+    // of walking the warning ladder. Only an administrator can set it -- the AI has no path to
+    // it at all (services/admin.ts) -- and it still carries the same single appeal.
+    severity: text('severity', { enum: ['standard', 'critical'] })
+      .notNull()
+      .default('standard'),
   },
   (t) => [index('violations_user_idx').on(t.userId, t.decidedAt)],
 );
@@ -523,4 +583,35 @@ export const appeals = sqliteTable(
     decisionReason: text('decision_reason'),
   },
   (t) => [index('appeals_status_idx').on(t.status, t.createdAt)],
+);
+
+// An append-only record of the moderation actions that change what a person may do: the
+// decision notice being presented, an appeal waived, a case decided, an appeal decided, a
+// critical child-safety classification, and legal or child-safety holds placed and released.
+//
+// It exists so those actions can be reconstructed after the evidence itself is redacted, and
+// it is written inside the same transaction as the action it describes -- there is no path
+// that changes standing without leaving a row here. `actorUserId` is null when the actor is
+// the subject themselves (waiving their own appeal) or the server (a retention run).
+export const moderationAudit = sqliteTable(
+  'moderation_audit',
+  {
+    id: text('id').primaryKey(),
+    action: text('action').notNull(),
+    caseId: text('case_id').references(() => moderationCases.id),
+    violationId: text('violation_id').references(() => violations.id),
+    appealId: text('appeal_id').references(() => appeals.id),
+    // Whose standing the action concerns.
+    subjectUserId: text('subject_user_id').references(() => users.id),
+    actorUserId: text('actor_user_id').references(() => users.id),
+    actorRole: text('actor_role', { enum: ['admin', 'developer', 'member', 'system'] }).notNull(),
+    // Free-text reason where the action requires one (a critical classification, a hold).
+    reason: text('reason'),
+    detail: text('detail'),
+    createdAt: integer('created_at').notNull(),
+  },
+  (t) => [
+    index('moderation_audit_case_idx').on(t.caseId, t.createdAt),
+    index('moderation_audit_subject_idx').on(t.subjectUserId, t.createdAt),
+  ],
 );

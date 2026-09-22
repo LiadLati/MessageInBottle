@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import { createApp } from './app.js';
-import { createTestWorld, loginAs as login, releaseInput } from '../test/harness.js';
+import {
+  acceptCurrent,
+  createTestWorld,
+  loginAs as login,
+  makeDeveloper,
+  releaseInput,
+} from '../test/harness.js';
 
 const auth = (token: string) => ({
   authorization: `Bearer ${token}`,
@@ -10,6 +16,8 @@ const auth = (token: string) => ({
 describe('HTTP surface', () => {
   it('opening a bottle found adrift: authenticated, single winner, no content to the loser', async () => {
     const w = createTestWorld();
+    // Losing a bottle on demand is a DEV control, so the account driving it needs the role.
+    makeDeveloper(w, 'ada');
     const app = createApp(w.ctx);
     const ada = await login(app, 'ada');
     const bo = await login(app, 'bo');
@@ -67,6 +75,8 @@ describe('HTTP surface', () => {
 
   it('public ocean: authenticated, strict projection, dev loss only by the owner', async () => {
     const w = createTestWorld();
+    // Losing a bottle on demand is a DEV control, so the account driving it needs the role.
+    makeDeveloper(w, 'ada');
     const app = createApp(w.ctx);
     expect((await app.request('/api/ocean/public')).status).toBe(401);
     const ada = await login(app, 'ada');
@@ -79,7 +89,11 @@ describe('HTTP surface', () => {
     });
     const { bottle } = (await release.json()) as { bottle: { id: string } };
 
-    // Only the sender can end their own journey through the development control.
+    // Only the sender can end their own journey through the development control. Bo and Cy
+    // hold the developer role here too, so what this proves is the ownership check and not
+    // merely that they lack the role.
+    makeDeveloper(w, 'bo');
+    makeDeveloper(w, 'cy');
     for (const token of [bo.token, cy.token]) {
       const res = await app.request('/api/dev/lose', {
         method: 'POST',
@@ -131,6 +145,8 @@ describe('HTTP surface', () => {
 
   it('requires authentication and never leaks bottle existence to non-participants', async () => {
     const w = createTestWorld();
+    // Losing a bottle on demand is a DEV control, so the account driving it needs the role.
+    makeDeveloper(w, 'ada');
     const app = createApp(w.ctx);
     expect((await app.request('/api/bottles/sent')).status).toBe(401);
 
@@ -171,6 +187,8 @@ describe('HTTP surface', () => {
 
   it("time zone: the device's zone is kept per account, refused when unknown, shown by /me", async () => {
     const w = createTestWorld();
+    // Losing a bottle on demand is a DEV control, so the account driving it needs the role.
+    makeDeveloper(w, 'ada');
     const app = createApp(w.ctx);
     const { token } = await login(app, 'ada');
     const auth = { authorization: `Bearer ${token}`, 'content-type': 'application/json' };
@@ -200,6 +218,8 @@ describe('HTTP surface', () => {
     const { eq } = await import('drizzle-orm');
     const t = await import('../db/schema.js');
     const w = createTestWorld();
+    // Losing a bottle on demand is a DEV control, so the account driving it needs the role.
+    makeDeveloper(w, 'ada');
     const app = createApp(w.ctx);
     const member = await login(app, 'ada');
     const auth = (token: string) => ({
@@ -236,6 +256,7 @@ describe('HTTP surface', () => {
         username: 'wannabe',
         email: 'w@example.test',
         password: 'Tide-pass-2026',
+        policies: acceptCurrent(),
         role: 'admin',
       }),
     });
@@ -318,6 +339,8 @@ describe('HTTP surface', () => {
 
   it('rejects malformed release bodies without creating anything', async () => {
     const w = createTestWorld();
+    // Losing a bottle on demand is a DEV control, so the account driving it needs the role.
+    makeDeveloper(w, 'ada');
     const app = createApp(w.ctx);
     const ada = await login(app, 'ada');
     const bo = await login(app, 'bo');
@@ -335,6 +358,8 @@ describe('HTTP surface', () => {
 
   it('chart responses list shores with app anchors and seas, never people or country names', async () => {
     const w = createTestWorld();
+    // Losing a bottle on demand is a DEV control, so the account driving it needs the role.
+    makeDeveloper(w, 'ada');
     const app = createApp(w.ctx);
     const ada = await login(app, 'ada');
     const res = await app.request('/api/chart', { headers: auth(ada.token) });
@@ -359,6 +384,8 @@ describe('HTTP surface', () => {
 
   it('user-facing responses never contain coordinates', async () => {
     const w = createTestWorld();
+    // Losing a bottle on demand is a DEV control, so the account driving it needs the role.
+    makeDeveloper(w, 'ada');
     const app = createApp(w.ctx);
     const ada = await login(app, 'ada');
     for (const path of ['/api/auth/me', '/api/friends', '/api/notifications']) {

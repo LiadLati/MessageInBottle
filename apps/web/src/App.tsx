@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { SentBottleDto } from '@mib/shared';
+import { PUBLISHED_DOCUMENTS, type DocumentId, type SentBottleDto } from '@mib/shared';
 import { api } from './api/client.js';
 import { Nav, type Tab } from './components/Nav.js';
+import { DeleteAccountDialog } from './components/DeleteAccountDialog.js';
+import { PolicyDialog } from './components/PolicyDialog.js';
 import { ProfileSheet } from './components/ProfileSheet.js';
 import { useAsync } from './lib/useAsync.js';
 import { useTopSlot } from './lib/useTopSlot.js';
-import { WarningAlert } from './components/WarningAlert.js';
+import { DecisionNotice } from './components/DecisionNotice.js';
 import { AdminScreen, type AdminSection } from './screens/AdminScreen.js';
 import { StandingScreen } from './screens/StandingScreen.js';
 import { DevPanel } from './screens/DevPanel.js';
@@ -15,6 +17,7 @@ import { LoginScreen } from './screens/LoginScreen.js';
 import { MyShoreScreen } from './screens/MyShoreScreen.js';
 import { NotificationsScreen } from './screens/NotificationsScreen.js';
 import { OceanScreen } from './screens/OceanScreen.js';
+import { PolicyUpdateScreen } from './screens/PolicyUpdateScreen.js';
 import { ShoreSetupScreen } from './screens/ShoreSetupScreen.js';
 import { WriteScreen } from './screens/WriteScreen.js';
 import { SessionProvider, useSession } from './state/session.js';
@@ -43,8 +46,39 @@ function readResetToken(): string | null {
   }
 }
 
+// A link such as /#privacy opens that document on load, signed in or not, so support replies
+// and the documents themselves can point at one another.
+function readPolicyHash(): DocumentId | null {
+  try {
+    const h = window.location.hash.replace(/^#/, '');
+    return PUBLISHED_DOCUMENTS.some((d) => d.id === h) ? (h as DocumentId) : null;
+  } catch {
+    return null;
+  }
+}
+
 function Shell() {
-  const { user, loading } = useSession();
+  const { user, loading, logout } = useSession();
+  // The document dialog is owned here so it can open over the sign-in screen, over the app,
+  // and over the "updated terms" screen alike.
+  const [policyDoc, setPolicyDoc] = useState<DocumentId | null>(readPolicyHash);
+  const openPolicy = useCallback((doc: DocumentId) => setPolicyDoc(doc), []);
+  const closePolicy = useCallback(() => {
+    setPolicyDoc(null);
+    if (readPolicyHash()) window.history.replaceState({}, '', window.location.pathname);
+  }, []);
+  // A hash typed or followed while the app is already open opens the document too.
+  useEffect(() => {
+    const onHash = () => {
+      const doc = readPolicyHash();
+      if (doc) setPolicyDoc(doc);
+    };
+    window.addEventListener('hashchange', onHash);
+    return () => window.removeEventListener('hashchange', onHash);
+  }, []);
+  const policyDialog = policyDoc ? (
+    <PolicyDialog initial={policyDoc} onClose={closePolicy} />
+  ) : null;
   const { phase } = useWeather();
   const [resetToken, setResetToken] = useState<string | null>(readResetToken);
   const [tab, setTab] = useState<Tab>('ocean');
@@ -57,6 +91,7 @@ function Shell() {
   const oceanLeave = useRef<(() => void) | null>(null);
   const [epoch, setEpoch] = useState(0);
   const [profileOpen, setProfileOpen] = useState(false);
+  const [deletingAccount, setDeletingAccount] = useState(false);
   const [choosingShore, setChoosingShore] = useState(false);
   // Immersive screens (preview & release, the release sequence) take the whole viewport: no
   // navigation, no system strips. An opened letter is a modal over the shore instead.
@@ -97,7 +132,6 @@ function Shell() {
   );
   const reloadStanding = standing.reload;
   const [standingOpen, setStandingOpen] = useState(false);
-  const [warningDismissed, setWarningDismissed] = useState<string | null>(null);
   const [admin, setAdmin] = useState<AdminSection | null>(null);
 
   // Visiting My Shore refreshes its count (a bottle opened there clears the badge); it no
@@ -120,27 +154,54 @@ function Shell() {
   }, []);
 
   if (resetToken) {
-    return <LoginScreen resetToken={resetToken} onResetDone={() => setResetToken(null)} />;
+    return (
+      <>
+        <LoginScreen
+          resetToken={resetToken}
+          onResetDone={() => setResetToken(null)}
+          onOpenPolicy={openPolicy}
+        />
+        {policyDialog}
+      </>
+    );
   }
   if (loading) return <main className="deck-screen" aria-busy />;
-  if (!user) return <LoginScreen />;
+  if (!user)
+    return (
+      <>
+        <LoginScreen onOpenPolicy={openPolicy} />
+        {policyDialog}
+      </>
+    );
+  // A released version this account has not accepted: nothing else until it has, or signs out.
+  if (user.policies.required)
+    return (
+      <>
+        <PolicyUpdateScreen onOpen={openPolicy} />
+        {policyDialog}
+      </>
+    );
+
+  // The decision notice still owed an answer. It is server state, not client state: there is
+  // no local "dismissed" flag, because closing or reloading must not resolve it.
+  const pendingDecision = standing.data?.pendingDecision ?? null;
 
   const restricted =
     standing.data?.standing === 'suspended' || standing.data?.standing === 'banned';
-  // A suspended or banned account sees its standing, can appeal and can sign out — nothing else.
+  // A suspended or banned account sees its standing, can read the decision, appeal, waive,
+  // get support, delete the account and sign out — nothing else.
   if (restricted && standing.data) {
     return (
       <main className="app-viewport" data-daylight="night">
-        <StandingScreen standing={standing.data} onChanged={reloadStanding} />
+        <StandingScreen standing={standing.data} />
+        {pendingDecision ? (
+          <DecisionNotice notice={pendingDecision} onResolved={reloadStanding} />
+        ) : null}
       </main>
     );
   }
 
   const shoreName = chart.data?.shores.find((s) => s.id === user.shoreId)?.name ?? null;
-  const pendingWarning =
-    standing.data?.pendingWarning && standing.data.pendingWarning.id !== warningDismissed
-      ? standing.data.pendingWarning
-      : null;
 
   if (!user.shoreId || choosingShore) {
     return (
@@ -193,11 +254,7 @@ function Shell() {
         {admin && user.role === 'admin' ? (
           <AdminScreen section={admin} onSection={setAdmin} onBack={() => setAdmin(null)} />
         ) : standingOpen && standing.data ? (
-          <StandingScreen
-            standing={standing.data}
-            onChanged={reloadStanding}
-            onBack={() => setStandingOpen(false)}
-          />
+          <StandingScreen standing={standing.data} onBack={() => setStandingOpen(false)} />
         ) : null}
         {inboxOpen && !admin && !standingOpen ? (
           <NotificationsScreen
@@ -254,6 +311,11 @@ function Shell() {
         <ProfileSheet
           shoreName={shoreName}
           onChangeShore={chooseShore}
+          onOpenPolicy={openPolicy}
+          onDeleteAccount={() => {
+            setProfileOpen(false);
+            setDeletingAccount(true);
+          }}
           onStanding={() => {
             setProfileOpen(false);
             setStandingOpen(true);
@@ -261,21 +323,20 @@ function Shell() {
           onClose={closeProfile}
         />
       ) : null}
-      {pendingWarning && !immersive ? (
-        <WarningAlert
-          warning={pendingWarning}
-          onAcknowledged={() => {
-            setWarningDismissed(pendingWarning.id);
-            void reloadStanding();
-          }}
-          onAppeal={() => {
-            setWarningDismissed(pendingWarning.id);
-            void api.acknowledgeWarning(pendingWarning.id).catch(() => {});
-            setStandingOpen(true);
-            void reloadStanding();
+      {pendingDecision && !immersive ? (
+        <DecisionNotice notice={pendingDecision} onResolved={reloadStanding} />
+      ) : null}
+      {deletingAccount ? (
+        <DeleteAccountDialog
+          onCancel={() => setDeletingAccount(false)}
+          onDeleted={() => {
+            setDeletingAccount(false);
+            // The account is gone and its session with it: drop the token and show sign-in.
+            void logout();
           }}
         />
       ) : null}
+      {policyDialog}
       {immersive ? null : (
         <Nav
           active={tab}

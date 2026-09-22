@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { AccountPoliciesSchema } from './policies.js';
 import { BOTTLE_STATES, JOURNEY_EVENT_TYPES, LOSS_REASONS } from './bottle-state.js';
 import { LETTER_FONTS } from './fonts.js';
 import { LETTER_MAX_BYTES, LETTER_MAX_CHARACTERS, countLetterCharacters } from './letter.js';
@@ -36,6 +37,20 @@ export const LetterTextSchema = z
   );
 
 // ---------- auth (request schemas live in auth.ts) ----------
+
+// The three roles an account can hold, and only ever one of them.
+//
+//   member    — an ordinary account.
+//   admin     — reviews and decides reports and appeals. Gets no DEV controls.
+//   developer — may use the DEV simulation panel, and only outside production. Has no
+//               moderation authority: admin routes answer 403.
+//
+// Roles are granted server-side by CLI and read from the users row on every request. There is
+// no registration field, header or request body that can set one.
+export const ACCOUNT_ROLES = ['member', 'admin', 'developer'] as const;
+export const AccountRoleSchema = z.enum(ACCOUNT_ROLES);
+export type AccountRole = z.infer<typeof AccountRoleSchema>;
+
 export const SessionResponseSchema = z.object({
   token: z.string(),
   user: z.object({
@@ -48,9 +63,14 @@ export const SessionResponseSchema = z.object({
     // The IANA zone the account's nights are counted in (spec §9.3): first learned from the
     // device and re-synced whenever the app starts or resumes. Null until a device has said.
     timeZone: z.string().nullable(),
-    // Granted only server-side (see apps/api/src/tools/grant-admin.ts); never chosen at
-    // registration and never taken from a client.
-    role: z.enum(['member', 'admin']),
+    // Granted only server-side (apps/api/src/tools/grant-admin.ts, grant-developer.ts); never
+    // chosen at registration and never taken from a client. `admin` reviews and decides reports
+    // and appeals; `developer` may use the DEV simulation panel outside production and has no
+    // moderation authority at all. An account holds exactly one of them.
+    role: AccountRoleSchema,
+    // What this account has accepted against the current documents, and whether it must be
+    // asked again before using the app (policies.ts).
+    policies: AccountPoliciesSchema,
   }),
 });
 
@@ -543,6 +563,35 @@ export const AdminCaseDetailSchema = AdminCaseSummarySchema.extend({
       createdAt: z.string(),
     })
     .nullable(),
+  // Where this case stands in the seven-day evidence retention calculation, so an
+  // administrator can see why evidence is still here — or why it is about to go.
+  retention: z.object({
+    // The instant nothing could need the evidence any more; null while something still can.
+    finalAt: z.string().nullable(),
+    redactableAt: z.string().nullable(),
+    // Why it is being kept: 'notice_unresolved', 'appeal_pending', 'legal_hold', …
+    hold: z.string().nullable(),
+  }),
+  // A documented legal or immediate child-safety hold, if one was placed.
+  hold: z
+    .object({
+      reason: z.enum(['legal', 'child_safety']),
+      note: z.string(),
+      placedAt: z.string(),
+      placedBy: PersonSchema.nullable(),
+      releasedAt: z.string().nullable(),
+    })
+    .nullable(),
+  // The violation this case produced, if it was upheld.
+  violation: z
+    .object({
+      id: IdSchema,
+      severity: z.enum(['standard', 'critical']),
+      appealAvailable: z.boolean(),
+      appealWaivedAt: z.string().nullable(),
+      noticePresentedAt: z.string().nullable(),
+    })
+    .nullable(),
 });
 export type AdminCaseDetailDto = z.infer<typeof AdminCaseDetailSchema>;
 
@@ -584,6 +633,9 @@ export const ViolationNoticeSchema = z.object({
   decidedAt: z.string(),
   revokedAt: z.string().nullable(),
   acknowledgedAt: z.string().nullable(),
+  // `critical` is a confirmed child-safety violation, which bans immediately rather than
+  // walking the warning ladder. It carries the same single appeal as any other decision.
+  severity: z.enum(['standard', 'critical']),
   bottle: z.object({ id: IdSchema, recipientDisplayName: z.string(), releasedAt: z.string() }),
   appeal: z
     .object({
@@ -594,6 +646,12 @@ export const ViolationNoticeSchema = z.object({
       decidedAt: z.string().nullable(),
     })
     .nullable(),
+  // The single appeal opportunity. `appealAvailable` is the server's answer to "may this
+  // person still appeal this decision?" -- false once they have appealed, explicitly waived,
+  // or the violation was revoked. Closing or reloading SeaYou changes none of it.
+  appealAvailable: z.boolean(),
+  appealWaivedAt: z.string().nullable(),
+  noticePresentedAt: z.string().nullable(),
 });
 export type ViolationNoticeDto = z.infer<typeof ViolationNoticeSchema>;
 
@@ -605,6 +663,10 @@ export const AccountStandingSchema = z.object({
   violationsInForce: z.number().int(),
   // A first accepted violation the account has not acknowledged yet: shown once, on entry.
   pendingWarning: ViolationNoticeSchema.nullable(),
+  // The decision notice still waiting to be resolved: the oldest upheld violation that has
+  // been neither appealed nor explicitly waived. It comes back on every eligible visit until
+  // the sender chooses, so leaving without choosing costs them nothing.
+  pendingDecision: ViolationNoticeSchema.nullable(),
   violations: z.array(ViolationNoticeSchema),
 });
 export type AccountStandingDto = z.infer<typeof AccountStandingSchema>;
@@ -614,3 +676,34 @@ export const AppealRequestSchema = z.object({
   text: z.string().trim().min(1).max(2000),
 });
 export type AppealRequest = z.infer<typeof AppealRequestSchema>;
+
+// Explicitly giving up the appeal. The client sends this only after the second confirmation,
+// and the server treats it as permanent -- so it is deliberately its own request, never a
+// side effect of reading or dismissing the notice.
+export const WaiveAppealRequestSchema = z.object({ violationId: IdSchema });
+export type WaiveAppealRequest = z.infer<typeof WaiveAppealRequestSchema>;
+
+// The exact words the second confirmation must use, kept here so the API tests and the UI
+// cannot drift apart.
+export const APPEAL_WAIVER_CONFIRMATION =
+  'If you continue, you will permanently lose the option to appeal this decision.';
+export const APPEAL_ACTION_APPEAL = 'Appeal decision';
+export const APPEAL_ACTION_CONTINUE = 'Continue without appealing';
+export const APPEAL_ACTION_GO_BACK = 'Go back';
+export const APPEAL_ACTION_SKIP = 'Skip appeal';
+
+// A confirmed critical child-safety decision. The reason is mandatory: there is no path that
+// bans an account this way without an administrator writing down why.
+export const CriticalDecisionRequestSchema = z.object({
+  reason: z.string().trim().min(1).max(1000),
+  classification: z.literal('critical_child_safety'),
+});
+export type CriticalDecisionRequest = z.infer<typeof CriticalDecisionRequestSchema>;
+
+// A documented legal or immediate child-safety reason to keep a case's evidence beyond the
+// ordinary seven days, and the release that returns it to the normal calculation.
+export const HoldRequestSchema = z.object({
+  reason: z.enum(['legal', 'child_safety']),
+  note: z.string().trim().min(1).max(1000),
+});
+export type HoldRequest = z.infer<typeof HoldRequestSchema>;

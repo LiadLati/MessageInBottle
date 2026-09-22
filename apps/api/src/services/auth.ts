@@ -1,10 +1,12 @@
 import { and, eq, gt, isNull } from 'drizzle-orm';
+import type { PolicyAcceptanceRequest } from '@mib/shared';
 import { RESET_TOKEN_TTL_MS, normalizeEmail, normalizeUsername } from '@mib/shared';
 import * as t from '../db/schema.js';
 import { newId, newSecretToken, sha256 } from '../lib/ids.js';
 import { AppError, badRequest, conflict } from '../lib/errors.js';
 import { DUMMY_PASSWORD_HASH, hashPassword, verifyPassword } from '../lib/password.js';
 import type { AppContext, AuthUser } from './context.js';
+import { assertAcceptancesAllowed, recordAcceptances } from './policies.js';
 
 export function toAuthUser(row: typeof t.users.$inferSelect): AuthUser {
   return {
@@ -67,8 +69,10 @@ function issueSession(ctx: AppContext, userId: string): string {
 
 export function register(
   ctx: AppContext,
-  input: { username: string; email: string; password: string },
+  input: { username: string; email: string; password: string; policies: PolicyAcceptanceRequest },
 ): { token: string; user: AuthUser } {
+  // Nobody is asked to agree to unfinished legal text outside development.
+  assertAcceptancesAllowed(ctx);
   const username = normalizeUsername(input.username);
   const email = normalizeEmail(input.email);
   const displayName = input.username.trim();
@@ -76,19 +80,23 @@ export function register(
   const passwordHash = hashPassword(input.password);
   const id = newId('usr');
   try {
-    ctx.db
-      .insert(t.users)
-      .values({
-        id,
-        username,
-        displayName,
-        shoreId: null,
-        createdAt: now,
-        passwordHash,
-        passwordUpdatedAt: now,
-        email,
-      })
-      .run();
+    // The account and its acceptances are one write: no account exists without its record of
+    // what it accepted, and no record exists without its account.
+    ctx.db.transaction((tx) => {
+      tx.insert(t.users)
+        .values({
+          id,
+          username,
+          displayName,
+          shoreId: null,
+          createdAt: now,
+          passwordHash,
+          passwordUpdatedAt: now,
+          email,
+        })
+        .run();
+      recordAcceptances(tx, id, input.policies, 'registration', ctx.realClock.now());
+    });
   } catch (err) {
     // The unique indexes are the authority; the normalized lookups are only friendlier pre-checks.
     if (isUniqueViolation(err)) {
@@ -197,11 +205,11 @@ export async function requestPasswordReset(ctx: AppContext, email: string): Prom
   const link = `${ctx.config.appUrl.replace(/\/$/, '')}/?reset=${token}`;
   await ctx.mailer.send({
     to: user.email!,
-    subject: 'Reset your Message in a Bottle password',
+    subject: 'Reset your SeaYou password',
     text: [
       `Hello ${user.displayName},`,
       '',
-      'Someone asked to reset the password for your Message in a Bottle account.',
+      'Someone asked to reset the password for your SeaYou account.',
       'If that was you, open this link within 30 minutes:',
       '',
       link,

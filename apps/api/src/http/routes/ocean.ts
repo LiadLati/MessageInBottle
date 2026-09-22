@@ -8,12 +8,13 @@ import {
 import type { AppEnv } from '../app.js';
 import { requireAuth } from '../middleware/auth.js';
 import { requireGoodStanding } from '../middleware/admin.js';
+import { requirePolicies } from '../middleware/policies.js';
 
 // The public ocean: bottles adrift, visible to every signed-in user through the strict public
 // projection only (spec §10.3, D03/D11: authenticated access, no sender or recipient identity).
 export function oceanRoutes() {
   const r = new Hono<AppEnv>();
-  r.use('*', requireAuth, requireGoodStanding);
+  r.use('*', requireAuth, requirePolicies, requireGoodStanding);
   r.get('/public', (c) => {
     const ctx = c.get('ctx');
     return c.json({

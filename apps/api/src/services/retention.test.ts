@@ -2,13 +2,26 @@ import { eq } from 'drizzle-orm';
 import { beforeEach, describe, expect, it } from 'vitest';
 import * as t from '../db/schema.js';
 import { AppError } from '../lib/errors.js';
-import { decideAppeal, decideCase, getCase } from './admin.js';
+import {
+  decideAppeal,
+  decideCase,
+  decideCaseCritical,
+  getCase,
+  placeHold,
+  releaseHold,
+} from './admin.js';
 import { openBottle } from './bottles.js';
 import type { AuthUser } from './context.js';
 import { commitArrivalIfDue } from './journey.js';
-import { reportLetter, standingOf, submitAppeal } from './moderation.js';
+import { reportLetter, standingOf, submitAppeal, waiveAppeal } from './moderation.js';
 import { releaseBottle } from './release.js';
-import { RETENTION_OFF, applyRetention, planRetention, type RetentionPolicy } from './retention.js';
+import {
+  RETENTION_DEFAULT,
+  RETENTION_OFF,
+  SEVEN_DAYS_MS,
+  applyRetention,
+  planRetention,
+} from './retention.js';
 import { createTestWorld, releaseInput, type TestWorld } from '../test/harness.js';
 
 const DAY = 24 * 60 * 60 * 1000;
@@ -40,232 +53,352 @@ function reportedCase(w: TestWorld): string {
   return reportLetter(w.ctx, w.user('bo'), { bottleId: id, reason: 'harassment', hide: false })
     .caseId;
 }
+const violationOf = (w: TestWorld, caseId: string) =>
+  w.db.select().from(t.violations).where(eq(t.violations.caseId, caseId)).get()!;
+const caseRow = (w: TestWorld, caseId: string) =>
+  w.db.select().from(t.moderationCases).where(eq(t.moderationCases.id, caseId)).get()!;
+const planOf = (w: TestWorld, caseId: string) =>
+  planRetention(w.db, w.realClock.now(), RETENTION_DEFAULT).cases.find((c) => c.caseId === caseId)!;
+const holdOf = (w: TestWorld, caseId: string) => planOf(w, caseId).hold;
+const run = (w: TestWorld) => applyRetention(w.db, w.realClock.now(), RETENTION_DEFAULT);
+const audits = (w: TestWorld, caseId: string) =>
+  w.db
+    .select()
+    .from(t.moderationAudit)
+    .where(eq(t.moderationAudit.caseId, caseId))
+    .all()
+    .map((a) => a.action);
 
-// A policy that would remove everything the moment it is allowed to, so that a case still
-// held under it is held by the safety rules rather than by a long window.
-const AGGRESSIVE: RetentionPolicy = {
-  enabled: true,
-  rejectedAfterMs: 0,
-  acceptedAfterMs: 0,
-  appealWindowMs: 1 * DAY,
-};
-const holdOf = (w: TestWorld, caseId: string, policy: RetentionPolicy) =>
-  planRetention(w.db, w.realClock.now(), policy).cases.find((c) => c.caseId === caseId)?.hold;
-
-describe('evidence retention', () => {
+describe('evidence retention: seven days after a case becomes final', () => {
   let w: TestWorld;
   beforeEach(() => {
     w = world();
   });
 
-  it('never redacts anything under the shipped defaults', () => {
+  it('keeps the evidence of an undecided report indefinitely', () => {
     const caseId = reportedCase(w);
+    expect(holdOf(w, caseId)).toBe('case_pending');
+    w.realClock.advance(365 * DAY);
+    expect(holdOf(w, caseId)).toBe('case_pending');
+    expect(run(w).redacted).toEqual([]);
+    expect(caseRow(w, caseId).evidenceText).not.toBe('');
+  });
+
+  it('redacts a rejected case seven days after the rejection, and not a moment before', () => {
+    const caseId = reportedCase(w);
+    const before = caseRow(w, caseId).evidenceText;
+    expect(before).not.toBe('');
     decideCase(w.ctx, admin(w), caseId, 'rejected', 'not a violation');
+
+    // A rejected report is final at once: there is no violation, so there is nothing to appeal.
+    expect(planOf(w, caseId).finalAt).toBe(w.realClock.now());
+    expect(holdOf(w, caseId)).toBe('within_window');
+
+    w.realClock.advance(SEVEN_DAYS_MS - 1);
+    expect(holdOf(w, caseId)).toBe('within_window');
+    expect(run(w).redacted).toEqual([]);
+    expect(caseRow(w, caseId).evidenceText).toBe(before);
+
+    w.realClock.advance(1);
+    expect(holdOf(w, caseId)).toBeNull();
+    expect(run(w).redacted).toEqual([caseId]);
+    const after = caseRow(w, caseId);
+    expect(after.evidenceText).toBe('');
+    expect(after.evidenceRedactedAt).toBe(w.realClock.now());
+    expect(audits(w, caseId)).toContain('evidence_redacted');
+  });
+
+  it('does not delete the letter itself when a report is rejected', () => {
+    const bottleId = deliveredLetter(w);
+    const caseId = reportLetter(w.ctx, w.user('bo'), {
+      bottleId,
+      reason: 'harassment',
+      hide: false,
+    }).caseId;
+    const letterId = caseRow(w, caseId).letterId;
+    decideCase(w.ctx, admin(w), caseId, 'rejected', null);
+    w.realClock.advance(SEVEN_DAYS_MS);
+    run(w);
+
+    // Only the moderation copy goes. The original letter and the bottle are untouched, and the
+    // letter is readable again under its ordinary rules.
+    const letter = w.db.select().from(t.letters).where(eq(t.letters.id, letterId)).get()!;
+    expect(letter.text.length).toBeGreaterThan(0);
+    const bottle = w.db.select().from(t.bottles).where(eq(t.bottles.id, bottleId)).get()!;
+    expect(bottle.moderationStatus).not.toBe('removed');
+  });
+
+  it('holds an upheld case until the sender resolves the decision, however long that takes', () => {
+    const caseId = reportedCase(w);
+    decideCase(w.ctx, admin(w), caseId, 'accepted', 'harassment');
+    expect(holdOf(w, caseId)).toBe('notice_unresolved');
+    expect(planOf(w, caseId).finalAt).toBeNull();
+
+    // A year later the offer is still open, so the evidence it would be judged on is still here.
     w.realClock.advance(365 * DAY);
-    const plan = planRetention(w.db, w.realClock.now(), RETENTION_OFF);
-    expect(plan.redactable).toEqual([]);
-    expect(holdOf(w, caseId, RETENTION_OFF)).toBe('no_policy');
+    expect(holdOf(w, caseId)).toBe('notice_unresolved');
+    expect(run(w).redacted).toEqual([]);
+    expect(caseRow(w, caseId).evidenceText).not.toBe('');
   });
 
-  it('holds a case nobody has decided yet, however old it is', () => {
+  it('starts the clock when the sender explicitly waives the appeal', () => {
     const caseId = reportedCase(w);
-    w.realClock.advance(365 * DAY);
-    expect(holdOf(w, caseId, AGGRESSIVE)).toBe('case_pending');
-    expect(applyRetention(w.db, w.realClock.now(), AGGRESSIVE).redacted).toEqual([]);
-    expect(getCase(w.ctx, caseId).letter.text.length).toBeGreaterThan(0);
+    decideCase(w.ctx, admin(w), caseId, 'accepted', 'harassment');
+    const v = violationOf(w, caseId);
+    w.realClock.advance(3 * DAY);
+    waiveAppeal(w.ctx, w.user('ada'), v.id);
+    const waivedAt = w.realClock.now();
+    expect(planOf(w, caseId).finalAt).toBe(waivedAt);
+
+    w.realClock.advance(SEVEN_DAYS_MS - 1);
+    expect(run(w).redacted).toEqual([]);
+    w.realClock.advance(1);
+    expect(run(w).redacted).toEqual([caseId]);
+    expect(caseRow(w, caseId).evidenceText).toBe('');
   });
 
-  it('holds a decided case while a model review is still in flight', () => {
-    const caseId = reportedCase(w);
-    decideCase(w.ctx, admin(w), caseId, 'rejected', 'fine');
-    w.db
-      .update(t.moderationCases)
-      .set({ aiStatus: 'running' })
-      .where(eq(t.moderationCases.id, caseId))
-      .run();
-    w.realClock.advance(365 * DAY);
-    expect(holdOf(w, caseId, AGGRESSIVE)).toBe('ai_in_queue');
+  it('keeps the letter unavailable after an upheld case is redacted', () => {
+    const bottleId = deliveredLetter(w);
+    const caseId = reportLetter(w.ctx, w.user('bo'), {
+      bottleId,
+      reason: 'harassment',
+      hide: false,
+    }).caseId;
+    decideCase(w.ctx, admin(w), caseId, 'accepted', 'upheld');
+    waiveAppeal(w.ctx, w.user('ada'), violationOf(w, caseId).id);
+    w.realClock.advance(SEVEN_DAYS_MS);
+    expect(run(w).redacted).toEqual([caseId]);
+
+    // The evidence is gone; the withdrawal of the letter is not undone by that.
+    const bottle = w.db.select().from(t.bottles).where(eq(t.bottles.id, bottleId)).get()!;
+    expect(bottle.moderationStatus).toBe('removed');
+    expect(() => openBottle(w.ctx, w.user('bo'), bottleId)).toThrow(AppError);
   });
 
-  it('holds an accepted case while its violation is still in force', () => {
+  it('holds while an appeal is pending, and redacts seven days after it is decided', () => {
     const caseId = reportedCase(w);
-    decideCase(w.ctx, admin(w), caseId, 'accepted', 'threats');
-    w.realClock.advance(365 * DAY);
-    // The appeal deadline has passed, but the sanction it justifies has not been lifted.
-    expect(holdOf(w, caseId, AGGRESSIVE)).toBe('violation_in_force');
-    expect(applyRetention(w.db, w.realClock.now(), AGGRESSIVE).redacted).toEqual([]);
+    decideCase(w.ctx, admin(w), caseId, 'accepted', 'harassment');
+    const v = violationOf(w, caseId);
+    submitAppeal(w.ctx, w.user('ada'), { violationId: v.id, text: 'please reconsider' });
+    expect(holdOf(w, caseId)).toBe('appeal_pending');
+    w.realClock.advance(100 * DAY);
+    expect(holdOf(w, caseId)).toBe('appeal_pending');
+    expect(run(w).redacted).toEqual([]);
+
+    const appeal = w.db.select().from(t.appeals).where(eq(t.appeals.violationId, v.id)).get()!;
+    decideAppeal(w.ctx, admin(w), appeal.id, 'rejected', 'the decision stands');
+    expect(planOf(w, caseId).finalAt).toBe(w.realClock.now());
+    w.realClock.advance(SEVEN_DAYS_MS - 1);
+    expect(run(w).redacted).toEqual([]);
+    w.realClock.advance(1);
+    expect(run(w).redacted).toEqual([caseId]);
   });
 
-  it('holds an accepted case while the sender can still appeal', () => {
-    const caseId = reportedCase(w);
-    decideCase(w.ctx, admin(w), caseId, 'accepted', 'threats');
-    w.realClock.advance(1000);
-    expect(holdOf(w, caseId, AGGRESSIVE)).toBe('appeal_open');
-  });
+  it('restores the letter on an accepted appeal, then redacts only the moderation evidence', () => {
+    const bottleId = deliveredLetter(w);
+    const caseId = reportLetter(w.ctx, w.user('bo'), {
+      bottleId,
+      reason: 'harassment',
+      hide: false,
+    }).caseId;
+    const letterId = caseRow(w, caseId).letterId;
+    decideCase(w.ctx, admin(w), caseId, 'accepted', 'upheld');
+    const v = violationOf(w, caseId);
+    submitAppeal(w.ctx, w.user('ada'), { violationId: v.id, text: 'it was quoted out of context' });
+    const appeal = w.db.select().from(t.appeals).where(eq(t.appeals.violationId, v.id)).get()!;
+    decideAppeal(w.ctx, admin(w), appeal.id, 'accepted', 'on reflection, not a violation');
 
-  it('holds a case whose appeal is waiting to be decided', () => {
-    const caseId = reportedCase(w);
-    decideCase(w.ctx, admin(w), caseId, 'accepted', 'threats');
-    const violation = w.db
-      .select()
-      .from(t.violations)
-      .where(eq(t.violations.caseId, caseId))
-      .get()!;
-    submitAppeal(w.ctx, w.user('ada'), { violationId: violation.id, text: 'it was a joke' });
-    w.realClock.advance(365 * DAY);
-    expect(holdOf(w, caseId, AGGRESSIVE)).toBe('appeal_pending');
-    expect(applyRetention(w.db, w.realClock.now(), AGGRESSIVE).redacted).toEqual([]);
-  });
-
-  it('holds a case whose appeal was rejected, because the sanction stands', () => {
-    const caseId = reportedCase(w);
-    decideCase(w.ctx, admin(w), caseId, 'accepted', 'threats');
-    const violation = w.db
-      .select()
-      .from(t.violations)
-      .where(eq(t.violations.caseId, caseId))
-      .get()!;
-    const appeal = submitAppeal(w.ctx, w.user('ada'), {
-      violationId: violation.id,
-      text: 'please reconsider',
-    }).appeal!;
-    decideAppeal(w.ctx, admin(w), appeal.id, 'rejected', 'stands');
-    w.realClock.advance(365 * DAY);
-    expect(holdOf(w, caseId, AGGRESSIVE)).toBe('violation_in_force');
-  });
-
-  it('redacts a rejected case only once the window has passed', () => {
-    const caseId = reportedCase(w);
-    decideCase(w.ctx, admin(w), caseId, 'rejected', 'not a violation');
-    const policy: RetentionPolicy = { ...RETENTION_OFF, enabled: true, rejectedAfterMs: 30 * DAY };
-    w.realClock.advance(29 * DAY);
-    expect(holdOf(w, caseId, policy)).toBe('within_window');
-    expect(applyRetention(w.db, w.realClock.now(), policy).redacted).toEqual([]);
-
-    w.realClock.advance(2 * DAY);
-    expect(holdOf(w, caseId, policy)).toBeNull();
-    expect(applyRetention(w.db, w.realClock.now(), policy).redacted).toEqual([caseId]);
-
-    // The case survives; only the copied letter and the reporters' words are gone.
-    const detail = getCase(w.ctx, caseId);
-    expect(detail.letter.text).toBe('');
-    expect(detail.letter.redactedAt).not.toBeNull();
-    expect(detail.status).toBe('rejected');
-    expect(detail.decision?.reason).toBe('not a violation');
-    expect(detail.reports[0]!.explanation).toBeNull();
-    expect(detail.reports[0]!.reporter.username).toBe('bo');
-  });
-
-  it('redacts an accepted case once the violation is revoked and the window has passed', () => {
-    const caseId = reportedCase(w);
-    decideCase(w.ctx, admin(w), caseId, 'accepted', 'threats');
-    const violation = w.db
-      .select()
-      .from(t.violations)
-      .where(eq(t.violations.caseId, caseId))
-      .get()!;
-    const appeal = submitAppeal(w.ctx, w.user('ada'), {
-      violationId: violation.id,
-      text: 'context was missing',
-    }).appeal!;
-    w.realClock.advance(60_000);
-    decideAppeal(w.ctx, admin(w), appeal.id, 'accepted', 'fair point');
-    // The account is clear again, so nothing depends on the evidence any more.
+    // The letter comes back, and the account is clear again.
+    const bottle = w.db.select().from(t.bottles).where(eq(t.bottles.id, bottleId)).get()!;
+    expect(bottle.moderationStatus).toBe('clear');
     expect(standingOf(w.db, w.user('ada').id, w.realClock.now()).standing).toBe('good');
 
-    const policy: RetentionPolicy = { ...AGGRESSIVE, acceptedAfterMs: 30 * DAY };
-    expect(holdOf(w, caseId, policy)).toBe('within_window');
-    w.realClock.advance(31 * DAY);
-    expect(applyRetention(w.db, w.realClock.now(), policy).redacted).toEqual([caseId]);
-    expect(getCase(w.ctx, caseId).letter.text).toBe('');
+    w.realClock.advance(SEVEN_DAYS_MS);
+    expect(run(w).redacted).toEqual([caseId]);
+    // Only the evidence copy went: the letter people legitimately hold is still there.
+    expect(caseRow(w, caseId).evidenceText).toBe('');
+    const letter = w.db.select().from(t.letters).where(eq(t.letters.id, letterId)).get()!;
+    expect(letter.text.length).toBeGreaterThan(0);
   });
 
-  it('refuses to change anything while retention is disabled', () => {
+  it('clears the reporters’ explanations but keeps who reported', () => {
+    const bottleId = deliveredLetter(w);
+    const caseId = reportLetter(w.ctx, w.user('bo'), {
+      bottleId,
+      reason: 'harassment',
+      hide: false,
+      explanation: 'he quoted my address back at me',
+    }).caseId;
+    decideCase(w.ctx, admin(w), caseId, 'rejected', null);
+    w.realClock.advance(SEVEN_DAYS_MS);
+    run(w);
+    const report = w.db
+      .select()
+      .from(t.letterReports)
+      .where(eq(t.letterReports.caseId, caseId))
+      .get()!;
+    expect(report.explanation).toBeNull();
+    // Kept: it is what stops one person reporting the same letter twice, and what makes a
+    // pattern of abusive reporting visible. It is never shown to the sender.
+    expect(report.reporterId).toBe(w.user('bo').id);
+  });
+
+  it('is idempotent: a second run changes nothing', () => {
     const caseId = reportedCase(w);
-    decideCase(w.ctx, admin(w), caseId, 'rejected', 'fine');
-    w.realClock.advance(365 * DAY);
-    const policy: RetentionPolicy = { ...AGGRESSIVE, enabled: false };
-    // The plan still reports what would go, so a policy can be reviewed before it is enabled.
-    expect(planRetention(w.db, w.realClock.now(), policy).redactable).toEqual([caseId]);
-    const result = applyRetention(w.db, w.realClock.now(), policy);
+    decideCase(w.ctx, admin(w), caseId, 'rejected', null);
+    w.realClock.advance(SEVEN_DAYS_MS);
+    expect(run(w).redacted).toEqual([caseId]);
+    const redactedAt = caseRow(w, caseId).evidenceRedactedAt;
+    const auditCount = audits(w, caseId).length;
+
+    w.realClock.advance(DAY);
+    expect(run(w).redacted).toEqual([]);
+    expect(caseRow(w, caseId).evidenceRedactedAt).toBe(redactedAt);
+    expect(audits(w, caseId)).toHaveLength(auditCount);
+    expect(holdOf(w, caseId)).toBe('already_redacted');
+  });
+
+  it('can be disabled, and then plans without changing anything', () => {
+    const caseId = reportedCase(w);
+    decideCase(w.ctx, admin(w), caseId, 'rejected', null);
+    w.realClock.advance(SEVEN_DAYS_MS);
+
+    const plan = planRetention(w.db, w.realClock.now(), RETENTION_OFF);
+    expect(plan.redactable).toEqual([caseId]);
+    const result = applyRetention(w.db, w.realClock.now(), RETENTION_OFF);
     expect(result.applied).toBe(false);
     expect(result.reason).toMatch(/disabled/);
-    expect(getCase(w.ctx, caseId).letter.text.length).toBeGreaterThan(0);
-  });
-
-  it('redacts each case once and leaves an already redacted one alone', () => {
-    const caseId = reportedCase(w);
-    decideCase(w.ctx, admin(w), caseId, 'rejected', 'fine');
-    w.realClock.advance(365 * DAY);
-    expect(applyRetention(w.db, w.realClock.now(), AGGRESSIVE).redacted).toEqual([caseId]);
-    const at = getCase(w.ctx, caseId).letter.redactedAt;
-    w.realClock.advance(DAY);
-    expect(applyRetention(w.db, w.realClock.now(), AGGRESSIVE).redacted).toEqual([]);
-    expect(holdOf(w, caseId, AGGRESSIVE)).toBe('already_redacted');
-    expect(getCase(w.ctx, caseId).letter.redactedAt).toBe(at);
+    expect(caseRow(w, caseId).evidenceText).not.toBe('');
   });
 });
 
-describe('appeal deadline', () => {
-  it('is unlimited by default', () => {
-    const w = world();
-    const caseId = reportedCase(w);
-    decideCase(w.ctx, admin(w), caseId, 'accepted', 'threats');
-    const v = w.db.select().from(t.violations).where(eq(t.violations.caseId, caseId)).get()!;
-    w.realClock.advance(5 * 365 * DAY);
-    expect(() =>
-      submitAppeal(w.ctx, w.user('ada'), { violationId: v.id, text: 'late but true' }),
-    ).not.toThrow();
+describe('legal and child-safety holds', () => {
+  let w: TestWorld;
+  beforeEach(() => {
+    w = world();
   });
 
-  it('closes for a warned account once a configured deadline passes', () => {
-    const w = createTestWorld({
-      defaultShoreCapacity: 80,
-      retention: { ...RETENTION_OFF, appealWindowMs: 30 * DAY },
-    });
-    w.db
-      .update(t.users)
-      .set({ role: 'admin' })
-      .where(eq(t.users.id, w.user('cy').id))
-      .run();
+  it('keeps evidence past seven days, and releases back to the ordinary calculation', () => {
     const caseId = reportedCase(w);
-    decideCase(w.ctx, admin(w), caseId, 'accepted', 'threats');
-    const v = w.db.select().from(t.violations).where(eq(t.violations.caseId, caseId)).get()!;
-    w.realClock.advance(31 * DAY);
+    decideCase(w.ctx, admin(w), caseId, 'rejected', null);
+    placeHold(w.ctx, admin(w), caseId, 'legal', 'preservation request 2026-04, ref 118');
+
+    w.realClock.advance(30 * DAY);
+    expect(holdOf(w, caseId)).toBe('legal_hold');
+    expect(run(w).redacted).toEqual([]);
+    expect(caseRow(w, caseId).evidenceText).not.toBe('');
+
+    // The hold records why, who and when — there is no undocumented way to keep evidence.
+    const row = caseRow(w, caseId);
+    expect(row.holdReason).toBe('legal');
+    expect(row.holdNote).toBe('preservation request 2026-04, ref 118');
+    expect(row.holdByUserId).toBe(admin(w).id);
+    expect(row.holdAt).not.toBeNull();
+    expect(audits(w, caseId)).toContain('hold_placed');
+
+    releaseHold(w.ctx, admin(w), caseId);
+    expect(audits(w, caseId)).toContain('hold_released');
+    // Already well past seven days after finality, so it goes on the next run.
+    expect(holdOf(w, caseId)).toBeNull();
+    expect(run(w).redacted).toEqual([caseId]);
+  });
+
+  it('a child-safety hold works the same way and is distinguishable', () => {
+    const caseId = reportedCase(w);
+    decideCase(w.ctx, admin(w), caseId, 'rejected', null);
+    placeHold(w.ctx, admin(w), caseId, 'child_safety', 'referred for review, do not redact');
+    w.realClock.advance(60 * DAY);
+    expect(holdOf(w, caseId)).toBe('child_safety_hold');
+    expect(run(w).redacted).toEqual([]);
+  });
+
+  it('refuses a hold with no documented reason, and refuses to release one that is not there', () => {
+    const caseId = reportedCase(w);
+    expect(() => placeHold(w.ctx, admin(w), caseId, 'legal', '   ')).toThrow(AppError);
+    expect(() => releaseHold(w.ctx, admin(w), caseId)).toThrow(AppError);
+    expect(caseRow(w, caseId).holdReason).toBeNull();
+  });
+
+  it('reports the hold and the timetable to the administrator', () => {
+    const caseId = reportedCase(w);
+    decideCase(w.ctx, admin(w), caseId, 'rejected', null);
+    const detail = getCase(w.ctx, caseId);
+    expect(detail.retention.finalAt).not.toBeNull();
+    expect(detail.retention.redactableAt).not.toBeNull();
+    expect(detail.hold).toBeNull();
+    placeHold(w.ctx, admin(w), caseId, 'legal', 'ref 118');
+    expect(getCase(w.ctx, caseId).hold).toMatchObject({ reason: 'legal', note: 'ref 118' });
+    expect(getCase(w.ctx, caseId).retention.hold).toBe('legal_hold');
+  });
+});
+
+describe('critical child-safety enforcement', () => {
+  let w: TestWorld;
+  beforeEach(() => {
+    w = world();
+  });
+
+  it('bans immediately on the first violation, with the reason and actor recorded', () => {
+    const caseId = reportedCase(w);
+    const detail = decideCaseCritical(w.ctx, admin(w), caseId, 'confirmed CSAM, referred');
+
+    expect(standingOf(w.db, w.user('ada').id, w.realClock.now())).toMatchObject({
+      standing: 'banned',
+      violationsInForce: 1,
+    });
+    const v = violationOf(w, caseId);
+    expect(v.severity).toBe('critical');
+    expect(v.decidedBy).toBe('admin');
+    expect(v.decidedByUserId).toBe(admin(w).id);
+    expect(v.reason).toBe('confirmed CSAM, referred');
+    expect(detail.violation).toMatchObject({ severity: 'critical' });
+
+    const audit = w.db
+      .select()
+      .from(t.moderationAudit)
+      .where(eq(t.moderationAudit.caseId, caseId))
+      .all()
+      .find((a) => a.action === 'critical_child_safety')!;
+    expect(audit.actorUserId).toBe(admin(w).id);
+    expect(audit.actorRole).toBe('admin');
+    expect(audit.reason).toBe('confirmed CSAM, referred');
+    expect(audit.subjectUserId).toBe(w.user('ada').id);
+    expect(audit.createdAt).toBe(w.realClock.now());
+  });
+
+  it('requires a reason', () => {
+    const caseId = reportedCase(w);
+    expect(() => decideCaseCritical(w.ctx, admin(w), caseId, '   ')).toThrow(AppError);
+    expect(caseRow(w, caseId).status).toBe('pending');
+    expect(standingOf(w.db, w.user('ada').id, w.realClock.now()).standing).toBe('good');
+  });
+
+  it('preserves the single appeal, and an accepted appeal lifts the ban', () => {
+    const caseId = reportedCase(w);
+    decideCaseCritical(w.ctx, admin(w), caseId, 'confirmed');
+    const v = violationOf(w, caseId);
+
+    submitAppeal(w.ctx, w.user('ada'), { violationId: v.id, text: 'this was a disclosure' });
+    const appeal = w.db.select().from(t.appeals).where(eq(t.appeals.violationId, v.id)).get()!;
+    decideAppeal(w.ctx, admin(w), appeal.id, 'accepted', 'good-faith victim disclosure');
+
+    expect(standingOf(w.db, w.user('ada').id, w.realClock.now()).standing).toBe('good');
+    expect(violationOf(w, caseId).revokedAt).not.toBeNull();
+  });
+
+  it('can escalate a case an administrator already upheld the ordinary way', () => {
+    const caseId = reportedCase(w);
+    decideCase(w.ctx, admin(w), caseId, 'accepted', 'first look');
     expect(standingOf(w.db, w.user('ada').id, w.realClock.now()).standing).toBe('warned');
-    const err = (() => {
-      try {
-        submitAppeal(w.ctx, w.user('ada'), { violationId: v.id, text: 'too late' });
-        return null;
-      } catch (e) {
-        return e as AppError;
-      }
-    })();
-    expect(err).toBeInstanceOf(AppError);
-    expect(err!.code).toBe('appeal_window_closed');
+    decideCaseCritical(w.ctx, admin(w), caseId, 'on review, confirmed child-safety material');
+    expect(standingOf(w.db, w.user('ada').id, w.realClock.now()).standing).toBe('banned');
+    // Still one violation: escalating a case does not invent a second one.
+    expect(standingOf(w.db, w.user('ada').id, w.realClock.now()).violationsInForce).toBe(1);
   });
 
-  it('never closes while the account is suspended or banned', () => {
-    const w = createTestWorld({
-      defaultShoreCapacity: 80,
-      retention: { ...RETENTION_OFF, appealWindowMs: 1 * DAY },
-    });
-    w.db
-      .update(t.users)
-      .set({ role: 'admin' })
-      .where(eq(t.users.id, w.user('cy').id))
-      .run();
-    const first = reportedCase(w);
-    decideCase(w.ctx, admin(w), first, 'accepted', 'one');
-    const second = reportedCase(w);
-    decideCase(w.ctx, admin(w), second, 'accepted', 'two');
-    expect(standingOf(w.db, w.user('ada').id, w.realClock.now()).standing).toBe('suspended');
-
-    const v = w.db.select().from(t.violations).where(eq(t.violations.caseId, second)).get()!;
-    w.realClock.advance(2 * DAY);
-    // Well past the deadline, but appealing is the only move a suspended account has left.
-    expect(() =>
-      submitAppeal(w.ctx, w.user('ada'), { violationId: v.id, text: 'hear me out' }),
-    ).not.toThrow();
+  it('refuses to classify a rejected case', () => {
+    const caseId = reportedCase(w);
+    decideCase(w.ctx, admin(w), caseId, 'rejected', null);
+    expect(() => decideCaseCritical(w.ctx, admin(w), caseId, 'reason')).toThrow(AppError);
   });
 });

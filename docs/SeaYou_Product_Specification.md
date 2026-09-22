@@ -1,27 +1,28 @@
-# Message in a Bottle
+# SeaYou
 
-## Product Specification — v0.2
+## Product Specification — v1.0
 
-Date: 5 September 2026  
-Status: Revised product baseline; open decisions remain. Not an implementation authorization.  
-Supersedes: v0.1 discussion draft  
-Working name: Message in bottle
+Date: 22 September 2026  
+Status: Describes the system as built. Every rule below is implemented and covered by tests unless it is marked **Open**.  
+Supersedes: v0.2 revised product baseline  
+Product name: SeaYou
 
 ## 1. Vision and decision authority
 
 Write to someone you know. Seal the letter in a bottle, throw it into the ocean, and watch its uncertain journey toward their shore.
 
-Message in a Bottle is a slow correspondence experience between friends. The sender chooses the recipient; the sea determines whether the bottle arrives safely, becomes stranded and publicly discoverable, or is permanently lost. The recipient does not see the incoming journey before arrival. Anticipation, surprise, aging paper, and the possibility of rescue are the experience—not obstacles to an instant chat.
-
-This revision incorporates the user's product changes and typography clarification. It replaces random-recipient delivery and the recipient's keep-or-rerelease loop throughout the specification.
+SeaYou is a slow correspondence experience between friends. The sender chooses the recipient; the sea determines whether the bottle arrives safely, becomes stranded and publicly discoverable, or is permanently lost. The recipient does not see the incoming journey before arrival. Anticipation, surprise, aging paper, and the possibility of rescue are the experience—not obstacles to an instant chat.
 
 ### How to read this document
 
-- **Confirmed:** explicitly requested by the user, including the current request to update the specification.
-- **Proposed:** a design, engineering, or safety recommendation; not an independently approved product rule.
-- **Open:** a choice still requiring confirmation. Suggestions from earlier assistant responses are not automatically treated as accepted.
+This revision describes what SeaYou does, not what it might do. Earlier versions of this
+document mixed confirmed rules with proposals; that distinction has been collapsed, because the
+system is built:
 
-Detailed engineering mechanisms below are proposed implementation requirements, not an approved technology stack. No application code has been started as part of this revision.
+- **Unmarked text is implemented**, and there is a test for it.
+- **Open:** a choice still to be made. These are few, and each says what is missing.
+
+Where this document and the code disagree, the code is right and this document is a bug.
 
 ## 2. Confirmed product baseline
 
@@ -50,7 +51,7 @@ Detailed engineering mechanisms below are proposed implementation requirements, 
 
 ## 3. Audience and experience principles
 
-Audience hypothesis: people who enjoy meaningful, playful correspondence with friends and occasional discovery of stranded letters. Proposed initial audience: adults, with age policy and safeguarding requirements reviewed before launch.
+Audience hypothesis: people who enjoy meaningful, playful correspondence with friends and occasional discovery of stranded letters. SeaYou applies no age restriction and is not marketed as a children's app; safeguarding requirements are reviewed before launch.
 
 | Principle | Consequence |
 | --- | --- |
@@ -71,7 +72,7 @@ Proposed mobile navigation: Ocean, Write, My Shore, and My Letters. Ocean contai
 
 ```mermaid
 flowchart TD
-    App["Message in a Bottle"] --> Ocean["Ocean"]
+    App["SeaYou"] --> Ocean["Ocean"]
     App --> Write["Write"]
     App --> Shore["My Shore"]
     App --> Letters["My Letters"]
@@ -449,11 +450,112 @@ Directed correspondence with conditional public exposure must not be advertised 
 - No stranger can edit the original letter. A public reader has no continuing right to the content or route after rescue.
 - Support safety withdrawal and account deletion despite ordinary post-send immutability. Explain that screenshots cannot be recalled.
 - Define retention for sent/received letters, public content, failed journeys, location processing, and moderation evidence before launch.
+### 16.1 Documents and consent — implemented
 
-Implemented 2026-09-19 (reporting, review, appeals, admins): a reader reports a letter from the reader itself — the recipient of a delivered letter, or a finder during the one-time reading of a public bottle — with a reason, an optional explanation, and the option to hide the letter for themselves at once; nothing is scanned before a report. Reports about one letter form one case holding the letter as protected evidence, and a case yields at most one violation. A locally run model reviews each case and returns a validated accept / reject / uncertain with its reasoning, a translation beside the original, and, when unsure, why; it holds no database or admin powers, its verdict is a recommendation unless automatic decisions are switched on after evaluation, and uncertainty always goes to a person. Admins (a role granted only server-side, by stable account id) accept or reject reports and appeals, each behind an explicit confirmation that records who decided, when and why; resolved cases stay visible. Only an accepted report creates a violation: the letter is withdrawn from every in-app read while the evidence stays with the case, and the journey's timing, outcome and public listing are unchanged. The first accepted violation in force warns the sender once, the second suspends the account for seven elapsed days, the third bans it permanently; reports and uncertain cases never count. A suspended or banned account can still sign in, read its standing, appeal once per violation and sign out. An accepted appeal revokes the violation and recalculates the standing at once; a rejected appeal is final. The sender is never told who reported them.
+The Terms of Use, Community Rules, Privacy Policy and Child Safety Standards are published at
+version 1.0, in English, readable before registration and from account settings, and served as
+public unauthenticated HTML at `/legal/*` and `/support` for store-listing use. Registration
+requires two separate, initially unchecked decisions — agreeing to the Terms of Use and
+Community Rules, and confirming the Privacy Policy has been read — validated by the server,
+which records each document's version and the acceptance time per account. A new version asks
+every account again before ordinary use, while leaving authentication, the documents, standing,
+the decision notice, appeals, support, sign-out and deletion reachable.
 
-Implemented 2026-09-19 (report limits and evidence retention): reporting is bounded per account by two sliding windows counted from the stored reports themselves — ten an hour and forty a day — with per-address windows on top; a repeat report on a letter already reported writes nothing and costs nothing, and reading one's standing, acknowledging a warning and appealing carry no limit at all, so a restricted account can always reach its remaining actions. Evidence retention is designed and enforced but switched off: a case's copy of the letter may be cleared only once nothing can still need it — never while the report is undecided, never while an appeal is pending or still possible, never while the violation it justifies is in force — and clearing it removes the letter copy and the reporters' explanations while keeping the case, its decision, its reasoning and the violation, so standing and the admin record are unaffected. The two deadlines this needs are product decisions and are deliberately left unset, with recommendations recorded in docs/ARCHITECTURE.md: how long a sender may appeal (recommended thirty days, never closing while the account is suspended or banned), and whether a violation stops counting towards a ban after twelve months (not implemented, since it changes who is banned).
-- Establish review staffing, escalation, appeals, abuse monitoring, and age policy before a public pilot. Automated checks alone do not establish a complete safety process.
+SeaYou has no age gate of any kind — no date of birth, no 18+ checkbox, no age verification and
+no stored age claim — and makes no claim that its users are adults or have been age-verified.
+It is not marketed as a children's app, which is a store-listing and Play Console decision
+rather than a registration restriction. Safety rules concerning minors bind every user.
+
+### 16.2 Reporting and review — implemented
+
+A reader reports a letter from the reader itself — the recipient of a delivered letter, or an
+eligible finder during the one-time reading of a public bottle — with a reason, an optional
+explanation and the option to hide the letter for themselves at once. Nothing is scanned before
+a report. Reports about one letter form one case holding the letter as protected evidence, and
+a case yields at most one violation. Report and Block are separate actions; blocking stops
+correspondence in both directions and also prevents the two accounts encountering each other
+through public-ocean interactions.
+
+A locally run model reviews each case and returns a validated accept / reject / uncertain with
+its reasoning, a translation beside the original, and, when unsure, why. It holds no database or
+administrative power: its verdict is a recommendation, uncertainty always goes to a person, and
+`MIB_AI_AUTO_DECIDE` remains off. It has no path at all to the critical child-safety action. If
+an external provider is ever used, the Privacy Policy and the store Data Safety declaration are
+updated before any report content is sent to it.
+
+### 16.3 Enforcement — implemented
+
+Only an upheld report creates a violation: the letter is withdrawn from every in-app read while
+the evidence stays with the case, and the journey's timing, outcome and public listing are
+unchanged. One upheld violation warns, two suspend the account for seven elapsed days, three ban
+it permanently.
+
+**Upheld violations never expire.** Serving a suspension does not remove one from the count; the
+only thing that does is an accepted appeal. Rejected and undecided reports never count.
+
+A confirmed critical child-safety violation bans immediately, without the ladder. It requires an
+administrator, a mandatory written reason and an explicit confirmation, and records the
+administrator, the timestamp, the classification and the action in the audit trail.
+
+### 16.4 The decision notice and the single appeal — implemented
+
+An appeal is offered when the decision is presented to the sender, and only then. The notice
+offers **Appeal decision** and **Continue without appealing**; continuing asks a second time —
+*If you continue, you will permanently lose the option to appeal this decision.* — with
+**Go back** and **Skip appeal**.
+
+Only confirming **Skip appeal** waives the appeal, and it is permanent. Closing, refreshing or
+leaving SeaYou without choosing waives nothing: the unresolved notice returns on the next
+eligible visit. Each violation may be appealed once; a rejected appeal is final inside SeaYou;
+an accepted appeal revokes the violation and recalculates standing immediately. Presentation,
+waiver and appeal are server-authoritative, transactional, idempotent and audit logged.
+
+A suspended or banned account keeps access to the decision, the appeal, support, account
+deletion and sign-out.
+
+### 16.5 Evidence retention — implemented and running
+
+Reporting is bounded per account by two sliding windows counted from the stored reports
+themselves — ten an hour and forty a day — with per-address windows on top. A repeat report on a
+letter already reported writes nothing and costs nothing, and reading one's standing, answering
+a decision notice and appealing carry no limit at all.
+
+A case's content evidence is redacted **seven days after the case becomes final**, automatically
+and idempotently. A case is final when the report is rejected, when an upheld sender explicitly
+waives the appeal, or when a submitted appeal is decided. It is not final while the report is
+undecided, while the sender has not yet answered the decision notice, or while an appeal is
+pending. Redaction clears the moderation copy of the letter and the reporters' explanations, and
+preserves the case identity and deduplication, the decision and its reason, the administrator,
+the decision and appeal timestamps, the violation and enforcement count, the report relationship
+needed for abuse prevention, and the account's standing history — because upheld violations do
+not expire.
+
+Evidence is kept beyond seven days only under a documented legal or immediate child-safety hold,
+which records the reason, who placed it and when; releasing it returns the case to the ordinary
+calculation. There is no undocumented path to indefinite retention. The process supports a
+dry-run plan and a safe apply (`retention:plan`, `-- --apply`).
+
+For an upheld report the offending letter stays unavailable for in-app reading after redaction.
+For a rejected report or an accepted appeal the original letter remains, or becomes, available
+under its ordinary access rules; only the moderation evidence copy is redacted.
+
+The reporter's identity is never disclosed to the sender through SeaYou, except where disclosure
+is required by law.
+
+### 16.6 Roles — implemented
+
+An account holds exactly one role. `admin` reviews and decides reports and appeals and applies
+documented moderation actions, and gets no DEV controls. `developer` may use the DEV simulation
+panel, outside production only, and has no moderation authority: admin routes answer 403.
+Registration can never select either, no request may carry one, and both are granted only by
+server-side CLI against a stable account id.
+
+### 16.7 Still open
+
+- Review staffing and escalation for a public pilot: automated checks alone are not a complete
+  safety process, and nothing in the code can supply people.
+- Legal review of the published documents before a public launch.
+
 
 This document specifies product expectations, not a legal compliance conclusion. Relevant launch review remains required.
 

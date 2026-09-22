@@ -8,6 +8,12 @@ interface Props {
   confirmLabel: string;
   // A short "why" recorded with the decision. Shown as a field when a label is given.
   reasonLabel?: string;
+  // The reason is mandatory: the confirm button stays disabled until something is typed. Used
+  // where the server also requires one, so the UI cannot offer an action the API will refuse.
+  requireReason?: boolean;
+  // An extra sentence the person must tick before confirming. For actions whose consequence is
+  // immediate and permanent, where a single button is not enough of a pause.
+  acknowledge?: string;
   destructive?: boolean;
   busy?: boolean;
   error?: Error | null;
@@ -22,6 +28,8 @@ export function ConfirmDialog({
   body,
   confirmLabel,
   reasonLabel,
+  requireReason = false,
+  acknowledge,
   destructive = false,
   busy = false,
   error = null,
@@ -29,6 +37,8 @@ export function ConfirmDialog({
   onCancel,
 }: Props) {
   const [reason, setReason] = useState('');
+  const [acknowledged, setAcknowledged] = useState(false);
+  const blocked = (requireReason && reason.trim().length === 0) || (!!acknowledge && !acknowledged);
   const dialogRef = useRef<HTMLDivElement>(null);
   const titleId = useId();
   const bodyId = useId();
@@ -96,6 +106,17 @@ export function ConfirmDialog({
             />
           </label>
         ) : null}
+        {acknowledge ? (
+          <label className="row" style={{ gap: 8, alignItems: 'flex-start' }}>
+            <input
+              type="checkbox"
+              checked={acknowledged}
+              onChange={(e) => setAcknowledged(e.target.checked)}
+              disabled={busy}
+            />
+            <span className="secondary">{acknowledge}</span>
+          </label>
+        ) : null}
         {error ? (
           <p className="note error" role="alert">
             {error.message}
@@ -109,7 +130,7 @@ export function ConfirmDialog({
             type="button"
             className={destructive ? 'btn-destructive' : 'btn-primary'}
             onClick={() => onConfirm(reason.trim())}
-            disabled={busy}
+            disabled={busy || blocked}
           >
             {busy ? 'Working…' : confirmLabel}
           </button>

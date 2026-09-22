@@ -22,6 +22,9 @@ const NEWEST = new Set([
   '0009_account_time_zone',
   '0010_reporting_and_moderation',
   '0011_evidence_retention',
+  '0012_policy_acceptances',
+  '0013_account_deletion',
+  '0014_appeal_waiver_and_holds',
 ]);
 
 function tableNames(sqlite: Database.Database): string[] {
@@ -95,6 +98,8 @@ describe('migrating a populated database', () => {
     expect(tableNames(sqlite)).not.toContain('risk_decisions');
     expect(columnsOf(sqlite, 'bottles')).not.toContain('risk_policy_version');
     expect(columnsOf(sqlite, 'users')).not.toContain('time_zone');
+    expect(tableNames(sqlite)).not.toContain('policy_acceptances');
+    expect(columnsOf(sqlite, 'users')).not.toContain('deleted_at');
     expect(tableNames(sqlite)).not.toContain('moderation_cases');
     sqlite.pragma('foreign_keys = OFF');
     for (const [table, rows] of Object.entries(dump(sourceSqlite))) {
@@ -118,6 +123,8 @@ describe('migrating a populated database', () => {
     expect(columnsOf(sqlite, 'bottles')).toContain('public_deadline_at');
     expect(columnsOf(sqlite, 'public_openings')).toContain('session_expires_at');
     expect(columnsOf(sqlite, 'users')).toContain('time_zone_since');
+    expect(tableNames(sqlite)).toContain('policy_acceptances');
+    expect(columnsOf(sqlite, 'users')).toContain('deleted_at');
     expect(columnsOf(sqlite, 'users')).toContain('role');
     for (const table of ['moderation_cases', 'letter_reports', 'violations', 'appeals'])
       expect(tableNames(sqlite)).toContain(table);

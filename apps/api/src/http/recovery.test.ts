@@ -6,7 +6,7 @@ import { FORGOT_PER_EMAIL } from './routes/auth.js';
 import * as t from '../db/schema.js';
 import { DisabledMailer, OutboxMailer, SmtpMailer, createMailer } from '../lib/mail.js';
 import { sha256 } from '../lib/ids.js';
-import { createTestWorld, testConfig } from '../test/harness.js';
+import { acceptCurrent, createTestWorld, testConfig } from '../test/harness.js';
 
 type App = ReturnType<typeof createApp>;
 const json = (body: unknown) => ({
@@ -16,7 +16,10 @@ const json = (body: unknown) => ({
 });
 const bearer = (token: string) => ({ headers: { authorization: `Bearer ${token}` } });
 async function registered(app: App, username: string, email: string, password = 'first password') {
-  const res = await app.request('/api/auth/register', json({ username, email, password }));
+  const res = await app.request(
+    '/api/auth/register',
+    json({ username, email, password, policies: acceptCurrent() }),
+  );
   expect(res.status).toBe(201);
   return (await res.json()) as { token: string; user: { id: string; email: string | null } };
 }
@@ -31,14 +34,23 @@ describe('registration with e-mail', () => {
     const w = createTestWorld();
     const app = createApp(w.ctx);
     expect(
-      (await app.request('/api/auth/register', json({ username: 'mira', password: 'long enough' })))
-        .status,
+      (
+        await app.request(
+          '/api/auth/register',
+          json({ username: 'mira', password: 'long enough', policies: acceptCurrent() }),
+        )
+      ).status,
     ).toBe(400);
     expect(
       (
         await app.request(
           '/api/auth/register',
-          json({ username: 'mira', email: 'nope', password: 'long enough' }),
+          json({
+            username: 'mira',
+            email: 'nope',
+            password: 'long enough',
+            policies: acceptCurrent(),
+          }),
         )
       ).status,
     ).toBe(400);
@@ -46,7 +58,12 @@ describe('registration with e-mail', () => {
     expect(a.user.email).toBe('mira@example.com');
     const dup = await app.request(
       '/api/auth/register',
-      json({ username: 'other', email: 'MIRA@example.com', password: 'long enough' }),
+      json({
+        username: 'other',
+        email: 'MIRA@example.com',
+        password: 'long enough',
+        policies: acceptCurrent(),
+      }),
     );
     expect(dup.status).toBe(409);
     expect(((await dup.json()) as { error: { code: string } }).error.code).toBe('email_taken');

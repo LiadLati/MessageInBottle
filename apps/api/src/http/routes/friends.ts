@@ -10,11 +10,12 @@ import {
 import type { AppEnv } from '../app.js';
 import { requireAuth } from '../middleware/auth.js';
 import { requireGoodStanding } from '../middleware/admin.js';
+import { requirePolicies } from '../middleware/policies.js';
 import { jsonBody } from '../validate.js';
 
 export function friendRoutes() {
   const r = new Hono<AppEnv>();
-  r.use('*', requireAuth, requireGoodStanding);
+  r.use('*', requireAuth, requirePolicies, requireGoodStanding);
   r.get('/', (c) => c.json(listFriends(c.get('ctx'), c.get('user').id)));
   r.post('/requests', jsonBody(SendFriendRequestSchema), (c) => {
     sendFriendRequest(c.get('ctx'), c.get('user').id, c.req.valid('json').username);

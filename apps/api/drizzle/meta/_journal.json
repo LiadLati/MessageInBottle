@@ -85,6 +85,27 @@
       "when": 1789848786378,
       "tag": "0011_evidence_retention",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "6",
+      "when": 1790026198007,
+      "tag": "0012_policy_acceptances",
+      "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "6",
+      "when": 1790026762633,
+      "tag": "0013_account_deletion",
+      "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "6",
+      "when": 1790108525607,
+      "tag": "0014_appeal_waiver_and_holds",
+      "breakpoints": true
     }
   ]
 }

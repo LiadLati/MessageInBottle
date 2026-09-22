@@ -1,12 +1,11 @@
-// Reports what an evidence retention policy would remove, and — only when the policy is
-// explicitly enabled and --apply is passed — carries it out.
+// Reports what the evidence retention policy would remove, and — with --apply — carries it
+// out. The server runs the same thing on a timer; this is for inspecting it by hand.
 //
-//   pnpm --filter @mib/api retention:plan              what the current policy would remove
-//   pnpm --filter @mib/api retention:plan -- --apply   actually redact (needs MIB_RETENTION_ENABLED=true)
+//   pnpm --filter @mib/api retention:plan              dry run: what is redactable and why not
+//   pnpm --filter @mib/api retention:plan -- --apply   redact now
 //
-// With the shipped defaults nothing is ever redactable: both windows are unset, so every
-// settled case is held under `no_policy`. That is deliberate — see docs/ARCHITECTURE.md for
-// the recommended values and the two product decisions they wait on.
+// The shipped policy redacts a case's content evidence seven days after it becomes final.
+// A dry run never changes anything, so it is safe to run against production data.
 import { loadEnvFiles } from '../lib/env.js';
 import { loadConfig } from '../config.js';
 import { createDb, runMigrations } from '../db/client.js';
@@ -21,13 +20,9 @@ const { db } = createDb(config.databasePath);
 runMigrations(db);
 const now = Date.now();
 const policy = config.retention;
-const days = (ms: number | null) => (ms === null ? 'never (unset)' : `${ms / 86_400_000} days`);
-
 console.log('Evidence retention policy');
-console.log(`  automatic deletion : ${policy.enabled ? 'ENABLED' : 'disabled'}`);
-console.log(`  rejected cases     : ${days(policy.rejectedAfterMs)}`);
-console.log(`  accepted cases     : ${days(policy.acceptedAfterMs)}`);
-console.log(`  appeal deadline    : ${days(policy.appealWindowMs)}\n`);
+console.log(`  automatic redaction : ${policy.enabled ? 'ENABLED' : 'disabled'}`);
+console.log(`  after a case is final: ${policy.finalAfterMs / 86_400_000} days\n`);
 
 const plan = planRetention(db, now, policy);
 console.log(`${plan.cases.length} case(s) examined.`);

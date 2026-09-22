@@ -1,14 +1,16 @@
 import { Hono } from 'hono';
 import type { Context } from 'hono';
 import { getConnInfo } from '@hono/node-server/conninfo';
-import { AppealRequestSchema, ReportRequestSchema } from '@mib/shared';
+import { AppealRequestSchema, ReportRequestSchema, WaiveAppealRequestSchema } from '@mib/shared';
 import { tooManyRequests } from '../../lib/errors.js';
 import { RateLimiter, type RateLimitRule } from '../../lib/rate-limit.js';
 import {
   accountStanding,
   acknowledgeWarning,
+  presentDecisionNotice,
   reportLetter,
   submitAppeal,
+  waiveAppeal,
 } from '../../services/moderation.js';
 import type { AppEnv } from '../app.js';
 import { requireAuth } from '../middleware/auth.js';
@@ -54,6 +56,16 @@ export function moderationRoutes(limiter = new RateLimiter()) {
     acknowledgeWarning(c.get('ctx'), c.get('user'), c.req.param('id'));
     return c.body(null, 204);
   });
+  // The decision notice was shown. Recorded server-side so the appeal is opened by the server,
+  // not asserted by the client, and so a notice nobody ever saw is never treated as declined.
+  r.post('/violations/:id/presented', (c) =>
+    c.json(presentDecisionNotice(c.get('ctx'), c.get('user'), c.req.param('id'))),
+  );
+  // "Skip appeal", after the second confirmation. Permanent, idempotent and audit logged; it
+  // must stay reachable while suspended or banned, like every other action on this router.
+  r.post('/appeals/waive', jsonBody(WaiveAppealRequestSchema), (c) =>
+    c.json(waiveAppeal(c.get('ctx'), c.get('user'), c.req.valid('json').violationId)),
+  );
   r.post('/appeals', jsonBody(AppealRequestSchema), (c) => {
     enforce(`appeal:addr:${clientKey(c)}`, APPEALS_PER_ADDRESS);
     return c.json(submitAppeal(c.get('ctx'), c.get('user'), c.req.valid('json')), 201);

@@ -1,4 +1,5 @@
 import type {
+  AccountPoliciesDto,
   AccountStandingDto,
   AdminAppealDto,
   AdminCaseDetailDto,
@@ -11,6 +12,7 @@ import type {
   NotificationDto,
   OpenedLetterDto,
   OutcomeVisibilityDto,
+  PolicyAcceptanceRequest,
   PublicOceanResponse,
   ReleasePreviewResponse,
   ReportReason,
@@ -48,7 +50,7 @@ export interface HealthResponse {
 
 export const UNREACHABLE = 'unreachable';
 export const UNREACHABLE_MESSAGE =
-  'Cannot reach the Message in a Bottle server. Check that the API is running, then try again.';
+  'Cannot reach the SeaYou server. Check that the API is running, then try again.';
 
 let authToken: string | null = null;
 export function setAuthToken(token: string | null) {
@@ -98,8 +100,23 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
 
 export const api = {
   health: () => request<HealthResponse>('GET', '/health'),
-  register: (username: string, email: string, password: string) =>
-    request<SessionResponse>('POST', '/auth/register', { username, email, password }),
+  register: (
+    username: string,
+    email: string,
+    password: string,
+    policies: PolicyAcceptanceRequest,
+  ) => request<SessionResponse>('POST', '/auth/register', { username, email, password, policies }),
+  // Terms, guidelines and privacy: the standing of the signed-in account against the current
+  // versions, and accepting them from the "updated terms" screen.
+  policyStanding: () => request<AccountPoliciesDto>('GET', '/policies/me/standing'),
+  acceptPolicies: (policies: PolicyAcceptanceRequest) =>
+    request<AccountPoliciesDto>('POST', '/policies/accept', policies),
+  // Settings → Delete account. Permanent, and refused without the password and the confirmation.
+  deleteAccount: (password: string) =>
+    request<{ deletedAt: string; alreadyDeleted: boolean }>('POST', '/account/delete', {
+      password,
+      confirm: true,
+    }),
   forgotPassword: (email: string) =>
     request<{ ok: boolean }>('POST', '/auth/password/forgot', { email }),
   resetPassword: (token: string, password: string) =>
@@ -165,6 +182,13 @@ export const api = {
     request<void>('POST', `/moderation/violations/${violationId}/acknowledge`),
   submitAppeal: (violationId: string, text: string) =>
     request<ViolationNoticeDto>('POST', '/moderation/appeals', { violationId, text }),
+  // Tells the server the decision notice is actually on screen. The server opens the appeal
+  // from this, so a notice nobody saw is never treated as one they declined to appeal.
+  presentDecision: (violationId: string) =>
+    request<ViolationNoticeDto>('POST', `/moderation/violations/${violationId}/presented`),
+  // "Skip appeal", after the second confirmation. Permanent.
+  waiveAppeal: (violationId: string) =>
+    request<ViolationNoticeDto>('POST', '/moderation/appeals/waive', { violationId }),
   // Admin console. Every one of these is refused by the server unless the account's role says so.
   adminCases: (status: 'pending' | 'accepted' | 'rejected' | 'all') =>
     request<{ cases: AdminCaseSummaryDto[] }>('GET', `/admin/reports?status=${status}`),
@@ -175,6 +199,17 @@ export const api = {
       `/admin/reports/${id}/${outcome}`,
       { reason },
     ),
+  // A confirmed critical child-safety violation: an immediate permanent ban. Admin only, and
+  // the reason is mandatory on the server too.
+  adminDecideCritical: (id: string, reason: string) =>
+    request<{ case: AdminCaseDetailDto }>('POST', `/admin/reports/${id}/critical`, {
+      reason,
+      classification: 'critical_child_safety',
+    }),
+  adminPlaceHold: (id: string, reason: 'legal' | 'child_safety', note: string) =>
+    request<{ case: AdminCaseDetailDto }>('POST', `/admin/reports/${id}/hold`, { reason, note }),
+  adminReleaseHold: (id: string) =>
+    request<{ case: AdminCaseDetailDto }>('POST', `/admin/reports/${id}/hold/release`),
   adminAppeals: (status: 'pending' | 'accepted' | 'rejected' | 'all') =>
     request<{ appeals: AdminAppealDto[] }>('GET', `/admin/appeals?status=${status}`),
   adminDecideAppeal: (id: string, outcome: 'accept' | 'reject', reason: string) =>

@@ -20,9 +20,13 @@ async function main(): Promise<void> {
   const { runJourneyTick } = await import('./services/journey.js');
   const { activatePublicListings } = await import('./services/risk.js');
   const { createOllamaReviewer, runAiReviewTick } = await import('./services/ai-review.js');
+  const { applyRetention } = await import('./services/retention.js');
   const { serve } = await import('@hono/node-server');
+  const { assertPolicySetServeable } = await import('./services/policies.js');
 
   const config = loadConfig();
+  // A released document set that still carries an unresolved field must never be served.
+  assertPolicySetServeable();
   const { db } = createDb(config.databasePath);
   runMigrations(db);
   seedChart(db, config.defaultShoreCapacity, Date.now());
@@ -66,10 +70,29 @@ async function main(): Promise<void> {
   }, config.ai.tickMs);
   aiWorker.unref();
 
+  // Evidence retention. The published policy says content evidence goes seven days after a case
+  // becomes final, so something has to actually remove it: a plan nobody runs is not a policy.
+  // The pass is idempotent and re-checks every case inside its own transaction, so an hourly
+  // tick that overlaps a decision, an appeal or a hold does the right thing.
+  const retentionWorker = setInterval(() => {
+    if (!config.retention.enabled) return;
+    try {
+      const result = applyRetention(db, Date.now(), config.retention);
+      if (result.redacted.length > 0)
+        console.log(
+          `Evidence retention: redacted ${result.redacted.length} case(s) that became final more ` +
+            `than ${config.retention.finalAfterMs / 86_400_000} days ago.`,
+        );
+    } catch (err) {
+      console.error('retention tick failed', err);
+    }
+  }, config.retentionTickMs);
+  retentionWorker.unref();
+
   const server = serve({ fetch: app.fetch, port: config.port }, (info) => {
     for (const file of loadedEnv) console.log(`Loaded environment from ${file}`);
     console.log(
-      `Message in a Bottle API listening on http://localhost:${info.port} (devMode=${config.devMode}, mail=${config.mail.provider})`,
+      `SeaYou API listening on http://localhost:${info.port} (devMode=${config.devMode}, mail=${config.mail.provider})`,
     );
     console.log(
       config.ai.enabled
@@ -93,7 +116,7 @@ function fatal(err: unknown, port?: number): never {
   const message = err instanceof Error ? err.message : String(err);
   const code = (err as { code?: string } | null)?.code;
   const rule = '='.repeat(72);
-  console.error(`\n${rule}\nMessage in a Bottle API failed to start.\n\n  ${message}\n`);
+  console.error(`\n${rule}\nSeaYou API failed to start.\n\n  ${message}\n`);
   if (code === 'ERR_MODULE_NOT_FOUND' || /Cannot find (module|package)/i.test(message)) {
     console.error('  A dependency is missing. After pulling changes, run:  pnpm install');
   } else if (/NODE_MODULE_VERSION|was compiled against|better[-_]sqlite3|\.node\b/i.test(message)) {

@@ -15,10 +15,17 @@ import { activePlan, runJourneyTick } from '../../services/journey.js';
 import { devLoseBottle } from '../../services/outcomes.js';
 import type { AppEnv } from '../app.js';
 import { requireAuth } from '../middleware/auth.js';
+import { requireDeveloper } from '../middleware/admin.js';
 import { jsonBody } from '../validate.js';
 
 // Deterministic development controls (spec §19: accelerated test journeys are kept separate).
-// Mounted only when MIB_DEV_MODE=true; time only ever moves forward.
+//
+// Three layers keep these away from real accounts and real data:
+//   • the router is mounted only when MIB_DEV_MODE=true, so a production build has no routes;
+//   • every control behind it requires the `developer` role *and* dev mode (requireDeveloper),
+//     so an administrator gets 403 here and a developer gets 403 on /api/admin;
+//   • each control still only ever touches the caller's own bottles, and time only ever moves
+//     forward.
 export function devRoutes() {
   const r = new Hono<AppEnv>();
 
@@ -41,7 +48,7 @@ export function devRoutes() {
     return c.json({ provider: mailer.kind, messages });
   });
 
-  r.use('*', requireAuth);
+  r.use('*', requireAuth, requireDeveloper);
 
   const status = (ctx: AppEnv['Variables']['ctx']): DevStatus => ({
     devMode: ctx.config.devMode,
@@ -86,5 +93,17 @@ export function devRoutes() {
   });
 
   r.post('/tick', (c) => c.json(runJourneyTick(c.get('ctx'))));
+  // Makes the signed-in account look like one that predates the published documents, so the
+  // acceptance gate can be walked through in a browser. Development builds only, and it only
+  // ever removes the caller's own acceptance rows.
+  r.post('/forget-policy-acceptances', (c) => {
+    const ctx = c.get('ctx');
+    const userId = c.get('user').id;
+    const removed = ctx.db
+      .delete(t.policyAcceptances)
+      .where(eq(t.policyAcceptances.userId, userId))
+      .run().changes;
+    return c.json({ removed });
+  });
   return r;
 }

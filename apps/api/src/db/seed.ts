@@ -1,5 +1,6 @@
 import type Database from 'better-sqlite3';
 import { and, eq, isNull } from 'drizzle-orm';
+import { POLICY_ACTION, POLICY_IDS, currentPolicyVersions } from '@mib/shared';
 import { loadConfig } from '../config.js';
 import { createDb, runMigrations, type Db } from './client.js';
 import * as t from './schema.js';
@@ -183,6 +184,22 @@ export function seedUsers(db: Db, now: number): void {
           passwordUpdatedAt: now,
         })
         .run();
+      // A seeded development account is created here and now, exactly as registration creates
+      // one, so it records the same acceptance of the current documents. Accounts that already
+      // existed are never touched: they are asked on their next sign-in.
+      for (const document of POLICY_IDS) {
+        tx.insert(t.policyAcceptances)
+          .values({
+            id: newId('pol'),
+            userId: id,
+            document,
+            version: currentPolicyVersions()[document],
+            action: POLICY_ACTION[document],
+            source: 'registration',
+            acceptedAt: now,
+          })
+          .run();
+      }
       ids.set(u.username, id);
     }
     for (const f of SEED_FRIENDSHIPS) {

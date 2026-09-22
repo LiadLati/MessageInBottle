@@ -1,10 +1,10 @@
-# Message in a Bottle
+# SeaYou
 
 Slow correspondence between friends: write a letter, seal it in a bottle, release it into a fictional
 sea, and follow its simulated journey to your friend's virtual shore. The recipient only learns about
 the bottle once the server has committed its arrival.
 
-Product source of truth: `docs/Message_in_a_Bottle_Product_Specification_v0.2.md`
+Product source of truth: `docs/SeaYou_Product_Specification.md`
 (v0.2, stage 3 "Directed delivery slice" is what this repository currently implements).
 
 ## Layout
@@ -236,7 +236,7 @@ environment variables take precedence, and the file is git-ignored):
 
 ```
 MIB_MAIL_PROVIDER=smtp
-MIB_MAIL_FROM="Message in a Bottle <no-reply@your-domain>"
+MIB_MAIL_FROM="SeaYou <no-reply@your-domain>"
 MIB_SMTP_HOST=smtp.your-provider.example
 MIB_SMTP_PORT=587
 MIB_SMTP_SECURE=false        # true for port 465
@@ -290,44 +290,87 @@ ollama serve                    # listens on http://127.0.0.1:11434 by default
 pnpm --filter @mib/api ai:eval -- --repeat 3   # judge the model before trusting it
 ```
 
-**Evidence retention.** A case keeps a copy of the reported letter so that admins, and any later
-appeal, judge the same text. Nothing is ever deleted by default. `MIB_RETENTION_*` configures a
-policy, and `pnpm --filter @mib/api retention:plan` shows exactly what it would remove before
-anything is switched on (`-- --apply` carries it out, and refuses unless the policy is enabled).
-Whatever is configured, evidence is held while a report is undecided, while an appeal is pending
-or still possible, and while the violation it justifies is still in force. Redaction clears the
-letter copy and the reporters' explanations; the case, its decision, its reasoning and the
-violation all survive, so account standing and the admin record are unaffected.
-`docs/ARCHITECTURE.md` carries the recommended windows and the two product decisions they need.
+**Evidence retention.** A case keeps a copy of the reported letter so that administrators, and
+any later appeal, judge the same text. It is redacted **seven days after the case becomes
+final**, and this runs by default — it is the published policy, not a plan.
 
-**Admins.** An admin icon appears beside the notification icon for admin accounts; its menu opens
-Reports and Appeals. Every admin endpoint (`/api/admin/*`) is enforced server-side from the role
-on the account. The role is granted only by the server-side tool, by stable user id:
+A case is final when the report was rejected, when the sender explicitly gave up their appeal,
+or when an appeal they submitted was decided. It is *not* final while the report is undecided,
+while the sender has not yet answered the decision notice, or while an appeal is pending: the
+offer of an appeal has no deadline, so the evidence it would be judged on stays until the
+person answers. Evidence is kept past seven days only under a documented legal or
+child-safety hold, which records why it was placed and by whom; releasing it returns the case
+to the ordinary calculation.
+
+Redaction clears the letter copy and the reporters' explanations. The case, its decision, its
+reasoning, who decided it, the violation and the whole audit trail all survive — upheld
+violations never expire, so what justifies one has to outlive the letter that proved it.
 
 ```bash
-pnpm --filter @mib/api admin:grant -- --email you@example.com            # prints the account's id
-pnpm --filter @mib/api admin:grant -- --email you@example.com --confirm usr_…   # grants it
-pnpm --filter @mib/api admin:grant -- --revoke usr_…
+pnpm --filter @mib/api retention:plan            # dry run: what is redactable, and why not
+pnpm --filter @mib/api retention:plan -- --apply # carry it out now
 ```
 
-Registration never sets a role and no request body is ever read for one.
+**Roles.** An account holds exactly one role, and the two privileged ones are deliberately
+disjoint:
 
-**Violations and account notices.** Only an accepted report creates a violation: the letter is
+| Role | Can | Cannot |
+| --- | --- | --- |
+| `admin` | Review reports and appeals, read the AI recommendation, accept or reject, apply documented moderation actions | Use the DEV simulation controls |
+| `developer` | Use the DEV simulation panel (arrival, storm, adrift loss, sinking), outside production only | Review or decide any real report or appeal |
+
+A developer gets 403 from `/api/admin/*`, and an administrator gets 403 from `/api/dev/*`. DEV
+controls need the role **and** a development environment, so a role granted for staging cannot
+reach production. Registration never sets a role, and no header, query or request body is ever
+read for one — these two commands are the whole surface:
+
+```bash
+pnpm --filter @mib/api admin:grant     -- --email you@example.com               # prints the account's id
+pnpm --filter @mib/api admin:grant     -- --email you@example.com --confirm usr_…
+pnpm --filter @mib/api admin:grant     -- --revoke usr_…
+pnpm --filter @mib/api developer:grant -- --username someone --confirm usr_…    # same four forms
+```
+
+Granting one role replaces the other, and the command says so before it does it. No account is
+seeded with a role: a fresh development database has none until you grant them.
+
+**Violations and account notices.** Only an upheld report creates a violation: the letter is
 withdrawn from every in-app read (the sender's passport included; the case keeps the evidence),
-and the journey's timing, outcome and public listing stay as they were. The first accepted
-violation shows the sender a one-time warning on their next entry; the second suspends the
-account for seven elapsed days (the end time is shown, with a warning that another accepted
-violation means a permanent ban); the third bans it permanently. Only distinct accepted
-violations still in force count — a report or an uncertain case never does. A suspended or
-banned account can still sign in, read its standing, appeal and sign out.
+and the journey's timing, outcome and public listing stay as they were. One upheld violation is
+a warning, two a seven-day suspension, three a permanent ban.
 
-**Appeals.** One appeal per accepted violation, from Account standing (the profile menu, or the
-whole screen while suspended or banned). An accepted appeal revokes the violation, restores the
-letter and recalculates the account's standing at once; a rejected appeal is final.
+**Upheld violations never expire.** Serving a suspension does not remove one from the count:
+when the seven days are up the account works again, but it is still two violations in and one
+from a ban. The only thing that removes a violation is an accepted appeal. Rejected and
+undecided reports count for nothing, and several reports about one letter make one case and at
+most one violation.
+
+**The decision notice, and the single appeal.** When a report against an account is upheld, the
+sender is shown the decision — and that is when the appeal is offered:
+
+- **Appeal decision** opens the appeal.
+- **Continue without appealing** asks a second time, saying plainly: *If you continue, you will
+  permanently lose the option to appeal this decision.* — **Go back** or **Skip appeal**.
+
+Only confirming **Skip appeal** gives the appeal up, and it is permanent. Closing the tab,
+reloading, or losing the connection resolves nothing: the notice is server state, and it comes
+back on the next visit until the person answers. Presenting the notice, waiving and appealing
+are all server-authoritative, transactional, idempotent and written to the moderation audit
+trail. Each violation may be appealed once; a rejected appeal is final, and an accepted one
+revokes the violation, restores the letter and recalculates standing immediately.
+
+A suspended or banned account can still sign in, read the decision, appeal it, waive it, reach
+Help & Support, delete the account and sign out.
+
+**Critical child safety.** An administrator can classify a confirmed case as a critical
+child-safety violation, which bans permanently and immediately instead of walking the ladder.
+It requires the admin role, a mandatory written reason and a strong confirmation, and records
+the administrator, the timestamp, the classification and the action. The review model can never
+apply it. The single appeal still applies.
 
 ### If the app says it cannot reach the server
 
-Sign-in (and every other action) reports `Cannot reach the Message in a Bottle server` when the
+Sign-in (and every other action) reports `Cannot reach the SeaYou server` when the
 API is not answering. The web dev server proxies `/api` to `http://localhost:3001`, and when
 nothing is listening there it replies `500` with an empty body — the app now names that case
 instead of blaming the request. Check, in order:
@@ -337,6 +380,40 @@ instead of blaming the request. Check, in order:
 2. `curl http://localhost:3001/api/health` — a healthy API answers `{"ok":true,...}`.
 3. Nothing else already occupying port 3001 (the API reports `EADDRINUSE` if so; start it with a
    different `MIB_PORT`, and point the web app at it with `MIB_API_URL`).
+
+### Terms of Use, Community Rules, Privacy Policy and account deletion
+
+The documents are published at version `1.0`, in English, and are readable before there is an
+account: linked from the sign-in screen and from the registration form, and served as plain
+public HTML at `/legal/terms`, `/legal/community-rules`, `/legal/privacy`,
+`/legal/child-safety` and `/legal/delete-account` (indexed at `/legal`). Those URLs need no
+sign-in and no JavaScript, which is what a store listing requires.
+
+Creating an account needs two separate, initially unchecked decisions — agreeing to the Terms
+and Community Rules, and confirming the Privacy Policy has been read — and the server refuses
+anything less, recording each document's version and the moment of acceptance per account. When
+a version changes, every account is asked again before ordinary use; authentication, the
+documents, account standing, appeals, signing out and deleting the account stay reachable
+meanwhile.
+
+The App has **no age gate**: no date of birth, no age checkbox, no verification and no claim
+that users are adults. Safety rules about minors bind everyone regardless.
+
+**Deleting an account** works from the account sheet in the App and from the public page, both
+asking for the password again and an explicit confirmation, and both running the same
+transactional operation: sessions end at once, the profile and identifiers go, friendships and
+blocks go, letters still at sea are cancelled and cleared, letters already received stay with
+their recipient, and moderation evidence is kept only where an open report, a pending appeal or
+an active restriction still needs it. **Support** is a published address, `Sea You Support` at `seayou.support@gmail.com`, served as a
+public page at `/support` beside the legal pages: no sign-in, no JavaScript, five headings that
+open a message with the subject already set, the address shown as selectable text, and a plain
+warning never to send a password, a verification code, payment details or an identity document.
+It is a `mailto:` link only — no form, no inbox integration, no ticket store — and the address is
+configurable with `MIB_SUPPORT_EMAIL`. **Help & Support** in the account sheet opens it, and so do
+links on the sign-in screen, the policy-acceptance screen, the account-standing screen and the
+deletion dialog, so it stays reachable while signed out, gated, suspended, appealing or deleting.
+
+`docs/LEGAL_DOCUMENTS.md` has the detail and the remaining Play Console tasks.
 
 ## API overview
 
