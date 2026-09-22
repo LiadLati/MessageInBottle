@@ -144,6 +144,45 @@ unspecified page, and the Privacy Policy and Child Safety Standards name the add
 personal name, address, country, company detail, response-time promise or jurisdiction claim
 appears in any of them.
 
+## Upgrading a development database created before the merge
+
+The policy-acceptance migration was briefly numbered `0010` on this branch. When the moderation
+branch merged, it was renumbered to `0012`, and a database that had already applied it under the
+old number could not tell that the new `0012` was the table it already had. Two things went wrong
+on such a database, and both are fixed:
+
+- `0012` was replayed and `CREATE TABLE policy_acceptances` failed, so `db:migrate` and the API
+  both refused to start. `0012` is now idempotent (`CREATE TABLE IF NOT EXISTS`,
+  `CREATE INDEX IF NOT EXISTS`), so replaying it over the existing table is a no-op.
+- More quietly, `0010_reporting_and_moderation` and `0011_evidence_retention` were **skipped
+  entirely**. Drizzle compares each journal entry against the single newest recorded migration,
+  and the old policy entry's timestamp (1789859116404) is later than both of theirs, so they
+  could never run. Such a database would have come up without a single moderation table.
+
+`src/db/compat.ts` fixes both, from `runMigrations` — the one path `db:migrate`, the API, the
+seed and every tool share. Before anything is applied it looks for the one stale bookkeeping row,
+recognised by the timestamp and content hash the renumbered migration was recorded under. If it
+is there, the existing `policy_acceptances` table is checked against the schema that migration
+creates — every column with its type, nullability and key, the foreign key to `users`, and the
+index and its columns. Only if it matches exactly is the stale row released, which lets Drizzle
+replay the migrations it would otherwise skip and re-run `0012` harmlessly. If it does not match,
+nothing is touched and the differences are listed.
+
+Nothing is dropped, cleared or recreated, and the acceptance rows are counted before and after to
+prove they are untouched. Running it twice is a no-op, and a fresh database is unaffected. After
+migrating, `assertSchemaComplete` checks that every table and column the journal promises is
+present, so a silently skipped migration is reported at once instead of surfacing later as a
+confusing runtime error.
+
+To upgrade an affected database:
+
+```bash
+git pull
+pnpm install
+pnpm --filter @mib/api db:migrate   # prints what it kept, if the compatibility step applied
+pnpm dev
+```
+
 ## Still to do in the Play Console (configuration, not code)
 
 These cannot be satisfied by wording or by this repository:

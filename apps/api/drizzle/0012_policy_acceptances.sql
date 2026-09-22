@@ -1,4 +1,4 @@
-CREATE TABLE `policy_acceptances` (
+CREATE TABLE IF NOT EXISTS `policy_acceptances` (
 	`id` text PRIMARY KEY NOT NULL,
 	`user_id` text NOT NULL,
 	`document` text NOT NULL,
@@ -9,4 +9,4 @@ CREATE TABLE `policy_acceptances` (
 	FOREIGN KEY (`user_id`) REFERENCES `users`(`id`) ON UPDATE no action ON DELETE no action
 );
 --> statement-breakpoint
-CREATE INDEX `policy_acceptances_user_idx` ON `policy_acceptances` (`user_id`,`document`,`accepted_at`);
+CREATE INDEX IF NOT EXISTS `policy_acceptances_user_idx` ON `policy_acceptances` (`user_id`,`document`,`accepted_at`);
