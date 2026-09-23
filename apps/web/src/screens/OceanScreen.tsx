@@ -510,7 +510,7 @@ export function OceanScreen({
               setView({ kind: 'clean' });
             }}
           >
-            <Icon name="letters" size={16} />
+            <Icon name="bottle" size={16} />
           </button>
         ) : null}
         <button

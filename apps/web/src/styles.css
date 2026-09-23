@@ -2742,7 +2742,9 @@ button.avatar {
     --rail-width: 72px;
     --pane-width: min(320px, 45vw);
   }
-  .mode-switch,
+  .mode-switch {
+    top: calc(var(--header-pad-top) + 88px);
+  }
   .zoom-cluster {
     top: calc(var(--header-pad-top) + 64px);
   }
