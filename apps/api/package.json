@@ -3,14 +3,20 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
+  "files": [
+    "dist",
+    "drizzle/*.sql",
+    "drizzle/meta/_journal.json"
+  ],
   "scripts": {
     "dev": "tsx watch src/server.ts",
-    "start": "tsx src/server.ts",
+    "build": "tsc --noEmit && node scripts/build.mjs",
+    "start": "node dist/server.js",
+    "migrate:prod": "node dist/migrate.js",
     "typecheck": "tsc --noEmit",
-    "build": "tsc --noEmit",
     "test": "vitest run",
     "db:migrate": "tsx src/db/migrate.ts",
-    "db:seed": "tsx src/db/seed.ts",
+    "db:seed": "tsx src/db/seed-cli.ts",
     "db:reset": "tsx src/db/reset.ts",
     "db:generate": "drizzle-kit generate",
     "admin:grant": "tsx src/tools/grant-admin.ts",
@@ -21,7 +27,6 @@
   "dependencies": {
     "@hono/node-server": "^1.19.0",
     "@hono/zod-validator": "^0.9.1",
-    "@mib/shared": "workspace:*",
     "better-sqlite3": "^12.11.1",
     "drizzle-orm": "^0.45.2",
     "hono": "^4.13.7",
@@ -29,6 +34,7 @@
     "zod": "^4.5.4"
   },
   "devDependencies": {
+    "@mib/shared": "workspace:*",
     "@types/better-sqlite3": "^7.6.13",
     "@types/geojson": "7946.0.16",
     "@types/node": "^22.20.1",
@@ -36,6 +42,7 @@
     "@types/topojson-client": "^3.1.5",
     "@types/topojson-specification": "1.0.5",
     "drizzle-kit": "^0.31.10",
+    "esbuild": "0.28.2",
     "topojson-client": "^3.1.0",
     "tsx": "^4.23.13",
     "typescript": "^5.9.3",

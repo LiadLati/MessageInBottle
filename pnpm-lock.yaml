@@ -38,9 +38,6 @@ importers:
       '@hono/zod-validator':
         specifier: ^0.9.1
         version: 0.9.1(hono@4.13.7)(zod@4.5.4)
-      '@mib/shared':
-        specifier: workspace:*
-        version: link:../../packages/shared
       better-sqlite3:
         specifier: ^12.11.1
         version: 12.11.1
@@ -57,6 +54,9 @@ importers:
         specifier: ^4.5.4
         version: 4.5.4
     devDependencies:
+      '@mib/shared':
+        specifier: workspace:*
+        version: link:../../packages/shared
       '@types/better-sqlite3':
         specifier: ^7.6.13
         version: 7.6.13
@@ -78,6 +78,9 @@ importers:
       drizzle-kit:
         specifier: ^0.31.10
         version: 0.31.10
+      esbuild:
+        specifier: 0.28.2
+        version: 0.28.2
       topojson-client:
         specifier: ^3.1.0
         version: 3.1.0

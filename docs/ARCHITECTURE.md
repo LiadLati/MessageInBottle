@@ -325,9 +325,9 @@ and the new `risk_decisions` table (one row per bottle per storm night, unique o
   decision notice and the deletion dialog alike.
 - **Roles.** `users.role` holds exactly one of `member`, `admin`, `developer`, read from the row
   on every request and never from anything a client sends. `requireAdmin` guards `/api/admin/*`;
-  `requireDeveloper` guards `/api/dev/*` and demands the role **and** `devMode`, so DEV controls
-  are unreachable in production even for a developer-role account, and an administrator gets 403
-  there. `tools/grant-role.ts` (behind `admin:grant` and `developer:grant`) is the only grant
+  `requireDeveloper` guards every `/api/dev/*` route — the mail outbox included — and demands
+  the role **and** `devMode`, so an anonymous caller gets 401, a member or an administrator 403,
+  and in production the router is not mounted at all (404). `tools/grant-role.ts` (behind `admin:grant` and `developer:grant`) is the only grant
   surface: lookup, then `--confirm <stable id>`. Granting one role replaces the other, and no
   account is seeded with either.
 - **The decision notice and the single appeal.** `violations.notice_presented_at` and
@@ -356,6 +356,37 @@ and the new `risk_decisions` table (one row per bottle per storm night, unique o
   and the trail survives the evidence it describes being redacted.
 - **No age data.** Nothing in the schema, the API or the interface collects or asserts an age;
   a test walks every production source file to keep it that way.
+
+## Production artefact and fail-closed development mode
+
+- **Artefact.** `apps/api/scripts/build.mjs` bundles each runtime entry (`server`, `migrate`,
+  `grant-admin`, `grant-developer`, `retention`) with esbuild into `apps/api/dist/<entry>.js`:
+  ESM, Node 22, `@mib/shared` bundled (it is TypeScript source), every npm dependency external,
+  no source maps, no splitting. All entries sit one directory below the API root, exactly as
+  `src/config.ts` does, so `API_ROOT`, the migrations folder (`apps/api/drizzle`) and the default
+  `.env` resolve identically from source and from `dist`; `dist/data/sea-graph.v2.json` is copied
+  beside them for `new URL('./data/…', import.meta.url)`. Nothing depends on the working
+  directory. The build refuses to bundle any npm package by accident. `package.json` `files`
+  limits `pnpm deploy --prod` to `dist`, the SQL migrations and the journal. `@mib/shared`, `tsx`
+  and `esbuild` are devDependencies only.
+- **Production by construction.** The build defines `__MIB_PRODUCTION_BUILD__`, so
+  `PRODUCTION_BUILD` is true only in the compiled artefact. `isProductionRuntime` is that flag or
+  `NODE_ENV=production`. `loadConfig(env)` validates everything before the server listens:
+  booleans are exactly `true`/`false` (anything else is a `ConfigError`), `MIB_DEV_MODE`
+  defaults to `false`, `MIB_DEV_MODE=true` is refused in production, production requires an
+  absolute `MIB_DATABASE_PATH`, and the outbox mail provider is refused outside dev mode.
+- **Seeding.** `prepareDatabase` (migrate, seed the chart, and seed development users only when
+  `devMode`) is what the server runs on start; `seedUsers` additionally throws inside a
+  production build. `db:seed` / `db:reset` are source-only tools (`seed-cli.ts`, `reset.ts`) and
+  are not in the artefact; `db:reset` requires dev mode.
+- **Web.** The DEV bar renders only in a Vite development build, only for the `developer` role,
+  and only while `/api/dev/status` reports dev mode; the password-recovery screen never reads the
+  outbox for a signed-out visitor. In a production bundle the panel is compiled out.
+- **Shutdown.** `SIGTERM`/`SIGINT` close the HTTP server, stop the workers and close SQLite.
+- **Proof.** `apps/api/src/config.test.ts` and `src/http/dev-mode.test.ts` pin the configuration
+  and the route gates (including the audited reset-link takeover chain);
+  `apps/api/scripts/smoke-artefact.mjs` starts `node dist/server.js` from a `pnpm deploy --prod`
+  output on a temporary database; `.github/workflows/ci.yml` runs all of it on every pull request.
 
 ## Deliberately not implemented (per task scope)
 

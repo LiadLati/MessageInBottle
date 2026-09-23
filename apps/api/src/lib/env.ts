@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { API_ROOT } from '../config.js';
+import { API_ROOT, PRODUCTION_BUILD } from '../config.js';
 
 // `.env.example` tells people to put configuration (SMTP credentials among it) in a .env file,
 // so the API has to actually read one. Values already present in the real environment always
@@ -29,7 +29,11 @@ export function parseEnvFile(contents: string): Record<string, string> {
 }
 
 // apps/api/.env first, then the repository root .env; neither overrides the real environment.
-export const ENV_FILES = [path.join(API_ROOT, '.env'), path.resolve(API_ROOT, '..', '..', '.env')];
+// The built artefact is deployed on its own, outside the monorepo, so it reads only the .env
+// beside it and never reaches two directories up into whatever happens to be there.
+export const ENV_FILES = PRODUCTION_BUILD
+  ? [path.join(API_ROOT, '.env')]
+  : [path.join(API_ROOT, '.env'), path.resolve(API_ROOT, '..', '..', '.env')];
 
 export function loadEnvFiles(files: string[] = ENV_FILES, env = process.env): string[] {
   const loaded: string[] = [];

@@ -21,18 +21,21 @@ import { jsonBody } from '../validate.js';
 // Deterministic development controls (spec §19: accelerated test journeys are kept separate).
 //
 // Three layers keep these away from real accounts and real data:
-//   • the router is mounted only when MIB_DEV_MODE=true, so a production build has no routes;
-//   • every control behind it requires the `developer` role *and* dev mode (requireDeveloper),
-//     so an administrator gets 403 here and a developer gets 403 on /api/admin;
+//   • the router is mounted only when MIB_DEV_MODE is explicitly `true`, which the configuration
+//     refuses in production — so a production server has no /api/dev routes at all (404);
+//   • every route behind it, the outbox included, requires a signed-in account with the
+//     `developer` role *and* dev mode (requireDeveloper), so an anonymous caller gets 401, a
+//     member or an administrator 403, and a developer gets 403 on /api/admin;
 //   • each control still only ever touches the caller's own bottles, and time only ever moves
 //     forward.
 export function devRoutes() {
   const r = new Hono<AppEnv>();
 
-  // Registered before the authentication middleware on purpose: password recovery is used while
-  // signed out, so the captured message has to be readable then. This router is mounted only
-  // when MIB_DEV_MODE is on, and the outbox only ever exists for the development mailer, so no
-  // production deployment can reach it.
+  r.use('*', requireAuth, requireDeveloper);
+
+  // The captured mail holds live password-reset links for every account, so it is behind the
+  // same gate as every other control. A developer recovering a test account's password reads
+  // the link from the dev bar while signed in to their own developer account.
   r.get('/outbox', (c) => {
     const mailer = c.get('ctx').mailer;
     const messages =
@@ -47,8 +50,6 @@ export function devRoutes() {
         : [];
     return c.json({ provider: mailer.kind, messages });
   });
-
-  r.use('*', requireAuth, requireDeveloper);
 
   const status = (ctx: AppEnv['Variables']['ctx']): DevStatus => ({
     devMode: ctx.config.devMode,
