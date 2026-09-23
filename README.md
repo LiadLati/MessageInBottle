@@ -334,6 +334,19 @@ pnpm --filter @mib/api developer:grant -- --username someone --confirm usr_…  
 Granting one role replaces the other, and the command says so before it does it. No account is
 seeded with a role: a fresh development database has none until you grant them.
 
+**Operator password reset.** `password:reset` sets a new password for one existing account,
+lookup-then-confirm. It looks the account up by username and by e-mail independently and stops,
+changing nothing, unless both name the same active account (and, with `--expect-role`, one with
+that role). With `--confirm <id>` it asks for the password twice at a masked prompt — never on
+the command line, so it is not kept in shell history — then does exactly what the in-app reset
+does: replaces the hash, invalidates outstanding reset links and signs every session out. It
+never runs migrations or creates a database file, and prints neither the password nor any hash.
+
+```bash
+pnpm --filter @mib/api password:reset -- --username someone --email you@example.com --expect-role developer
+pnpm --filter @mib/api password:reset -- --username someone --email you@example.com --expect-role developer --confirm usr_…
+```
+
 **Violations and account notices.** Only an upheld report creates a violation: the letter is
 withdrawn from every in-app read (the sender's passport included; the case keeps the evidence),
 and the journey's timing, outcome and public listing stay as they were. One upheld violation is
