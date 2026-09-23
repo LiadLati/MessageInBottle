@@ -50,6 +50,8 @@ const env = {
   HOME: tmp,
   MIB_DATABASE_PATH: databasePath,
   MIB_PORT: String(port),
+  // Production requires an https public URL; nothing is ever sent to it here.
+  MIB_APP_URL: 'https://seayou.example',
   MIB_AI_ENABLED: 'false',
   MIB_LOG_REQUESTS: 'false',
 };
@@ -103,6 +105,17 @@ check('a relative MIB_DATABASE_PATH is refused', relative.status !== 0, `exit ${
 // 3. Fresh migration with the compiled migrator.
 const migrated = spawnSync(node, [dist('migrate.js')], { cwd: tmp, env, encoding: 'utf8' });
 check('fresh migration (node dist/migrate.js)', migrated.status === 0, migrated.stderr.trim());
+const backupFile = path.join(tmp, 'backups', 'smoke-backup.sqlite');
+const backedUp = spawnSync(node, [dist('backup.js'), '--to', backupFile], {
+  cwd: tmp,
+  env,
+  encoding: 'utf8',
+});
+check(
+  'online backup of the fresh database (node dist/backup.js)',
+  backedUp.status === 0 && /"integrity": "ok"/.test(backedUp.stdout),
+  backedUp.stderr.trim(),
+);
 check('migration wrote the temporary database', fs.existsSync(databasePath));
 
 // 4. Start the compiled server. The working directory is the temp dir on purpose: nothing may
@@ -163,6 +176,19 @@ try {
     h.ok === true && !('devMode' in h) && !('mail' in h),
   );
   check('startup log says devMode=false', /devMode=false/.test(output));
+  check(
+    'security headers are set (frame, sniffing, CSP, HSTS)',
+    health.headers.get('x-frame-options') === 'DENY' &&
+      health.headers.get('x-content-type-options') === 'nosniff' &&
+      /default-src 'none'/.test(health.headers.get('content-security-policy') ?? '') &&
+      /max-age=/.test(health.headers.get('strict-transport-security') ?? ''),
+  );
+  const big = await fetch(`${base}/api/auth/login`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ username: 'x', password: 'x'.repeat(70_000) }),
+  });
+  check('an oversized request body is refused (413)', big.status === 413, String(big.status));
 
   for (const page of [
     '/legal',

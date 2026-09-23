@@ -1,5 +1,6 @@
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
+import { bodyLimit } from 'hono/body-limit';
 import { logger } from 'hono/logger';
 import type { ZodError } from 'zod';
 import { AppError } from '../lib/errors.js';
@@ -18,6 +19,9 @@ import { supportPage } from './legal-pages.js';
 import { legalRoutes } from './routes/legal.js';
 import { policyRoutes } from './routes/policies.js';
 import { shoreRoutes } from './routes/shore.js';
+import { securityHeaders } from './security-headers.js';
+
+export const MAX_REQUEST_BYTES = 64 * 1024;
 
 export type AppEnv = { Variables: { ctx: AppContext; user: AuthUser; token: string } };
 
@@ -28,10 +32,31 @@ export function createApp(ctx: AppContext) {
     await next();
   });
   if (ctx.config.logRequests) app.use('*', logger());
+  app.use('*', securityHeaders);
+  // No request SeaYou accepts is anywhere near this size (a letter is at most 8 KB); anything
+  // larger is refused before it is read, instead of being parsed on the one API thread
+  // (audit ARCH-027 / SEC-014).
+  app.use(
+    '*',
+    bodyLimit({
+      maxSize: MAX_REQUEST_BYTES,
+      onError: (c) =>
+        c.json({ error: { code: 'payload_too_large', message: 'request body too large' } }, 413),
+    }),
+  );
   app.use('/api/*', cors({ origin: ctx.config.corsOrigin, credentials: false }));
 
-  app.get('/api/health', (c) =>
-    c.json({
+  // A health check that the database answers, so a load balancer or process manager learns
+  // about a dead or locked database file rather than only that Node is alive (ARCH-017).
+  app.get('/api/health', (c) => {
+    try {
+      (ctx.db as unknown as { $client: { prepare(sql: string): { get(): unknown } } }).$client
+        .prepare('select 1')
+        .get();
+    } catch {
+      return c.json({ ok: false, error: { code: 'database_unavailable' } }, 503);
+    }
+    return c.json({
       ok: true,
       serverTime: new Date(ctx.clock.now()).toISOString(),
       // Development builds say how mail is handled, so the password-recovery screen can state
@@ -45,8 +70,8 @@ export function createApp(ctx: AppContext) {
             },
           }
         : {}),
-    }),
-  );
+    });
+  });
   app.route('/api/auth', authRoutes());
   app.route('/api/policies', policyRoutes());
   app.route('/api/account', accountRoutes());
@@ -78,10 +103,10 @@ export function createApp(ctx: AppContext) {
       );
     }
     if (isZodError(err)) {
-      return c.json(
-        { error: { code: 'validation', message: 'invalid request', details: err.issues } },
-        400,
-      );
+      // Path, code and message only: never the rejected input, which may be a password or a
+      // letter (ARCH-022; http/validate.ts does the same for the ordinary path).
+      const details = err.issues.map((i) => ({ path: i.path, code: i.code, message: i.message }));
+      return c.json({ error: { code: 'validation', message: 'invalid request', details } }, 400);
     }
     console.error(err);
     return c.json({ error: { code: 'internal', message: 'unexpected error' } }, 500);

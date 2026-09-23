@@ -69,6 +69,13 @@ function envInt(env: Env, name: string, fallback: number): number {
   return n;
 }
 
+function envPositiveInt(env: Env, name: string, fallback: number): number {
+  const n = envInt(env, name, fallback);
+  if (!Number.isInteger(n) || n < 1)
+    throw new ConfigError(`${name} must be a whole number of at least 1`);
+  return n;
+}
+
 export interface AppConfig {
   port: number;
   databasePath: string;
@@ -85,6 +92,9 @@ export interface AppConfig {
   // Only behind a reverse proxy that sets X-Forwarded-For: otherwise clients could pick their
   // own rate-limit bucket by sending the header themselves.
   trustProxy: boolean;
+  // How many trusted proxies append to X-Forwarded-For in front of the API (default 1). The
+  // client address is read that many entries from the right (http/client-address.ts).
+  trustedProxyHops: number;
   // Public URL of the web app, used to build links in e-mails.
   appUrl: string;
   // The published support address shown on /support and in the legal documents. A public
@@ -154,6 +164,14 @@ export function loadConfig(
       'MIB_DATABASE_PATH must be set to an absolute path in production (a file on persistent ' +
         'storage outside the application directory).',
     );
+  const appUrl = env.MIB_APP_URL ?? 'http://localhost:5173';
+  // Password-reset links are built from this URL, and the Privacy Policy says a production
+  // deployment requires HTTPS; a production server with an http:// public URL would mail
+  // plain-text links to its users (SEC-014).
+  if (production && !/^https:\/\//.test(appUrl))
+    throw new ConfigError(
+      'MIB_APP_URL must be the public https:// address of the web app in production.',
+    );
   return {
     port: envInt(env, 'MIB_PORT', 3001),
     databasePath: databasePath || path.join(API_ROOT, 'data', 'mib.sqlite'),
@@ -166,7 +184,8 @@ export function loadConfig(
     sessionTtlMs: envInt(env, 'MIB_SESSION_TTL_MS', 30 * 24 * 60 * 60 * 1000),
     corsOrigin: env.MIB_CORS_ORIGIN ?? 'http://localhost:5173',
     trustProxy: envBool(env, 'MIB_TRUST_PROXY', false),
-    appUrl: env.MIB_APP_URL ?? 'http://localhost:5173',
+    trustedProxyHops: envPositiveInt(env, 'MIB_TRUSTED_PROXY_HOPS', 1),
+    appUrl,
     supportEmail: env.MIB_SUPPORT_EMAIL ?? SUPPORT_EMAIL,
     mail: loadMailConfig(env, devMode),
     // The published set is the authority; there is no environment switch that can release

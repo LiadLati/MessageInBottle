@@ -47,6 +47,7 @@ export function testConfig(overrides: Partial<AppConfig> = {}): AppConfig {
     sessionTtlMs: 60 * 60 * 1000,
     corsOrigin: '*',
     trustProxy: true,
+    trustedProxyHops: 1,
     appUrl: 'http://app.test',
     supportEmail: SUPPORT_EMAIL,
     mail: {

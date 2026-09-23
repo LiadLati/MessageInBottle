@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import type { Context } from 'hono';
-import { getConnInfo } from '@hono/node-server/conninfo';
+import { clientAddress } from '../client-address.js';
 import {
   PUBLISHED_DOCUMENTS,
   SUPPORT_NAME,
@@ -64,17 +64,7 @@ export function legalRoutes(limiter = new RateLimiter()) {
     if (!confirmed) return back('Tick the box to confirm that deletion is permanent.');
 
     // One address cannot sit here guessing credentials.
-    const key = (() => {
-      if (c.get('ctx').config.trustProxy) {
-        const first = c.req.header('x-forwarded-for')?.split(',')[0]?.trim();
-        if (first) return first;
-      }
-      try {
-        return getConnInfo(c).remote.address ?? 'local';
-      } catch {
-        return 'local';
-      }
-    })();
+    const key = clientAddress(c);
     if (!limiter.hit(`legal-delete:${key}`, DELETE_PER_ADDRESS).allowed)
       return back('Too many attempts from this device. Wait a few minutes and try again.');
 

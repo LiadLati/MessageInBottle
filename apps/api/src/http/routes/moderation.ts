@@ -1,6 +1,5 @@
 import { Hono } from 'hono';
-import type { Context } from 'hono';
-import { getConnInfo } from '@hono/node-server/conninfo';
+import { clientAddress } from '../client-address.js';
 import { AppealRequestSchema, ReportRequestSchema, WaiveAppealRequestSchema } from '@mib/shared';
 import { tooManyRequests } from '../../lib/errors.js';
 import { RateLimiter, type RateLimitRule } from '../../lib/rate-limit.js';
@@ -31,17 +30,7 @@ export function moderationRoutes(limiter = new RateLimiter()) {
   const r = new Hono<AppEnv>();
   r.use('*', requireAuth);
 
-  const clientKey = (c: Context<AppEnv>): string => {
-    if (c.get('ctx').config.trustProxy) {
-      const first = c.req.header('x-forwarded-for')?.split(',')[0]?.trim();
-      if (first) return first;
-    }
-    try {
-      return getConnInfo(c).remote.address ?? 'local';
-    } catch {
-      return 'local';
-    }
-  };
+  const clientKey = clientAddress;
   const enforce = (key: string, rule: RateLimitRule) => {
     const d = limiter.hit(key, rule);
     if (!d.allowed) throw tooManyRequests(d.retryAfterMs);

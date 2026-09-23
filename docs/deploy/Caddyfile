@@ -1,0 +1,30 @@
+# Reference reverse-proxy configuration for SeaYou (Caddy 2). Provider-neutral: any proxy that
+# does the same is fine. Replace seayou.example with the real domain. Caddy obtains and renews
+# the TLS certificate and redirects http:// to https:// on its own.
+seayou.example {
+	# The API owns these paths; everything else is the static web app.
+	@api path /api/* /legal /legal/* /support
+	handle @api {
+		request_body {
+			max_size 64KB
+		}
+		# Caddy appends the client address to X-Forwarded-For: one trusted hop.
+		reverse_proxy 127.0.0.1:3001
+	}
+
+	handle {
+		root * /srv/seayou-web
+		try_files {path} /index.html
+		file_server
+		header {
+			# MapLibre builds its worker from a blob: URL; tiles and fonts are bundled.
+			Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self'; worker-src 'self' blob:; frame-ancestors 'none'; base-uri 'none'; form-action 'self'"
+			X-Content-Type-Options nosniff
+			X-Frame-Options DENY
+			Referrer-Policy no-referrer
+			Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		}
+		@immutable path /assets/*
+		header @immutable Cache-Control "public, max-age=31536000, immutable"
+	}
+}

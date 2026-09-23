@@ -275,7 +275,7 @@ describe('the audited account-takeover chain is closed', () => {
 describe('a clean production database has no development accounts', () => {
   it('creates none on start, so the published development password signs nobody in', async () => {
     const config = loadConfig(
-      { MIB_DATABASE_PATH: '/var/lib/seayou/seayou.sqlite' },
+      { MIB_DATABASE_PATH: '/var/lib/seayou/seayou.sqlite', MIB_APP_URL: 'https://seayou.example' },
       { productionBuild: true },
     );
     expect(config.devMode).toBe(false);

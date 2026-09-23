@@ -1,6 +1,5 @@
 import { Hono } from 'hono';
-import type { Context } from 'hono';
-import { getConnInfo } from '@hono/node-server/conninfo';
+import { clientAddress } from '../client-address.js';
 import {
   ForgotPasswordRequestSchema,
   LoginRequestSchema,
@@ -39,20 +38,7 @@ export const RESET_PER_ADDRESS: RateLimitRule = { limit: 10, windowMs: 15 * 60 *
 export function authRoutes(limiter = new RateLimiter()) {
   const r = new Hono<AppEnv>();
 
-  // The client's network address: the socket peer, or the first X-Forwarded-For entry when the
-  // deployment declares a trusted reverse proxy (MIB_TRUST_PROXY). In-process test requests
-  // have no socket and share one bucket.
-  const clientKey = (c: Context<AppEnv>): string => {
-    if (c.get('ctx').config.trustProxy) {
-      const first = c.req.header('x-forwarded-for')?.split(',')[0]?.trim();
-      if (first) return first;
-    }
-    try {
-      return getConnInfo(c).remote.address ?? 'local';
-    } catch {
-      return 'local';
-    }
-  };
+  const clientKey = clientAddress;
   const enforce = (key: string, rule: RateLimitRule) => {
     const d = limiter.hit(key, rule);
     if (!d.allowed) throw tooManyRequests(d.retryAfterMs);
