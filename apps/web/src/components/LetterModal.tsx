@@ -2,7 +2,8 @@ import { useEffect, useId, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import type { OpenedLetterDto } from '@mib/shared';
 import { Icon } from '../design/Icon.js';
-import { focusableIn, nextTabTarget } from '../lib/focusTrap.js';
+import { focusableIn } from '../lib/focusTrap.js';
+import { restoreFocus, useModalKeys } from '../lib/modal.js';
 import { formatDuration, prefersReducedMotion } from '../lib/format.js';
 import { LetterPaper } from './LetterPaper.js';
 import { ReportSheet } from './ReportSheet.js';
@@ -63,7 +64,7 @@ export function LetterModal({
     return () => {
       for (const el of siblings) el.removeAttribute('inert');
       document.body.style.overflow = bodyOverflow;
-      previous?.focus();
+      restoreFocus(previous);
     };
   }, []);
 
@@ -82,26 +83,10 @@ export function LetterModal({
     }
   };
 
-  const onKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Escape') {
-      e.preventDefault();
-      close();
-      return;
-    }
-    if (e.key !== 'Tab' || !dialogRef.current) return;
-    const target = nextTabTarget(
-      focusableIn(dialogRef.current),
-      document.activeElement,
-      e.shiftKey,
-    );
-    if (target) {
-      e.preventDefault();
-      target.focus();
-    }
-  };
+  useModalKeys(dialogRef, close);
 
   return createPortal(
-    <div className={`letter-modal${closing ? ' closing' : ''}`} onKeyDown={onKeyDown}>
+    <div className={`letter-modal${closing ? ' closing' : ''}`}>
       <div className="letter-modal-backdrop" onClick={close} aria-hidden />
       {justOpened && !closing ? <div className="veil" aria-hidden /> : null}
       <div
@@ -156,7 +141,8 @@ export function LetterModal({
             Thank you. Your report has been sent for review.
           </p>
         ) : null}
-        <div className="letter-modal-scroll">
+        {/* Focusable so a keyboard can scroll a long letter (audit A11Y-001). */}
+        <div className="letter-modal-scroll" role="region" aria-label="Letter" tabIndex={0}>
           <LetterPaper
             text={letter.letter.text}
             font={letter.letter.font}

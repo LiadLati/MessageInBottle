@@ -154,6 +154,44 @@ function Shell() {
     setTab('ocean');
   }
 
+  // Browser Back walks back through the screens of this session instead of leaving the app
+  // (audit FE-015). Each user-driven change of screen pushes one history entry holding the
+  // screen; popping an entry restores it. There is no router: the URL itself stays put.
+  const navKey = JSON.stringify({
+    tab,
+    passportId,
+    inbox: inboxOpen,
+    admin,
+    standing: standingOpen,
+  } satisfies NavEntry);
+  const currentNav = useRef(navKey);
+  const restoringNav = useRef(false);
+  useEffect(() => {
+    if (!userId) {
+      currentNav.current = '';
+      return;
+    }
+    const entry = { mib: JSON.parse(navKey) as NavEntry };
+    if (currentNav.current === '') window.history.replaceState(entry, '');
+    else if (restoringNav.current) restoringNav.current = false;
+    else if (currentNav.current !== navKey) window.history.pushState(entry, '');
+    currentNav.current = navKey;
+  }, [navKey, userId]);
+  useEffect(() => {
+    const onPop = (e: PopStateEvent) => {
+      const entry = (e.state as { mib?: NavEntry } | null)?.mib;
+      if (!entry || JSON.stringify(entry) === currentNav.current) return;
+      restoringNav.current = true;
+      setTab(entry.tab);
+      setPassportId(entry.passportId);
+      setInboxOpen(entry.inbox);
+      setAdmin(entry.admin);
+      setStandingOpen(entry.standing);
+    };
+    window.addEventListener('popstate', onPop);
+    return () => window.removeEventListener('popstate', onPop);
+  }, []);
+
   // Visiting My Shore refreshes its count (a bottle opened there clears the badge); it no
   // longer marks notifications read — that is the inbox's job.
   useEffect(() => {
@@ -215,6 +253,17 @@ function Shell() {
   // no local "dismissed" flag, because closing or reloading must not resolve it.
   const pendingDecision = standing.data?.pendingDecision ?? null;
 
+  const deleteDialog = (
+    <DeleteAccountDialog
+      onCancel={() => setDeletingAccount(false)}
+      onDeleted={() => {
+        setDeletingAccount(false);
+        // The account is gone and its session with it: drop the token and show sign-in.
+        void logout();
+      }}
+    />
+  );
+
   const restricted =
     standing.data?.standing === 'suspended' || standing.data?.standing === 'banned';
   // A suspended or banned account sees its standing, can read the decision, appeal, waive,
@@ -222,10 +271,11 @@ function Shell() {
   if (restricted && standing.data) {
     return (
       <main className="app-viewport" data-daylight="night">
-        <StandingScreen standing={standing.data} />
+        <StandingScreen standing={standing.data} onDeleteAccount={() => setDeletingAccount(true)} />
         {pendingDecision ? (
           <DecisionNotice notice={pendingDecision} onResolved={reloadStanding} />
         ) : null}
+        {deletingAccount ? deleteDialog : null}
       </main>
     );
   }
@@ -355,16 +405,7 @@ function Shell() {
       {pendingDecision && !immersive ? (
         <DecisionNotice notice={pendingDecision} onResolved={reloadStanding} />
       ) : null}
-      {deletingAccount ? (
-        <DeleteAccountDialog
-          onCancel={() => setDeletingAccount(false)}
-          onDeleted={() => {
-            setDeletingAccount(false);
-            // The account is gone and its session with it: drop the token and show sign-in.
-            void logout();
-          }}
-        />
-      ) : null}
+      {deletingAccount ? deleteDialog : null}
       {policyDialog}
       {immersive ? null : (
         <Nav
@@ -384,6 +425,14 @@ function Shell() {
       )}
     </main>
   );
+}
+
+interface NavEntry {
+  tab: Tab;
+  passportId: string | null;
+  inbox: boolean;
+  admin: AdminSection | null;
+  standing: boolean;
 }
 
 // Arrival notice: a strip in the top stack, never a cover over the header beneath it.

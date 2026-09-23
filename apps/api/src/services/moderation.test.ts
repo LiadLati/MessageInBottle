@@ -30,6 +30,7 @@ import {
   reportLetter,
   standingOf,
   submitAppeal,
+  suspensionEnd,
 } from './moderation.js';
 import { listNotifications } from './notifications.js';
 import { activeReading, closeReading, devLoseBottle, openPublicBottle } from './outcomes.js';
@@ -735,5 +736,19 @@ describe('report budgets', { timeout: 30_000 }, () => {
     expect(() =>
       submitAppeal(w.ctx, w.user('ada'), { violationId, text: 'please look again' }),
     ).not.toThrow();
+  });
+});
+
+describe('the suspension end a person is shown (FE-022)', () => {
+  const until = Date.UTC(2026, 8, 29, 23, 15);
+  it('is written in the account zone', () => {
+    expect(suspensionEnd(until, 'Europe/Berlin')).toBe('30 September 2026 at 01:15 CEST');
+  });
+  it('says UTC when the account has no zone, or an unknown one', () => {
+    expect(suspensionEnd(until, null)).toBe('29 September 2026 at 23:15 UTC');
+    expect(suspensionEnd(until, 'Not/AZone')).toBe('29 September 2026 at 23:15 UTC');
+  });
+  it('never uses the raw RFC 1123 form', () => {
+    expect(suspensionEnd(until, null)).not.toMatch(/GMT/);
   });
 });

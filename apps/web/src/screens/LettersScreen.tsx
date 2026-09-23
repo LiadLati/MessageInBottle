@@ -15,7 +15,8 @@ import {
 } from '../components/ui.js';
 import { Icon } from '../design/Icon.js';
 import { formatDate, formatDuration } from '../lib/format.js';
-import { useAsync } from '../lib/useAsync.js';
+import { useAsync, type AsyncState } from '../lib/useAsync.js';
+import { TabList, tabPanelProps } from '../components/Tabs.js';
 
 interface Props {
   passportId: string | null;
@@ -29,48 +30,57 @@ type Folder = 'sent' | 'received' | 'lost';
 const FOLDER_LABELS: Record<Folder, string> = { sent: 'Sent', received: 'Received', lost: 'Lost' };
 
 export function LettersScreen({ passportId, onSelect, onBack, onShowPublic }: Props) {
-  const [folder, setFolder] = useState<Folder>('sent');
   if (passportId) return <PassportView key={passportId} id={passportId} onBack={onBack} />;
+  return <Folders onSelect={onSelect} onShowPublic={onShowPublic} />;
+}
+
+function Folders({
+  onSelect,
+  onShowPublic,
+}: {
+  onSelect: (id: string) => void;
+  onShowPublic: (id: string) => void;
+}) {
+  const [folder, setFolder] = useState<Folder>('sent');
+  // Sent and Lost are two views of one list: fetched once here, not once per folder visit
+  // (audit FE-013).
+  const sent = useAsync(() => api.sentBottles(), []);
   const tabs = (
-    <div className="seg-tabs" role="tablist" aria-label="Letters">
-      {(['sent', 'received', 'lost'] as const).map((f) => (
-        <button
-          key={f}
-          type="button"
-          role="tab"
-          id={`letters-tab-${f}`}
-          aria-selected={folder === f}
-          aria-controls={`letters-panel-${f}`}
-          className={folder === f ? 'active' : ''}
-          onClick={() => setFolder(f)}
-        >
-          {FOLDER_LABELS[f]}
-        </button>
-      ))}
-    </div>
+    <TabList
+      base="letters"
+      label="Letters"
+      items={['sent', 'received', 'lost'] as const}
+      selected={folder}
+      onSelect={setFolder}
+      labelOf={(f) => FOLDER_LABELS[f]}
+    />
   );
   return folder === 'sent' ? (
-    <SentHistory onSelect={onSelect} tabs={tabs} />
+    <SentHistory sent={sent} onSelect={onSelect} tabs={tabs} />
   ) : folder === 'lost' ? (
-    <LostHistory onSelect={onSelect} onShowPublic={onShowPublic} tabs={tabs} />
+    <LostHistory sent={sent} onSelect={onSelect} onShowPublic={onShowPublic} tabs={tabs} />
   ) : (
     <ReceivedHistory tabs={tabs} />
   );
 }
 
-function SentHistory({ onSelect, tabs }: { onSelect: (id: string) => void; tabs: ReactNode }) {
-  const sent = useAsync(() => api.sentBottles(), []);
+type SentList = AsyncState<{ bottles: SentBottleSummaryDto[] }>;
+
+function SentHistory({
+  sent,
+  onSelect,
+  tabs,
+}: {
+  sent: SentList;
+  onSelect: (id: string) => void;
+  tabs: ReactNode;
+}) {
   // Letters the sea ended live under Lost; everything else stays here with its fate.
   const list = (sent.data?.bottles ?? []).filter((b) => b.state !== 'lost');
   return (
     <DeckScreen title="Letters" subtitle="Everything you have sent, with its fate">
       {tabs}
-      <div
-        id="letters-panel-sent"
-        role="tabpanel"
-        aria-labelledby="letters-tab-sent"
-        className="stack"
-      >
+      <div {...tabPanelProps('letters', 'sent')} className="stack">
         {sent.error && !sent.data ? (
           <LoadFailed error={sent.error} onRetry={() => void sent.reload()} />
         ) : sent.loading && !sent.data ? (
@@ -113,15 +123,16 @@ function SentHistory({ onSelect, tabs }: { onSelect: (id: string) => void; tabs:
 // Letters → Lost: journeys the sea ended, with the outcome stated in words. The sender keeps
 // the letter and the passport; an adrift bottle can be shown on the public map.
 function LostHistory({
+  sent,
   onSelect,
   onShowPublic,
   tabs,
 }: {
+  sent: SentList;
   onSelect: (id: string) => void;
   onShowPublic: (id: string) => void;
   tabs: ReactNode;
 }) {
-  const sent = useAsync(() => api.sentBottles(), []);
   const list = (sent.data?.bottles ?? []).filter(
     (b): b is SentBottleSummaryDto & { outcome: NonNullable<SentBottleSummaryDto['outcome']> } =>
       b.state === 'lost' && b.outcome !== null,
@@ -129,12 +140,7 @@ function LostHistory({
   return (
     <DeckScreen title="Letters" subtitle="Journeys the sea ended">
       {tabs}
-      <div
-        id="letters-panel-lost"
-        role="tabpanel"
-        aria-labelledby="letters-tab-lost"
-        className="stack"
-      >
+      <div {...tabPanelProps('letters', 'lost')} className="stack">
         {sent.loading && !sent.data ? (
           <Skeleton />
         ) : sent.error && !sent.data ? null : list.length === 0 ? (
@@ -211,14 +217,9 @@ function ReceivedHistory({ tabs }: { tabs: ReactNode }) {
     }
   };
   return (
-    <DeckScreen title="Letters" subtitle="Letters that reached you, and bottles you found adrift">
+    <DeckScreen title="Letters" subtitle="Letters that reached your shore">
       {tabs}
-      <div
-        id="letters-panel-received"
-        role="tabpanel"
-        aria-labelledby="letters-tab-received"
-        className="stack"
-      >
+      <div {...tabPanelProps('letters', 'received')} className="stack">
         {received.error && !received.data ? (
           <LoadFailed error={received.error} onRetry={() => void received.reload()} />
         ) : received.loading && !received.data ? (
@@ -227,8 +228,8 @@ function ReceivedHistory({ tabs }: { tabs: ReactNode }) {
           <div className="glass-panel stack">
             <h2 className="t-display-sm">Nothing opened yet</h2>
             <p className="secondary">
-              Letters you pick up on your shore — and bottles you open in the public ocean — are
-              kept here.
+              Letters you pick up on your shore are kept here. A bottle found adrift in the public
+              ocean is read once, where you find it, and is not kept.
             </p>
           </div>
         ) : (
@@ -314,7 +315,7 @@ function PassportView({ id, onBack }: { id: string; onBack: () => void }) {
               <dt>Passages</dt>
               <dd>{Math.max(1, b.route.nodeIds.length - 1)}</dd>
               <dt>Storms</dt>
-              <dd>None</dd>
+              <dd>{b.stormsWeathered === 0 ? 'None' : b.stormsWeathered}</dd>
               {b.deliveredAt ? (
                 <>
                   <dt>Arrived</dt>

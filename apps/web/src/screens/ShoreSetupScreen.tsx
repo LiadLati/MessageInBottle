@@ -48,6 +48,29 @@ export function ShoreSetupScreen({ onDone, onCancel }: Props) {
     setQuery('');
   };
 
+  const onRadioKey = (e: React.KeyboardEvent<HTMLUListElement>) => {
+    const radios = [...e.currentTarget.querySelectorAll<HTMLElement>('[role="radio"]')];
+    const at = radios.indexOf(document.activeElement as HTMLElement);
+    const next =
+      e.key === 'ArrowDown' || e.key === 'ArrowRight'
+        ? radios[(at + 1) % radios.length]
+        : e.key === 'ArrowUp' || e.key === 'ArrowLeft'
+          ? radios[(at - 1 + radios.length) % radios.length]
+          : e.key === 'Home'
+            ? radios[0]
+            : e.key === 'End'
+              ? radios[radios.length - 1]
+              : undefined;
+    if (!next) return;
+    e.preventDefault();
+    const id = next.dataset.shoreId;
+    if (id) {
+      setChoice(id);
+      setFocus(id);
+    }
+    next.focus();
+  };
+
   const save = async () => {
     if (!choice) return;
     setBusy(true);
@@ -99,14 +122,19 @@ export function ShoreSetupScreen({ onDone, onCancel }: Props) {
       ) : null}
     </div>
   );
-  const shoreRow = (s: ShoreDto) => {
+  // A managed radiogroup (audit A11Y-009): one tab stop per list, arrow keys move and select,
+  // so reaching "Save" no longer means tabbing through hundreds of shores.
+  const shoreRow = (s: ShoreDto, index: number, all: ShoreDto[]) => {
     const selected = choice === s.id;
+    const tabStop = selected || (index === 0 && !all.some((x) => x.id === choice));
     return (
       <li key={s.id}>
         <button
           type="button"
           role="radio"
           aria-checked={selected}
+          tabIndex={tabStop ? 0 : -1}
+          data-shore-id={s.id}
           className={`row-item selectable${selected ? ' selected' : ''}`}
           onClick={() => pick(s.id)}
         >
@@ -137,6 +165,7 @@ export function ShoreSetupScreen({ onDone, onCancel }: Props) {
           focusAnchorId={focus}
           onSelectAnchor={(id) => setChoice((c) => (c === id ? null : id))}
           bottomPadding={200}
+          fallbackMessage="The chart needs WebGL, which this browser cannot provide. Search for your harbour by name below instead."
           fitKey="shores"
         />
       </div>
@@ -158,7 +187,12 @@ export function ShoreSetupScreen({ onDone, onCancel }: Props) {
       <div className="shore-search phone-only">
         {searchField('shore-search-phone')}
         {searching ? (
-          <ul className="list shore-results" role="radiogroup" aria-label="Matching shores">
+          <ul
+            className="list shore-results"
+            role="radiogroup"
+            aria-label="Matching shores"
+            onKeyDown={onRadioKey}
+          >
             {filtered.slice(0, 8).map(shoreRow)}
             {filtered.length === 0 ? <li className="t-meta empty">No shore matches.</li> : null}
             {filtered.length > 8 ? (
@@ -210,7 +244,12 @@ export function ShoreSetupScreen({ onDone, onCancel }: Props) {
                 ? `${filtered.length} of ${shores.length} shores`
                 : `${shores.length} shores across every coast`}
             </p>
-            <ul className="list shore-list" role="radiogroup" aria-label="Available shores">
+            <ul
+              className="list shore-list"
+              role="radiogroup"
+              aria-label="Available shores"
+              onKeyDown={onRadioKey}
+            >
               {filtered.map(shoreRow)}
               {filtered.length === 0 ? <li className="t-meta empty">No shore matches.</li> : null}
             </ul>

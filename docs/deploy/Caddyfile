@@ -17,7 +17,9 @@ seayou.example {
 		try_files {path} /index.html
 		file_server
 		header {
-			# MapLibre builds its worker from a blob: URL; tiles and fonts are bundled.
+			# MapLibre builds its worker from a blob: URL; tiles and fonts are bundled. If a tile
+			# provider is configured (VITE_MIB_MAP_TILES_URL), add its origin to connect-src and
+			# img-src, or the map will stay blank.
 			Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self'; worker-src 'self' blob:; frame-ancestors 'none'; base-uri 'none'; form-action 'self'"
 			X-Content-Type-Options nosniff
 			X-Frame-Options DENY

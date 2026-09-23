@@ -10,11 +10,14 @@ interface Props {
   // Present when reached from the profile (the account is usable); absent when the screen is
   // the whole app, i.e. the account is suspended or banned.
   onBack?: (() => void) | undefined;
+  // Offered on the restricted screen: the Terms promise a suspended or banned account can
+  // still delete itself (FE-019).
+  onDeleteAccount?: (() => void) | undefined;
 }
 
 // Account standing (spec §16): every accepted violation, what it means, and one appeal each.
 // A suspended or banned account sees nothing but this screen — and can still sign out.
-export function StandingScreen({ standing, onBack }: Props) {
+export function StandingScreen({ standing, onBack, onDeleteAccount }: Props) {
   const { logout } = useSession();
   const blocked = standing.standing === 'suspended' || standing.standing === 'banned';
   const headline =
@@ -35,6 +38,11 @@ export function StandingScreen({ standing, onBack }: Props) {
         ) : (
           <div className="row" style={{ gap: 8 }}>
             <SupportLink className="btn-ghost" />
+            {onDeleteAccount ? (
+              <button type="button" className="btn-ghost" onClick={onDeleteAccount}>
+                Delete account
+              </button>
+            ) : null}
             <button type="button" className="btn-ghost" onClick={() => void logout()}>
               Sign out
             </button>
@@ -67,7 +75,8 @@ export function StandingScreen({ standing, onBack }: Props) {
           )}
           {blocked ? (
             <p className="t-meta">
-              While {standing.standing}, you can read this page, appeal, and sign out.
+              While {standing.standing}, you can read this page, appeal, get support, delete the
+              account and sign out.
             </p>
           ) : null}
         </div>

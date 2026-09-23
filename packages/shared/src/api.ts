@@ -271,11 +271,17 @@ export const SentBottleSchema = z.object({
   // True when the letter was removed after an accepted report: the text above is empty.
   removed: z.boolean().optional(),
   events: z.array(JourneyEventSchema),
+  // Storm nights this journey has sailed through so far (passport only).
+  stormsWeathered: z.number().int().nonnegative(),
   serverTime: z.string(),
 });
 export type SentBottleDto = z.infer<typeof SentBottleSchema>;
 
-export const SentBottleSummarySchema = SentBottleSchema.omit({ letter: true, events: true });
+export const SentBottleSummarySchema = SentBottleSchema.omit({
+  letter: true,
+  events: true,
+  stormsWeathered: true,
+});
 export type SentBottleSummaryDto = z.infer<typeof SentBottleSummarySchema>;
 
 export const ReleaseResponseSchema = z.object({ bottle: SentBottleSchema });

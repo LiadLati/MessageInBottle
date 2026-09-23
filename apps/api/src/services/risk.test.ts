@@ -109,8 +109,11 @@ describe(`automatic storm outcomes (policy v${RISK_POLICY_VERSION})`, () => {
     w.clock.set(storm.decisionAt - 1);
     expect(processRiskDecisions(w.ctx, w.clock.now()).decided).toBe(0);
     expect(getSentBottle(w.ctx, ada(), id).storms.length).toBeGreaterThan(0);
+    expect(getSentBottle(w.ctx, ada(), id).stormsWeathered).toBe(0);
     w.clock.set(storm.decisionAt);
     expect(processRiskDecisions(w.ctx, w.clock.now()).decided).toBe(1);
+    // The passport counts the storm the journey has now been through (FE-008).
+    expect(getSentBottle(w.ctx, ada(), id).stormsWeathered).toBe(1);
     const row = decisions(id)[0]!;
     expect(row).toMatchObject({
       nightKey: storm.key,

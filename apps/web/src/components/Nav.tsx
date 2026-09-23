@@ -44,9 +44,13 @@ export function Nav({ active, on3d = false, unread = 0, pendingFriends = 0, onSe
             <Icon name={item.icon} />
             <span>{item.label}</span>
             {count > 0 ? (
-              <span className="nav-badge" aria-label={countLabel}>
-                {count > 9 ? '9+' : count}
-              </span>
+              <>
+                {/* aria-label is not allowed on a generic span: say it in text instead. */}
+                <span className="nav-badge" aria-hidden>
+                  {count > 9 ? '9+' : count}
+                </span>
+                <span className="sr-only">{countLabel}</span>
+              </>
             ) : null}
           </button>
         );

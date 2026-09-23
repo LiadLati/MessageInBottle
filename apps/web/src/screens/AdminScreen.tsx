@@ -1,12 +1,15 @@
 import { useState, type ReactNode } from 'react';
-import type {
-  AdminAppealDto,
-  AdminCaseDetailDto,
-  AdminCaseSummaryDto,
-  ReportReason,
+import {
+  countHiddenControls,
+  revealHiddenControls,
+  type AdminAppealDto,
+  type AdminCaseDetailDto,
+  type AdminCaseSummaryDto,
+  type ReportReason,
 } from '@mib/shared';
 import { api } from '../api/client.js';
 import { ConfirmDialog } from '../components/ConfirmDialog.js';
+import { TabList, tabId } from '../components/Tabs.js';
 import { LetterPaper } from '../components/LetterPaper.js';
 import { REPORT_REASON_LABELS } from '../components/ReportSheet.js';
 import { Avatar, BackButton, DeckScreen, ErrorNote, Skeleton } from '../components/ui.js';
@@ -35,40 +38,30 @@ export function AdminScreen({ section, onSection, onBack }: Props) {
   const [selected, setSelected] = useState<string | null>(null);
   const tabs = (
     <div className="row between" style={{ flexWrap: 'wrap', gap: 10 }}>
-      <div className="seg-tabs" role="tablist" aria-label="Admin section">
-        {(['reports', 'appeals'] as const).map((s) => (
-          <button
-            key={s}
-            type="button"
-            role="tab"
-            aria-selected={section === s}
-            className={section === s ? 'active' : ''}
-            onClick={() => {
-              onSection(s);
-              setSelected(null);
-            }}
-          >
-            {s === 'reports' ? 'Reports' : 'Appeals'}
-          </button>
-        ))}
-      </div>
-      <div className="seg-tabs" role="tablist" aria-label="Status">
-        {(['pending', 'accepted', 'rejected'] as const).map((s) => (
-          <button
-            key={s}
-            type="button"
-            role="tab"
-            aria-selected={status === s}
-            className={status === s ? 'active' : ''}
-            onClick={() => {
-              setStatus(s);
-              setSelected(null);
-            }}
-          >
-            {STATUS_LABELS[s]}
-          </button>
-        ))}
-      </div>
+      <TabList
+        base="admin-section"
+        label="Admin section"
+        items={['reports', 'appeals'] as const}
+        selected={section}
+        onSelect={(s) => {
+          onSection(s);
+          setSelected(null);
+        }}
+        labelOf={(s) => (s === 'reports' ? 'Reports' : 'Appeals')}
+        controls={ADMIN_PANEL}
+      />
+      <TabList
+        base="admin-status"
+        label="Status"
+        items={['pending', 'accepted', 'rejected'] as const}
+        selected={status}
+        onSelect={(s) => {
+          setStatus(s);
+          setSelected(null);
+        }}
+        labelOf={(s) => STATUS_LABELS[s]}
+        controls={ADMIN_PANEL}
+      />
     </div>
   );
   return section === 'reports' ? (
@@ -89,6 +82,9 @@ export function AdminScreen({ section, onSection, onBack }: Props) {
     />
   );
 }
+
+// Both tab lists (section and status) control this one panel.
+const ADMIN_PANEL = 'admin-panel';
 
 // ---------- reports ----------
 
@@ -126,7 +122,14 @@ function ReportsSection({
       wide
     >
       {tabs}
-      <div className="stack" aria-live="polite">
+      <div
+        id={ADMIN_PANEL}
+        role="tabpanel"
+        aria-labelledby={`${tabId('admin-section', 'reports')} ${tabId('admin-status', status)}`}
+        tabIndex={0}
+        className="stack"
+        aria-live="polite"
+      >
         {list.loading && !list.data ? (
           <Skeleton />
         ) : cases.length === 0 ? (
@@ -389,7 +392,10 @@ function CaseBody({ c }: { c: AdminCaseDetailDto }) {
               policy. The decision and its reasoning are kept below.
             </p>
           ) : (
-            <LetterPaper text={c.letter.text} font={c.letter.font} readable toolbar="none" />
+            <>
+              <LetterPaper text={c.letter.text} font={c.letter.font} readable toolbar="none" />
+              <HiddenControlsWarning text={c.letter.text} />
+            </>
           )}
         </div>
       </section>
@@ -508,7 +514,14 @@ function AppealsSection({
       wide
     >
       {tabs}
-      <div className="stack" aria-live="polite">
+      <div
+        id={ADMIN_PANEL}
+        role="tabpanel"
+        aria-labelledby={`${tabId('admin-section', 'appeals')} ${tabId('admin-status', status)}`}
+        tabIndex={0}
+        className="stack"
+        aria-live="polite"
+      >
         {list.loading && !list.data ? (
           <Skeleton />
         ) : appeals.length === 0 ? (
@@ -633,5 +646,28 @@ function AppealView({
         />
       ) : null}
     </DeckScreen>
+  );
+}
+
+// A letter can carry invisible bidirectional or zero-width controls, which make the rendered
+// text read differently from what was written (audit SEC-018). The moderator is told, and is
+// shown the text with each control made visible, before deciding on it.
+function HiddenControlsWarning({ text }: { text: string }) {
+  const count = countHiddenControls(text);
+  if (count === 0) return null;
+  return (
+    <div className="note amber stack" role="note">
+      <p>
+        This letter contains{' '}
+        {count === 1
+          ? 'an invisible formatting character'
+          : `${count} invisible formatting characters`}{' '}
+        (text-direction or zero-width controls). They can make the text above read differently from
+        what was written. Here it is with each one shown:
+      </p>
+      <pre className="revealed-text" dir="ltr" style={{ whiteSpace: 'pre-wrap', margin: 0 }}>
+        {revealHiddenControls(text)}
+      </pre>
+    </div>
   );
 }

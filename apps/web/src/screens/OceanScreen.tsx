@@ -15,6 +15,7 @@ import {
 import { Icon } from '../design/Icon.js';
 import { formatDate, formatDuration, formatTime } from '../lib/format.js';
 import { useAsync } from '../lib/useAsync.js';
+import { isWebGLAvailable } from '../lib/webgl.js';
 import { oceanWeatherMap, type BottleWeather } from '../lib/oceanWeather.js';
 import { useSession } from '../state/session.js';
 import { useWeather } from '../state/weather.js';
@@ -152,6 +153,10 @@ export function OceanScreen({
 
   const isPublic = mode === 'public';
   const publicList = useMemo(() => publicOcean.data?.bottles ?? [], [publicOcean.data]);
+  // A list alternative to the map (audit A11Y-012): on request, and always when the chart
+  // cannot be drawn at all, where it is the only way to reach a bottle (FE-006).
+  const [mapDrawable] = useState(isWebGLAvailable);
+  const [listOpen, setListOpen] = useState(false);
   const current = view.kind === 'bottle' ? (list.find((b) => b.id === view.id) ?? null) : null;
   const currentPublic =
     view.kind === 'bottle' ? (publicList.find((b) => b.id === view.id) ?? null) : null;
@@ -216,6 +221,7 @@ export function OceanScreen({
   const [publicError, setPublicError] = useState<Error | null>(null);
   // The dedicated sea viewer: opened only from the card's "View at sea", never from a marker.
   const [viewing, setViewing] = useState<string | null>(null);
+  const showList = view.kind === 'clean' && !viewing && (listOpen || !mapDrawable);
   const viewingBottle = viewing ? (list.find((b) => b.id === viewing) ?? null) : null;
   const focusBottle = current ?? routeBottles[0] ?? null;
   const shoreById = useMemo(
@@ -419,6 +425,8 @@ export function OceanScreen({
           watchIds={isPublic ? [] : sunkIds}
           onSeen={onSeen}
           ariaLabel={isPublic ? 'Public ocean chart' : 'Private ocean chart'}
+          fallbackMessage="The chart needs WebGL, which this browser cannot provide. The bottles are listed below instead."
+
           selectedRouteIds={selectedRouteIds}
           onSelectRoute={selectFromMap}
           phase={phase}
@@ -491,6 +499,20 @@ export function OceanScreen({
         </button>
       </div>
       <div className="zoom-cluster">
+        {mapDrawable ? (
+          <button
+            type="button"
+            className="glass-control map-control"
+            aria-label="List the bottles"
+            aria-pressed={listOpen}
+            onClick={() => {
+              setListOpen((o) => !o);
+              setView({ kind: 'clean' });
+            }}
+          >
+            <Icon name="letters" size={16} />
+          </button>
+        ) : null}
         <button
           type="button"
           className="glass-control map-control"
@@ -524,15 +546,15 @@ export function OceanScreen({
       ) : null}
       {isPublic ? (
         publicOcean.loading && !publicOcean.data ? (
-          <section className="sheet" aria-label="Public ocean">
+          <section className="sheet" tabIndex={0} aria-label="Public ocean">
             <Skeleton />
           </section>
         ) : publicOcean.error && !publicOcean.data ? (
-          <section className="sheet" aria-label="Public ocean">
+          <section className="sheet" tabIndex={0} aria-label="Public ocean">
             <LoadFailed error={publicOcean.error} onRetry={() => void publicOcean.reload()} />
           </section>
         ) : view.kind === 'bottle' && (currentPublic || claimedIds.includes(view.id)) ? (
-          <section className="sheet" aria-label="Adrift bottle">
+          <section className="sheet" tabIndex={0} aria-label="Adrift bottle">
             {currentPublic ? (
               <PublicCard
                 bottle={currentPublic}
@@ -550,7 +572,7 @@ export function OceanScreen({
         ) : publicList.length === 0 ? (
           // After the unavailable card: someone who just lost a race, or whose bottle expired
           // under them, is told why before the map is called empty.
-          <section className="sheet" aria-label="Public ocean">
+          <section className="sheet" tabIndex={0} aria-label="Public ocean">
             <div className="stack">
               <h2 className="t-display-sm">Nothing adrift</h2>
               <p className="t-meta" style={{ fontSize: 13.5 }}>
@@ -558,17 +580,39 @@ export function OceanScreen({
               </p>
             </div>
           </section>
+        ) : showList ? (
+          <section className="sheet" tabIndex={0} aria-label="Bottles adrift">
+            <h2 className="t-card-title">{publicList.length} adrift</h2>
+            <ul className="list" style={{ marginTop: 12 }}>
+              {publicList.map((b) => (
+                <li key={b.id}>
+                  <button
+                    type="button"
+                    className="row-item selectable"
+                    onClick={() => setView({ kind: 'bottle', id: b.id, fromRoute: null })}
+                  >
+                    <span className="grow">
+                      <span className="t-card-title" style={{ display: 'block' }}>
+                        {b.mine ? 'Your bottle' : 'A lost bottle'}
+                      </span>
+                      <span className="t-meta">Adrift since {formatDate(b.lostAt)}</span>
+                    </span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </section>
         ) : null
       ) : bottles.error && !bottles.data ? (
-        <section className="sheet" aria-label="Journey">
+        <section className="sheet" tabIndex={0} aria-label="Journey">
           <LoadFailed error={bottles.error} onRetry={() => void bottles.reload()} />
         </section>
       ) : bottles.loading && !bottles.data ? (
-        <section className="sheet" aria-label="Journey">
+        <section className="sheet" tabIndex={0} aria-label="Journey">
           <Skeleton />
         </section>
       ) : list.length === 0 ? (
-        <section className="sheet" aria-label="Journey">
+        <section className="sheet" tabIndex={0} aria-label="Journey">
           <div className="stack">
             <h2 className="t-display-sm">No bottles at sea</h2>
             <p className="t-meta" style={{ fontSize: 13.5 }}>
@@ -580,8 +624,38 @@ export function OceanScreen({
             <ErrorNote error={loadError} />
           </div>
         </section>
+      ) : showList ? (
+        <section className="sheet" tabIndex={0} aria-label="Your bottles">
+          <h2 className="t-card-title">
+            {list.length === 1 ? 'One bottle' : `${list.length} bottles`}
+          </h2>
+          <ul className="list" style={{ marginTop: 12 }}>
+            {list.map((b) => (
+              <li key={b.id}>
+                <button
+                  type="button"
+                  className="row-item selectable"
+                  onClick={() => setView({ kind: 'bottle', id: b.id, fromRoute: null })}
+                >
+                  <Avatar name={b.recipient.displayName} tone="foam" />
+                  <span className="grow">
+                    <span className="t-card-title" style={{ display: 'block' }}>
+                      To {b.recipient.displayName}
+                    </span>
+                    <span className="t-meta">
+                      {b.state === 'at_sea' ? 'At sea for' : 'Journey took'}{' '}
+                      {formatDuration(b.elapsedMs)}
+                    </span>
+                  </span>
+                  {weatherOf(b.id) === 'storm' ? <StormChip /> : <StatusChip state={b.state} />}
+                </button>
+              </li>
+            ))}
+          </ul>
+          <ErrorNote error={loadError} />
+        </section>
       ) : view.kind === 'route' ? (
-        <section className="sheet" aria-label="Bottles on this route">
+        <section className="sheet" tabIndex={0} aria-label="Bottles on this route">
           <div className="row">
             <div className="grow">
               <h2 className="t-card-title">{routeBottles.length} bottles on this route</h2>
@@ -619,7 +693,7 @@ export function OceanScreen({
           <ErrorNote error={loadError} />
         </section>
       ) : view.kind === 'bottle' && current ? (
-        <section className="sheet" aria-label="Journey">
+        <section className="sheet" tabIndex={0} aria-label="Journey">
           <JourneyCard
             bottle={current}
             weather={weatherOf(current.id)}
@@ -633,7 +707,7 @@ export function OceanScreen({
           <ErrorNote error={loadError} />
         </section>
       ) : loadError ? (
-        <section className="sheet" aria-label="Journey">
+        <section className="sheet" tabIndex={0} aria-label="Journey">
           <ErrorNote error={loadError} />
         </section>
       ) : null}
@@ -907,11 +981,60 @@ function UnavailableCard({ why, onClose }: { why: string; onClose: () => void })
 
 // The admin icon beside the notification icon: drawn only for an admin account (the server
 // refuses every admin request from anyone else). Its menu starts with Reports and Appeals.
+// A menu button that behaves like one (audit A11Y-007): opening focuses the first item, arrow
+// keys move between items, Escape and a click elsewhere close it and return focus.
 function AdminControl({ onOpen }: { onOpen: (section: 'reports' | 'appeals') => void }) {
   const [open, setOpen] = useState(false);
+  const rootRef = useRef<HTMLSpanElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    menuRef.current?.querySelector<HTMLElement>('[role="menuitem"]')?.focus();
+    const onPointer = (e: PointerEvent) => {
+      if (!rootRef.current?.contains(e.target as Node)) setOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      e.preventDefault();
+      setOpen(false);
+      triggerRef.current?.focus();
+    };
+    document.addEventListener('pointerdown', onPointer);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('pointerdown', onPointer);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [open]);
+  const onMenuKey = (e: React.KeyboardEvent) => {
+    const items = [...(menuRef.current?.querySelectorAll<HTMLElement>('[role="menuitem"]') ?? [])];
+    const at = items.indexOf(document.activeElement as HTMLElement);
+    const next =
+      e.key === 'ArrowDown'
+        ? items[(at + 1) % items.length]
+        : e.key === 'ArrowUp'
+          ? items[(at - 1 + items.length) % items.length]
+          : e.key === 'Home'
+            ? items[0]
+            : e.key === 'End'
+              ? items[items.length - 1]
+              : undefined;
+    if (next) {
+      e.preventDefault();
+      next.focus();
+    } else if (e.key === 'Tab') {
+      setOpen(false);
+    }
+  };
+  const choose = (section: 'reports' | 'appeals') => {
+    setOpen(false);
+    onOpen(section);
+  };
   return (
-    <span className="admin-control">
+    <span className="admin-control" ref={rootRef}>
       <button
+        ref={triggerRef}
         type="button"
         className="glass-control"
         aria-label="Admin"
@@ -922,15 +1045,19 @@ function AdminControl({ onOpen }: { onOpen: (section: 'reports' | 'appeals') => 
         <Icon name="shield" size={18} />
       </button>
       {open ? (
-        <div className="glass-panel admin-menu stack" role="menu" aria-label="Admin">
+        <div
+          ref={menuRef}
+          className="glass-panel admin-menu stack"
+          role="menu"
+          aria-label="Admin"
+          onKeyDown={onMenuKey}
+        >
           <button
             type="button"
             role="menuitem"
+            tabIndex={-1}
             className="btn-ghost"
-            onClick={() => {
-              setOpen(false);
-              onOpen('reports');
-            }}
+            onClick={() => choose('reports')}
           >
             <Icon name="report" size={14} />
             Reports
@@ -938,11 +1065,9 @@ function AdminControl({ onOpen }: { onOpen: (section: 'reports' | 'appeals') => 
           <button
             type="button"
             role="menuitem"
+            tabIndex={-1}
             className="btn-ghost"
-            onClick={() => {
-              setOpen(false);
-              onOpen('appeals');
-            }}
+            onClick={() => choose('appeals')}
           >
             <Icon name="archive" size={14} />
             Appeals

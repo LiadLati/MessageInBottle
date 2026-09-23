@@ -1037,13 +1037,20 @@ export function ShoreScene({
   }, [mode]);
 
   return (
-    <div ref={hostRef} className={`shore-scene ${mode}${ready ? ' ready' : ''}`} aria-hidden>
+    // Decorative while it draws; when it cannot, the reason must reach a screen reader too, so
+    // the host stops hiding its contents (audit A11Y-008).
+    <div
+      ref={hostRef}
+      className={`shore-scene ${mode}${ready ? ' ready' : ''}`}
+      aria-hidden={failed ? undefined : true}
+    >
       <div
         className="poster"
+        aria-hidden
         style={{ backgroundImage: `url(${mode === 'throw' ? TEX.skyThrow : TEX.skyShore})` }}
       />
       {failed ? (
-        <p className="scene-fallback">
+        <p className="scene-fallback" role="status">
           {mode === 'sea'
             ? 'Real-time view unavailable on this device.'
             : 'The shore needs WebGL, which this browser cannot provide.'}

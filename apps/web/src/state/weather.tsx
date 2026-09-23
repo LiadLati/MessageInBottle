@@ -82,6 +82,7 @@ export function WeatherProvider({ children }: { children: ReactNode }) {
   // changes: a fresh sign-in must not spend its first tick on the real clock.
   const { user, setUser } = useSession();
   const userId = user?.id ?? null;
+  const isDeveloper = user?.role === 'developer';
   // The account's zone is the authority for its nights. Until the server has heard from a
   // device, or while it cannot be reached, the last known zone stands in; before any account
   // at all, the device's own.
@@ -115,7 +116,8 @@ export function WeatherProvider({ children }: { children: ReactNode }) {
     };
   }, [userId, deviceZone, accountZone, setUser]);
   useEffect(() => {
-    if (!import.meta.env.DEV || !userId) return;
+    // Only a developer may read the dev clock; anyone else would get a 403 twice a minute (FE-021).
+    if (!import.meta.env.DEV || !userId || !isDeveloper) return;
     let alive = true;
     const read = () =>
       void api
@@ -130,7 +132,7 @@ export function WeatherProvider({ children }: { children: ReactNode }) {
       alive = false;
       clearInterval(id);
     };
-  }, [userId]);
+  }, [userId, isDeveloper]);
 
   // Keep the instant fresh while the page is open, and re-read it immediately when a
   // backgrounded tab comes back — a tab restored after midnight must not stay on yesterday.

@@ -1,7 +1,8 @@
 import { useEffect, useId, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { ApiError, api } from '../api/client.js';
-import { focusableIn, nextTabTarget } from '../lib/focusTrap.js';
+import { focusableIn } from '../lib/focusTrap.js';
+import { restoreFocus, useModalKeys } from '../lib/modal.js';
 import { SupportLink } from './SupportLink.js';
 
 // Settings → Delete account. Deletion is permanent, so it asks for the password again (a
@@ -33,27 +34,9 @@ export function DeleteAccountDialog({
     (focusableIn(dialogRef.current!)[0] ?? dialogRef.current)?.focus();
     return () => {
       for (const el of siblings) el.removeAttribute('inert');
-      previous?.focus();
+      restoreFocus(previous);
     };
   }, []);
-
-  const onKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Escape' && !busy) {
-      e.preventDefault();
-      onCancel();
-      return;
-    }
-    if (e.key !== 'Tab' || !dialogRef.current) return;
-    const target = nextTabTarget(
-      focusableIn(dialogRef.current),
-      document.activeElement,
-      e.shiftKey,
-    );
-    if (target) {
-      e.preventDefault();
-      target.focus();
-    }
-  };
 
   const submit = async () => {
     if (!password || !confirmed || busy) return;
@@ -72,8 +55,10 @@ export function DeleteAccountDialog({
     }
   };
 
+  useModalKeys(dialogRef, busy ? null : onCancel);
+
   return createPortal(
-    <div className="confirm-layer" onKeyDown={onKeyDown}>
+    <div className="confirm-layer">
       <div className="confirm-backdrop" onClick={busy ? undefined : onCancel} aria-hidden />
       <div
         ref={dialogRef}

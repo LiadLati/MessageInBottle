@@ -14,6 +14,7 @@ import { SupportLink } from './SupportLink.js';
 import { ErrorNote } from './ui.js';
 import { formatDate } from '../lib/format.js';
 import { focusableIn } from '../lib/focusTrap.js';
+import { useModalKeys } from '../lib/modal.js';
 
 interface Props {
   notice: ViolationNoticeDto;
@@ -39,6 +40,9 @@ export function DecisionNotice({ notice, onResolved }: Props) {
   const [error, setError] = useState<Error | null>(null);
   const ref = useRef<HTMLDivElement>(null);
   const titleId = useId();
+  const bodyId = useId();
+  // Answer-only: no Escape, but Tab stays inside even after focus falls to <body>.
+  useModalKeys(ref, null);
 
   useEffect(() => {
     const siblings = [...document.body.children].filter((el) => el !== ref.current?.parentElement);
@@ -88,6 +92,9 @@ export function DecisionNotice({ notice, onResolved }: Props) {
         role="alertdialog"
         aria-modal="true"
         aria-labelledby={titleId}
+        // The notice's paragraphs are the decision itself: announce them, not just the title
+        // and the first control (audit A11Y-004).
+        aria-describedby={stage === 'appeal' ? undefined : bodyId}
         tabIndex={-1}
       >
         {stage === 'notice' ? (
@@ -95,17 +102,19 @@ export function DecisionNotice({ notice, onResolved }: Props) {
             <h2 id={titleId} className="t-display-sm">
               A decision about a letter you sent
             </h2>
-            <p className="secondary">
-              Your letter to {notice.bottle.recipientDisplayName}, released{' '}
-              {formatDate(notice.bottle.releasedAt)}, was reported for{' '}
-              <strong>{REPORT_REASON_LABELS[notice.category].toLowerCase()}</strong> and, after
-              review by a person, removed for breaking the Community Rules.
-            </p>
-            <p className="secondary">{ladder}</p>
-            <p className="secondary">
-              You can appeal this decision once. Nothing is decided by closing this: it will be
-              shown to you again until you choose.
-            </p>
+            <div id={bodyId} className="stack">
+              <p className="secondary">
+                Your letter to {notice.bottle.recipientDisplayName}, released{' '}
+                {formatDate(notice.bottle.releasedAt)}, was reported for{' '}
+                <strong>{REPORT_REASON_LABELS[notice.category].toLowerCase()}</strong> and, after
+                review by a person, removed for breaking the Community Rules.
+              </p>
+              <p className="secondary">{ladder}</p>
+              <p className="secondary">
+                You can appeal this decision once. Nothing is decided by closing this: it will be
+                shown to you again until you choose.
+              </p>
+            </div>
             <ErrorNote error={error} />
             {/* Wraps at phone width: three actions do not fit on one 390px line, and a
                 decision notice is the last place to hide a button off the edge. */}
@@ -136,7 +145,9 @@ export function DecisionNotice({ notice, onResolved }: Props) {
             <h2 id={titleId} className="t-display-sm">
               {APPEAL_ACTION_CONTINUE}
             </h2>
-            <p className="note amber">{APPEAL_WAIVER_CONFIRMATION}</p>
+            <p id={bodyId} className="note amber">
+              {APPEAL_WAIVER_CONFIRMATION}
+            </p>
             <ErrorNote error={error} />
             <div className="row" style={{ justifyContent: 'flex-end', gap: 8 }}>
               <button

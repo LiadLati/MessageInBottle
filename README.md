@@ -174,7 +174,11 @@ source for the land layer instead, set in `apps/web/.env` (see `.env.example`):
 
 - `VITE_MIB_MAP_TILES_URL` — a TileJSON URL for a vector source
 - `VITE_MIB_MAP_SOURCE_LAYER` — the name of that source's land/coastline layer
-- `VITE_MIB_MAP_ATTRIBUTION` — the provider's attribution text (shown per their terms)
+- `VITE_MIB_MAP_ATTRIBUTION` — the provider's attribution text, shown in a compact attribution
+  control on the map whenever a provider is configured
+
+Any key in that URL is **public**: Vite inlines `VITE_*` values into the JavaScript every visitor
+downloads. Use a key restricted to your domain by the provider, or proxy the tiles.
 
 ### Time of day and simulated weather
 

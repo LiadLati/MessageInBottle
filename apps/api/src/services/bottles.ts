@@ -1,4 +1,4 @@
-import { and, asc, desc, eq } from 'drizzle-orm';
+import { and, asc, desc, eq, isNotNull } from 'drizzle-orm';
 import {
   AgingProfileSchema,
   type AgingProfile,
@@ -185,7 +185,18 @@ export function getSentBottle(ctx: AppContext, user: AuthUser, bottleId: string)
         },
     removed,
     events: eventsFor(ctx, bottle.id),
+    stormsWeathered: stormsWeathered(ctx, bottle.id),
   };
+}
+
+// Storm nights the journey has actually been through: a risk decision was taken with a storm
+// window, whatever it decided. The passport states this rather than a fixed "None" (FE-008).
+function stormsWeathered(ctx: AppContext, bottleId: string): number {
+  return ctx.db
+    .select({ id: t.riskDecisions.id })
+    .from(t.riskDecisions)
+    .where(and(eq(t.riskDecisions.bottleId, bottleId), isNotNull(t.riskDecisions.stormStartsAt)))
+    .all().length;
 }
 
 // The reader's own view of a letter they hold. A bottle **found adrift** carries no sender and

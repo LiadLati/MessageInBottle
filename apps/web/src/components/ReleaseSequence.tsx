@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { prefersReducedMotion } from '../lib/format.js';
+import { useModalKeys } from '../lib/modal.js';
 import { ShoreScene, THROW_BEATS, THROW_TOTAL_S, type ThrowController } from './ShoreScene.js';
 
 export type ReleaseStatus = 'releasing' | 'committed' | 'failed';
@@ -66,11 +67,19 @@ export function ReleaseSequence({ status, onFinished, onFailed }: Props) {
     if (done && status === 'committed') onFinished();
   }, [done, status, onFinished]);
 
+  // A real modal (audit A11Y-011): focus starts on Skip, Escape skips, Tab stays inside.
+  const rootRef = useRef<HTMLDivElement>(null);
+  const skipRef = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    skipRef.current?.focus();
+  }, []);
+
   const skip = () => {
     setDone(true);
     controllerRef.current?.seek(THROW_TOTAL_S);
     setT(THROW_TOTAL_S);
   };
+  useModalKeys(rootRef, skip);
 
   const beatIndex = Math.max(
     0,
@@ -82,7 +91,15 @@ export function ReleaseSequence({ status, onFinished, onFailed }: Props) {
   const waiting = done && status === 'releasing';
 
   return (
-    <div className="world-screen" role="dialog" aria-label="Releasing the bottle" onClick={skip}>
+    <div
+      ref={rootRef}
+      className="world-screen"
+      role="dialog"
+      aria-modal="true"
+      aria-label="Releasing the bottle"
+      tabIndex={-1}
+      onClick={skip}
+    >
       <div className="world-layer">
         <ShoreScene
           mode="throw"
@@ -93,7 +110,7 @@ export function ReleaseSequence({ status, onFinished, onFailed }: Props) {
         />
       </div>
       <div className="scrim scrim-throw" />
-      <div className="beat-title" aria-live="polite">
+      <div className="beat-title">
         <div className="t-eyebrow">
           Beat {String(beatIndex + 1).padStart(2, '0')} of{' '}
           {String(THROW_BEATS.length).padStart(2, '0')}
@@ -103,7 +120,7 @@ export function ReleaseSequence({ status, onFinished, onFailed }: Props) {
       <div className="transport" onClick={(e) => e.stopPropagation()}>
         <div className="status">
           <span className="pulse-dot" aria-hidden />
-          <span className="grow">
+          <span className="grow" role="status">
             {status === 'committed' ? 'The sea has it.' : 'Releasing to the sea…'}
           </span>
           <span className="t-numeric" style={{ color: 'rgba(255,248,236,.7)' }}>
@@ -121,7 +138,7 @@ export function ReleaseSequence({ status, onFinished, onFailed }: Props) {
               .map((b) => b.name)
               .join(' · ')}
           </span>
-          <button type="button" onClick={skip} disabled={done}>
+          <button ref={skipRef} type="button" onClick={skip} disabled={done}>
             skip
           </button>
         </div>

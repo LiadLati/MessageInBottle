@@ -97,6 +97,7 @@ export function page(options: {
   description: string;
   slug: string;
   body: string;
+  robots?: string;
 }): string {
   return `<!doctype html>
 <html lang="en" dir="ltr">
@@ -104,7 +105,7 @@ export function page(options: {
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="description" content="${esc(options.description)}">
-<meta name="robots" content="index, follow">
+<meta name="robots" content="${options.robots ?? 'index, follow'}">
 <title>${esc(options.title)} — SeaYou</title>
 <style>${STYLE}</style>
 </head>
@@ -202,6 +203,19 @@ ${error}
 <button type="submit">Permanently delete my account</button>
 </form>
 </div>`,
+  });
+}
+
+// An unknown address under /legal gets a page, not an API error body: these are the URLs store
+// reviewers and regulators follow (audit FE-018).
+export function notFoundPage(): string {
+  return page({
+    title: 'Page not found',
+    description: 'This SeaYou legal page does not exist.',
+    slug: '',
+    robots: 'noindex',
+    body: `<h1>Page not found</h1>
+<p>There is no document at this address. Every published document is listed on the <a href="/legal">Legal and safety</a> page.</p>`,
   });
 }
 

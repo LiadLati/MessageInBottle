@@ -13,7 +13,13 @@ import { RateLimiter, type RateLimitRule } from '../../lib/rate-limit.js';
 import { login } from '../../services/auth.js';
 import { deleteAccount, verifyAccountPassword } from '../../services/deletion.js';
 import type { AppEnv } from '../app.js';
-import { documentPage, deletionDonePage, deletionPage, page } from '../legal-pages.js';
+import {
+  documentPage,
+  deletionDonePage,
+  deletionPage,
+  notFoundPage,
+  page,
+} from '../legal-pages.js';
 
 // The public legal surface: unauthenticated HTML at stable URLs, suitable for a store listing.
 // Nothing here needs a session, JavaScript or a PDF reader, and the deletion form below is a
@@ -92,7 +98,7 @@ export function legalRoutes(limiter = new RateLimiter()) {
 
   r.get('/:slug', (c) => {
     const doc = publishedDocumentBySlug(c.req.param('slug'));
-    if (!doc) return c.notFound();
+    if (!doc) return c.html(notFoundPage(), 404, { 'cache-control': 'no-store' });
     return html(c, documentPage(doc));
   });
 

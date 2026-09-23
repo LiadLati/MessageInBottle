@@ -924,8 +924,9 @@ button.avatar {
   min-height: var(--min-touch);
   padding: 4px 2px;
   border-radius: 12px;
-  color: rgba(222, 234, 233, 0.5);
-  font-size: 9.5px;
+  /* 4.5:1 on every backdrop the bar floats over, at a readable size (audit A11Y-002). */
+  color: var(--text-secondary);
+  font-size: var(--min-type);
   font-weight: 500;
   letter-spacing: 0.2px;
 }
@@ -1663,7 +1664,7 @@ button.avatar {
     padding: 15px;
   }
 }
-@media (min-width: 900px) {
+@media (min-width: 900px), (orientation: landscape) and (max-height: 520px) and (min-width: 560px) {
   .app-viewport {
     padding-left: var(--rail-width);
   }
@@ -1801,7 +1802,8 @@ button.avatar {
   min-height: 36px;
   padding: 0 18px;
   border-radius: 999px;
-  color: var(--text-faint);
+  /* Inactive tabs are live controls, not disabled ones: they need full text contrast. */
+  color: var(--text-secondary);
   font-size: 13.5px;
   font-weight: 600;
 }
@@ -1934,7 +1936,7 @@ button.avatar {
     transform: translateY(18px) scale(0.985);
   }
 }
-@media (min-width: 900px) {
+@media (min-width: 900px), (orientation: landscape) and (max-height: 520px) and (min-width: 560px) {
   .letter-modal {
     padding: 32px 32px 32px calc(var(--rail-width) + 32px);
   }
@@ -1966,7 +1968,13 @@ button.avatar {
     rgba(255, 255, 255, 0.1),
     rgba(9, 44, 62, 0.42) 80%
   );
-  --scrim-map-header: linear-gradient(rgba(4, 24, 34, 0.62), rgba(4, 24, 34, 0));
+  --scrim-map-header: linear-gradient(rgba(4, 24, 34, 0.74), rgba(4, 24, 34, 0));
+}
+/* The day map is bright: the header subline is the only hint that the map is tappable, so it
+   gets the stronger text colour and a shadow to hold 4.5:1 (audit A11Y-002). */
+.app-viewport[data-daylight='day'] .world-header .t-meta {
+  color: var(--text-secondary);
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.7);
 }
 /* Day and night swap over 600ms on the map's own clock; the chrome follows on the same feel. */
 .app-viewport .scrim-map,
@@ -2108,7 +2116,7 @@ button.avatar {
     opacity: 1;
   }
 }
-@media (min-width: 900px) {
+@media (min-width: 900px), (orientation: landscape) and (max-height: 520px) and (min-width: 560px) {
   .world-screen.two-pane .hint-pill {
     left: calc((100% - var(--pane-width)) / 2);
     bottom: 28px;
@@ -2276,7 +2284,7 @@ button.avatar {
     transform: none;
   }
 }
-@media (min-width: 900px) {
+@media (min-width: 900px), (orientation: landscape) and (max-height: 520px) and (min-width: 560px) {
   .sea-viewer {
     left: var(--rail-width);
     right: var(--pane-width);
@@ -2724,4 +2732,18 @@ button.avatar {
 }
 .confirm-dialog .checkbox-row {
   margin-top: 12px;
+}
+
+/* A phone held in landscape: too short for a bottom sheet over the map, which covered the map
+   controls and the Private/Public switch (audit FE-004). It takes the side-pane layout above,
+   with a narrower pane and rail so the map keeps a usable width. */
+@media (orientation: landscape) and (max-height: 520px) and (min-width: 560px) and (max-width: 899px) {
+  :root {
+    --rail-width: 72px;
+    --pane-width: min(320px, 45vw);
+  }
+  .mode-switch,
+  .zoom-cluster {
+    top: calc(var(--header-pad-top) + 64px);
+  }
 }

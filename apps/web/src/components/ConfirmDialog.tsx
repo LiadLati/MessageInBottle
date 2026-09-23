@@ -1,6 +1,7 @@
 import { useEffect, useId, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { focusableIn, nextTabTarget } from '../lib/focusTrap.js';
+import { focusableIn } from '../lib/focusTrap.js';
+import { restoreFocus, useModalKeys } from '../lib/modal.js';
 
 interface Props {
   title: string;
@@ -53,30 +54,14 @@ export function ConfirmDialog({
     (focusables[0] ?? dialogRef.current)?.focus();
     return () => {
       for (const el of siblings) el.removeAttribute('inert');
-      previous?.focus();
+      restoreFocus(previous);
     };
   }, []);
 
-  const onKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Escape') {
-      e.preventDefault();
-      if (!busy) onCancel();
-      return;
-    }
-    if (e.key !== 'Tab' || !dialogRef.current) return;
-    const target = nextTabTarget(
-      focusableIn(dialogRef.current),
-      document.activeElement,
-      e.shiftKey,
-    );
-    if (target) {
-      e.preventDefault();
-      target.focus();
-    }
-  };
+  useModalKeys(dialogRef, busy ? null : onCancel);
 
   return createPortal(
-    <div className="confirm-layer" onKeyDown={onKeyDown}>
+    <div className="confirm-layer">
       <div className="confirm-backdrop" onClick={busy ? undefined : onCancel} aria-hidden />
       <div
         ref={dialogRef}

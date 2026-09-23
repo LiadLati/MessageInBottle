@@ -20,6 +20,8 @@ import 'maplibre-gl/dist/maplibre-gl.css';
 import type { Feature } from 'geojson';
 import type { GeoPoint } from '@mib/shared';
 import { prefersReducedMotion } from '../lib/format.js';
+import { isWebGLAvailable } from '../lib/webgl.js';
+import { sidePaneLayout } from '../lib/layout.js';
 import type { BottleWeather } from '../lib/oceanWeather.js';
 import {
   assertMapStylePolicy,
@@ -80,6 +82,9 @@ interface Props {
   watchIds?: string[];
   onSeen?: (id: string) => void;
   ariaLabel?: string;
+  // What to say when the chart cannot be drawn: each screen knows what it offers instead
+  // (audit FE-006). The default promises nothing.
+  fallbackMessage?: string;
   // Time of day for the map palette. Changing it tweens paint properties in place: the camera,
   // sources, routes, markers and any open selection are untouched.
   phase?: MapPhase;
@@ -278,15 +283,6 @@ function tween(ms: number, onStep: (k: number) => void): () => void {
   return () => cancelAnimationFrame(raf);
 }
 
-export function isWebGLAvailable(): boolean {
-  try {
-    const c = document.createElement('canvas');
-    return Boolean(c.getContext('webgl2') ?? c.getContext('webgl'));
-  } catch {
-    return false;
-  }
-}
-
 export function OceanMap({
   routes,
   anchors,
@@ -298,6 +294,7 @@ export function OceanMap({
   watchIds = EMPTY_SELECTION,
   onSeen,
   ariaLabel = 'Private ocean chart',
+  fallbackMessage = 'The chart needs WebGL, which this browser cannot provide.',
   phase = 'night',
   weather = EMPTY_WEATHER,
   paused = false,
@@ -364,7 +361,7 @@ export function OceanMap({
         : as.map((a) => a.geo);
     const b = boundsOf(points);
     if (!b) return;
-    const wide = map.getContainer().clientWidth >= 900;
+    const wide = sidePaneLayout();
     // Keep routes clear of the header, the mode switch / zoom cluster and the sheet; scale the
     // paddings down on short viewports so they never exceed the container.
     let top = wide ? 170 : 250;
@@ -418,6 +415,11 @@ export function OceanMap({
             el.type = 'button';
             el.className = 'map-shore-cluster';
             el.textContent = String(c.members.length);
+            // Shore pins are a pointer shortcut: every screen that shows them also lists the
+            // same shores as text or as a radiogroup, so they stay out of the tab order and
+            // the accessibility tree instead of putting ~96 stops before it (A11Y-009).
+            el.tabIndex = -1;
+            el.setAttribute('aria-hidden', 'true');
             el.setAttribute('aria-label', `${c.members.length} shores, activate to zoom in`);
             el.addEventListener('click', (ev) => {
               ev.stopPropagation();
@@ -445,6 +447,8 @@ export function OceanMap({
             el.type = 'button';
             el.className = 'map-shore-pin';
             el.innerHTML = `<span class="leg"></span><span class="dot"></span><span class="label"></span>`;
+            el.tabIndex = -1;
+            el.setAttribute('aria-hidden', 'true');
             el.addEventListener('click', (ev) => {
               ev.stopPropagation();
               latest.current.onSelectAnchor?.(member.id);
@@ -548,7 +552,7 @@ export function OceanMap({
     if (!cb || ids.length === 0 || covered || document.visibilityState !== 'visible') return;
     const w = map.getContainer().clientWidth;
     const h = map.getContainer().clientHeight;
-    const wide = w >= 900;
+    const wide = sidePaneLayout();
     const bottomLimit = h - (wide ? 0 : pad);
     for (const id of ids) {
       if (seenRef.current.has(id)) continue;
@@ -577,7 +581,12 @@ export function OceanMap({
       dragRotate: false,
       pitchWithRotate: false,
       touchPitch: false,
-      attributionControl: false,
+      // The bundled Natural Earth geometry is public domain and needs no credit; a configured
+      // tile provider's attribution is always shown, as its terms require (audit: FE
+      // deployment item 3).
+      attributionControl: import.meta.env.VITE_MIB_MAP_TILES_URL
+        ? { compact: true, customAttribution: import.meta.env.VITE_MIB_MAP_ATTRIBUTION ?? '' }
+        : false,
       fadeDuration: 240,
     });
     map.touchZoomRotate.disableRotation();
@@ -909,11 +918,7 @@ export function OceanMap({
   return (
     <div className="ocean-map" ref={containerRef} role="region" aria-label={ariaLabel}>
       {!loaded && !unsupported ? <div className="map-fade" /> : null}
-      {unsupported ? (
-        <p className="scene-fallback">
-          The chart needs WebGL, which this browser cannot provide. Your bottles are listed below.
-        </p>
-      ) : null}
+      {unsupported ? <p className="scene-fallback">{fallbackMessage}</p> : null}
     </div>
   );
 }

@@ -517,6 +517,35 @@ export function submitAppeal(
 
 // ---------- the sender's notifications ----------
 
+// A person reads "until 30 September 2026, 01:15 CEST" in their own account zone, not an RFC
+// 1123 UTC string (audit FE-022). An account without a usable zone is told the zone is UTC.
+export function suspensionEnd(untilMs: number, timeZone: string | null): string {
+  const format = (zone: string) =>
+    new Intl.DateTimeFormat('en-GB', {
+      dateStyle: 'long',
+      timeStyle: 'short',
+      timeZone: zone,
+    }).format(new Date(untilMs));
+  if (timeZone) {
+    try {
+      const zoneName =
+        new Intl.DateTimeFormat('en-GB', { timeZone, timeZoneName: 'short' })
+          .formatToParts(new Date(untilMs))
+          .find((p) => p.type === 'timeZoneName')?.value ?? timeZone;
+      return `${format(timeZone)} ${zoneName}`;
+    } catch {
+      /* an unknown zone falls through to UTC */
+    }
+  }
+  return `${format('UTC')} UTC`;
+}
+
+function accountZone(tx: DbOrTx, userId: string): string | null {
+  return (
+    tx.select({ z: t.users.timeZone }).from(t.users).where(eq(t.users.id, userId)).get()?.z ?? null
+  );
+}
+
 // One row per event, deduplicated by key: retries and concurrent decisions insert nothing new.
 export function notifyStanding(
   tx: DbOrTx,
@@ -543,7 +572,7 @@ export function notifyStanding(
       kind: 'moderation_suspended',
       bottleId: null,
       dedupeKey: `suspended:${violation.id}`,
-      message: `${base} This is your second accepted violation: your account is suspended for seven days, until ${new Date(standing.suspendedUntil!).toUTCString()}. Another accepted violation means a permanent ban.`,
+      message: `${base} This is your second accepted violation: your account is suspended for seven days, until ${suspensionEnd(standing.suspendedUntil!, accountZone(tx, userId))}. Another accepted violation means a permanent ban.`,
       now,
     });
   } else {
@@ -565,6 +594,6 @@ export function assertNotRestricted(ctx: AppContext, user: AuthUser): void {
   throw forbidden(
     s.standing === 'banned'
       ? 'This account is permanently banned.'
-      : `This account is suspended until ${new Date(s.suspendedUntil!).toUTCString()}.`,
+      : `This account is suspended until ${suspensionEnd(s.suspendedUntil!, accountZone(ctx.db, user.id))}.`,
   );
 }

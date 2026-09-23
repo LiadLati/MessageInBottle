@@ -128,6 +128,8 @@
   --top-stack: calc(var(--slot-dev, 0px) + var(--slot-banner, 0px));
   --header-pad-top: calc(max(14px, var(--safe-top)) + var(--top-stack));
   --nav-icon: 21px;
+  /* The smallest text any control may use. */
+  --min-type: 11px;
   --write-pill-size: 46px;
   --button-primary-height: 52px;
   --button-secondary-height: 46px;

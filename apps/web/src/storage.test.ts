@@ -82,18 +82,17 @@ describe('what SeaYou stores in the browser', () => {
     }
   });
 
-  it('clears the session token and the time zone on sign-out', () => {
+  // The promises themselves are proven by behaviour, not by these files' text:
+  // state/session.test.tsx signs out and inspects storage, lib/draft.test.ts and
+  // screens/WriteScreen.test.tsx send a letter and check the draft is gone (audit QA-008).
+  // What stays here is the cheap backstop: the clean-up code exists where it should.
+  it('keeps the clean-up code the behavioural tests exercise', () => {
     const session = bodies.get(path.join(SRC, 'state', 'session.tsx'))!;
-    // Signing out drops the token…
     expect(session).toMatch(/sessionStorage\.removeItem\(STORAGE_KEY\)/);
-    // …and every other key this app owns, so nothing of the account survives the sign-out.
     expect(session).toMatch(/sessionStorage\.removeItem\(sessionKey\)/);
     expect(session).toMatch(/localStorage\.removeItem\(localKey\)/);
-  });
-
-  it('clears the unsent letter once it has been sent', () => {
-    const write = bodies.get(path.join(SRC, 'screens', 'WriteScreen.tsx'))!;
-    expect(write).toMatch(/sessionStorage\.removeItem\(DRAFT_KEY\)/);
+    const draft = bodies.get(path.join(SRC, 'lib', 'draft.ts'))!;
+    expect(draft).toMatch(/sessionStorage\.removeItem\(DRAFT_KEY\)/);
   });
 
   it('says all of this, and only this, in the Privacy Policy', () => {

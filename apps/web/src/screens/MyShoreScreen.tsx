@@ -116,7 +116,7 @@ export function MyShoreScreen({ onOpenProfile, onChooseShore }: Props) {
           </span>
         </aside>
       ) : null}
-      <section className="sheet on-3d" aria-label="Arrivals">
+      <section className="sheet on-3d" tabIndex={0} aria-label="Arrivals">
         {shore.error && !shore.data ? (
           <LoadFailed error={shore.error} onRetry={() => void shore.reload()} />
         ) : shore.loading && !shore.data ? (

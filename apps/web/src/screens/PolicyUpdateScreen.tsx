@@ -46,7 +46,7 @@ export function PolicyUpdateScreen({ onOpen }: { onOpen: (doc: DocumentId) => vo
     <main className="login-screen">
       <div className="scrim" />
       <div className="login-card">
-        <span className="t-eyebrow">Before you continue</span>
+        {firstTime ? null : <span className="t-eyebrow">Before you continue</span>}
         <h1 className="t-display">
           {firstTime ? 'Before you continue' : 'The terms have changed'}
         </h1>
