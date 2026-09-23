@@ -1,7 +1,8 @@
 // Visual fonts affect presentation only (spec §10.1). Families follow the design handoff
-// (FONTS.md): four OFL letter faces chosen for shape as placeholders for licensed faces, with
-// script fallbacks so unsupported scripts render in a serif rather than tofu. The identifiers
-// below are what is stored with a letter; changing a family never changes stored text.
+// (docs/FONTS.md): four open-licence letter faces (three OFL-1.1, Special Elite Apache-2.0)
+// chosen for shape as placeholders for licensed faces, with script fallbacks so unsupported
+// scripts render in a serif rather than tofu. The identifiers below are what is stored with a
+// letter; changing a family never changes stored text.
 export const LETTER_FONTS = ['handwriting', 'calligraphy', 'typewriter', 'print'] as const;
 export type LetterFont = (typeof LETTER_FONTS)[number];
 

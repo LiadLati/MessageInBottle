@@ -3,7 +3,7 @@
 ## Product Specification — v1.0
 
 Date: 22 September 2026  
-Status: Describes the system as built. Every rule below is implemented and covered by tests unless it is marked **Open**.  
+Status: Describes the system as built, except where noted. **Known drift (audit QA-025, 2026-09-23):** §11 "As built" and §18 were reconciled with the code; the vision (§1), §9 intro and event table, §10.1–10.3, §11 invariants and §19–§21 still carry earlier wording about stranding, rescue and discard, which the product does not have. Where they disagree, §11 "As built", §18 and the code win.  
 Supersedes: v0.2 revised product baseline  
 Product name: SeaYou
 
@@ -321,6 +321,8 @@ Whether the recipient sees the completed route after arrival is open. The public
 
 The following model separates journey state from weather, moderation, and archive placement. This avoids treating a storm alert or a visual animation as an independent delivery state.
 
+**As built (amended 2026-09-23).** The server writes five journey states (`packages/shared/src/bottle-state.ts`): `at_sea` → `delivered` → `opened`; `at_sea` → `lost`, with loss reason `adrift` (listed on the public map for 72 hours from the loss, with a one-time reading for its single finder, then permanently removed — §9.2–9.3) or `sunk` (private to the sender); and `at_sea` → `cancelled` (a block or an inactive recipient at arrival, or an account deletion). `opened`, `lost` and `cancelled` are terminal. Drafts are kept on the client, not as a server state. The diagram and table below are the earlier design and are kept for history: StrandedPublic, Rescue, Discarded and PublicExpired do not exist — public expiry is recorded on a lost bottle, not as a state.
+
 ```mermaid
 stateDiagram-v2
     [*] --> Draft
@@ -602,6 +604,8 @@ Web/PWA versus native mobile, stack, database, map provider, hosting, and animat
 
 Confirmed behavior and proposed safeguards to verify once the relevant decisions are approved:
 
+Amended 2026-09-23: criteria 9, 11–15, 17 and 21 now describe the shipped outcomes (adrift, sunk, cancelled — §9.2–9.3, §11 "As built"). Rescue, discard and a chosen fate after public expiry are not part of the product. This amendment corrects wording only; it does not mark any criterion as verified.
+
 1. Sender selects a friend; self-send is rejected and repeat sends to that friend are supported.
 2. Release fails safely for invalid recipients, blocks, full capacity, unsupported routes, or rejected content; the draft remains intact.
 3. Retried release creates exactly one bottle and one reservation.
@@ -610,19 +614,19 @@ Confirmed behavior and proposed safeguards to verify once the relevant decisions
 6. Sender sees dashed destination route, current simulated position, elapsed time, and all their outgoing history.
 7. Recipient cannot retrieve the incoming bottle or receive prearrival alerts through any ordinary endpoint.
 8. Storm resolution is consistent across clients and retries; loss remains terminal.
-9. Stranding creates one public listing and a noninteractive private marker, with sender notification.
+9. A bottle lost adrift creates one public listing and a pennant on the sender's own map, with one sender notification; a sunk bottle is private to the sender.
 10. Public projection does not expose private destination or recipient fields under the proposed privacy policy.
-11. Read, rescue, and discard honor eligibility, moderation, deadline, and version checks.
-12. Concurrent rescue/discard/expiry cannot produce more than one winning transition.
-13. Rescue retains original text, recipient, timestamp, and reserved capacity; visitors cannot append notes.
-14. After three days, the listing and its read/action access expire; the chosen subsequent fate is tested before release.
-15. A discarded, sunk, destroyed, or cancelled bottle can never arrive later.
+11. Opening an adrift bottle honors eligibility (never the sender, never across a block), moderation, and the 72-hour deadline.
+12. Concurrent openings and expiry cannot produce more than one winner: at most one finder opens a bottle, and never at or after its deadline.
+13. Opening an adrift bottle changes nothing in the sender's record: the letter, recipient and timestamps are kept, the bottle stays lost, the intended recipient is never delivered to, and the finder cannot append notes or reopen the letter after the one-time reading.
+14. After exactly 72 hours from the loss, an unopened adrift bottle is permanently removed from the public map, is never delivered, and the sender is notified once.
+15. A lost (adrift or sunk) or cancelled bottle can never arrive later.
 16. Changing device time or client refresh frequency cannot affect arrival or risk.
-17. Opening completes the journey without a keep/rerelease prompt. Public reading is not recipient opening.
+17. Opening completes the journey; there is no keep or re-release step. A finder's public reading is not recipient opening.
 18. Unread notification is sent only while still unopened and does not independently cause publication or deletion.
 19. Font changes never rewrite wording; Readable Print preserves text exactly, including supported RTL and Unicode content.
 20. Aging never removes characters or blocks accessible reading.
-21. Blocking during transit cannot be bypassed by rescue, public visibility, or delayed arrival work.
+21. Blocking during transit cannot be bypassed by public visibility or delayed arrival work: a block in either direction cancels the journey at arrival and hides an adrift bottle from anyone blocked by, or blocking, its sender.
 22. Worker recovery, notification retries, and failure handling do not duplicate events or free capacity twice.
 23. Reduced-motion and list alternatives support every essential action without sound, GPS, or push permission.
 24. Restricted/withdrawn content is unavailable through old links and ordinary cached responses; terminal records remain consistent.

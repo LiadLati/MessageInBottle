@@ -1,8 +1,10 @@
-// Journey state: only the states the server actually writes (audit ARCH-025). A bottle is at
-// sea, then either delivered (and later opened) or lost; an account deletion cancels one that
-// has not arrived. The v0.2 states `stranded_public`, `public_expired` and `discarded` were
-// never produced by any code path and are gone: an adrift bottle is `lost` with loss reason
-// `adrift`, and its public listing is tracked by `public_deadline_at` / `public_expired_at`.
+// Journey state (docs/SeaYou_Product_Specification.md §11, "As built", and §9.2–9.3): only the
+// states the server actually writes (audit ARCH-025). A bottle is at sea, then either delivered
+// (and later opened) or lost; a block, an inactive recipient or an account deletion cancels one
+// that has not arrived. The earlier design's states `stranded_public`, `public_expired` and
+// `discarded` were never produced by any code path and are gone: an adrift bottle is `lost`
+// with loss reason `adrift`, and its public listing is tracked by `public_deadline_at` /
+// `public_expired_at`.
 export const BOTTLE_STATES = ['at_sea', 'delivered', 'opened', 'lost', 'cancelled'] as const;
 export type BottleState = (typeof BOTTLE_STATES)[number];
 

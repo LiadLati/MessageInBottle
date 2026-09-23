@@ -1,7 +1,7 @@
 # Architecture notes — stage 3 foundation
 
 This document records the decisions taken to start implementation from an empty repository. The
-product specification (v0.2) remains the source of truth; where the specification leaves a decision
+product specification (`docs/SeaYou_Product_Specification.md`) remains the source of truth; where the specification leaves a decision
 open (D01–D13) the code uses a clearly labelled, configurable placeholder and does not pretend the
 decision has been made.
 
@@ -69,7 +69,7 @@ Rules live in `services/` and are tested directly against an in-memory database
   targets and are never used as through-passages by the planner.
 - `letters` — immutable text, character count, original font, disclosure version.
 - `bottles` — sender/recipient/letter refs, **snapshots** of names and shores taken at release,
-  `state` (full v0.2 enum), optimistic `version`, `moderation_status`, timestamps, `loss_reason`,
+  `state` (`at_sea`, `delivered`, `opened`, `lost`, `cancelled`), optimistic `version`, `moderation_status`, timestamps, `loss_reason`,
   frozen `aging_profile`, and the persisted outcome (`outcome_at`, `outcome_progress`, chart/geo
   position) once the sea ends a journey.
 - `bottle_outcome_views` — per (user, bottle): when a terminal marker was first seen inside the
