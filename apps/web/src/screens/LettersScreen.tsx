@@ -8,6 +8,7 @@ import {
   BackButton,
   DeckScreen,
   ErrorNote,
+  LoadFailed,
   OutcomeChip,
   Skeleton,
   StatusChip,
@@ -70,7 +71,9 @@ function SentHistory({ onSelect, tabs }: { onSelect: (id: string) => void; tabs:
         aria-labelledby="letters-tab-sent"
         className="stack"
       >
-        {sent.loading && !sent.data ? (
+        {sent.error && !sent.data ? (
+          <LoadFailed error={sent.error} onRetry={() => void sent.reload()} />
+        ) : sent.loading && !sent.data ? (
           <Skeleton />
         ) : list.length === 0 ? (
           <div className="glass-panel stack">
@@ -101,7 +104,7 @@ function SentHistory({ onSelect, tabs }: { onSelect: (id: string) => void; tabs:
             ))}
           </ul>
         )}
-        <ErrorNote error={sent.error} />
+        {sent.data ? <ErrorNote error={sent.error} /> : null}
       </div>
     </DeckScreen>
   );
@@ -186,7 +189,7 @@ function LostHistory({
             ))}
           </ul>
         )}
-        <ErrorNote error={sent.error} />
+        {sent.data ? <ErrorNote error={sent.error} /> : null}
       </div>
     </DeckScreen>
   );
@@ -216,7 +219,9 @@ function ReceivedHistory({ tabs }: { tabs: ReactNode }) {
         aria-labelledby="letters-tab-received"
         className="stack"
       >
-        {received.loading && !received.data ? (
+        {received.error && !received.data ? (
+          <LoadFailed error={received.error} onRetry={() => void received.reload()} />
+        ) : received.loading && !received.data ? (
           <Skeleton />
         ) : list.length === 0 ? (
           <div className="glass-panel stack">
@@ -260,7 +265,7 @@ function ReceivedHistory({ tabs }: { tabs: ReactNode }) {
             ))}
           </ul>
         )}
-        <ErrorNote error={error ?? received.error} />
+        <ErrorNote error={error ?? (received.data ? received.error : null)} />
       </div>
       {reading ? (
         <LetterModal

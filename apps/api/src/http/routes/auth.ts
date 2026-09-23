@@ -29,7 +29,31 @@ import { jsonBody } from '../validate.js';
 // Attempt budgets per client address and, for sign-in, per target account. Both are counted
 // before the credentials are checked so guessing costs the same whether or not it succeeds.
 export const LOGIN_PER_ADDRESS: RateLimitRule = { limit: 20, windowMs: 15 * 60 * 1000 };
-export const LOGIN_PER_ACCOUNT: RateLimitRule = { limit: 10, windowMs: 15 * 60 * 1000 };
+// Failed sign-ins are counted per (account, address) — ten from one address lock only that
+// address out of that account — and per account across all addresses, with a much larger
+// ceiling that only a distributed attack reaches. A single third party can therefore no longer
+// keep an account locked, including a banned account whose only remaining action is to sign
+// in and appeal (audit SEC-008). A success clears both.
+export const LOGIN_PER_ACCOUNT_ADDRESS: RateLimitRule = { limit: 10, windowMs: 15 * 60 * 1000 };
+export const LOGIN_PER_ACCOUNT: RateLimitRule = { limit: 100, windowMs: 15 * 60 * 1000 };
+
+export function signInKeys(username: string, address: string): string[] {
+  const account = `login:user:${normalizeUsername(username)}`;
+  return [`${account}:addr:${address}`, account];
+}
+
+// Counts one credential attempt against an account's budgets (sign-in, and the public account
+// deletion form, which checks the same credentials — audit ARCH-009).
+export function chargeSignIn(limiter: RateLimiter, username: string, address: string) {
+  const [pair, account] = signInKeys(username, address);
+  const byPair = limiter.hit(pair!, LOGIN_PER_ACCOUNT_ADDRESS);
+  if (!byPair.allowed) return byPair;
+  return limiter.hit(account!, LOGIN_PER_ACCOUNT);
+}
+
+export function clearSignIn(limiter: RateLimiter, username: string, address: string): void {
+  for (const key of signInKeys(username, address)) limiter.reset(key);
+}
 export const REGISTER_PER_ADDRESS: RateLimitRule = { limit: 10, windowMs: 60 * 60 * 1000 };
 export const FORGOT_PER_ADDRESS: RateLimitRule = { limit: 5, windowMs: 15 * 60 * 1000 };
 export const FORGOT_PER_EMAIL: RateLimitRule = { limit: 3, windowMs: 60 * 60 * 1000 };
@@ -58,12 +82,13 @@ export function authRoutes(limiter = new RateLimiter()) {
 
   r.post('/login', jsonBody(LoginRequestSchema), (c) => {
     const body = c.req.valid('json');
-    const accountKey = `login:user:${normalizeUsername(body.username)}`;
-    enforce(`login:addr:${clientKey(c)}`, LOGIN_PER_ADDRESS);
-    enforce(accountKey, LOGIN_PER_ACCOUNT);
+    const address = clientKey(c);
+    enforce(`login:addr:${address}`, LOGIN_PER_ADDRESS);
+    const charged = chargeSignIn(limiter, body.username, address);
+    if (!charged.allowed) throw tooManyRequests(charged.retryAfterMs);
     const session = login(c.get('ctx'), body);
-    // A successful sign-in clears the account's failed-attempt budget.
-    limiter.reset(accountKey);
+    // A successful sign-in clears the account's failed-attempt budgets.
+    clearSignIn(limiter, body.username, address);
     return c.json({ token: session.token, user: withPolicies(c.get('ctx'), session.user) }, 200);
   });
 

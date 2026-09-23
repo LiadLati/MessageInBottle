@@ -4,7 +4,7 @@ import path from 'node:path';
 import { eq } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 import { createApp } from './app.js';
-import { LOGIN_PER_ACCOUNT, REGISTER_PER_ADDRESS } from './routes/auth.js';
+import { LOGIN_PER_ACCOUNT_ADDRESS, REGISTER_PER_ADDRESS } from './routes/auth.js';
 import { MIGRATIONS_FOLDER, createDb, runMigrations } from '../db/client.js';
 import * as t from '../db/schema.js';
 import { DEV_SEED_PASSWORD } from '../db/seed-data.js';
@@ -290,7 +290,7 @@ describe('rate limiting', () => {
   it('locks an account after repeated failed sign-ins and clears on success', async () => {
     const w = createTestWorld();
     const app = createApp(w.ctx);
-    for (let i = 0; i < LOGIN_PER_ACCOUNT.limit; i++) {
+    for (let i = 0; i < LOGIN_PER_ACCOUNT_ADDRESS.limit; i++) {
       expect((await login(app, 'ada', 'wrong password')).status).toBe(401);
     }
     const blocked = await login(app, 'ada', DEV_SEED_PASSWORD);

@@ -309,7 +309,9 @@ export type ShoreResponse = z.infer<typeof ShoreResponseSchema>;
 export const ReceivedLetterSchema = z.object({
   id: IdSchema,
   source: z.enum(['shore', 'public']),
-  state: z.enum(['delivered', 'opened', 'lost']),
+  // A recipient or finder sees delivered, opened or lost; a sender reading their own letter
+  // (GET /bottles/sent/:id/letter) may also see it at sea or cancelled.
+  state: z.enum(['at_sea', 'delivered', 'opened', 'lost', 'cancelled']),
   sender: z.object({ id: IdSchema, displayName: z.string() }).nullable(),
   originShore: z.object({ id: IdSchema, name: z.string() }).nullable(),
   releasedAt: z.string(),
@@ -592,8 +594,36 @@ export const AdminCaseDetailSchema = AdminCaseSummarySchema.extend({
       noticePresentedAt: z.string().nullable(),
     })
     .nullable(),
+  // SHA-256 of the evidence exactly as shown. A decision must echo it back, so a screen left
+  // open while the case changed cannot decide something the administrator did not see.
+  evidenceDigest: z.string(),
+  // What upholding this case would do to the sender's standing, computed by the server from
+  // the violations currently in force (audit FE-009).
+  consequence: z.object({
+    violationsInForce: z.number().int().nonnegative(),
+    ifUpheld: z.enum(['warning', 'suspension', 'ban']),
+  }),
+  // The viewing administrator is the sender, the recipient or a reporter on this case, and so
+  // may not decide it, its appeal or its critical classification (audit SEC-010).
+  recused: z.boolean(),
 });
 export type AdminCaseDetailDto = z.infer<typeof AdminCaseDetailSchema>;
+
+// One row of the moderation audit trail, as an administrator reads it (audit SEC-011).
+export const AuditEntrySchema = z.object({
+  id: IdSchema,
+  action: z.string(),
+  caseId: IdSchema.nullable(),
+  violationId: IdSchema.nullable(),
+  appealId: IdSchema.nullable(),
+  subjectUserId: IdSchema.nullable(),
+  actorUserId: IdSchema.nullable(),
+  actorRole: z.enum(['admin', 'developer', 'member', 'system']),
+  reason: z.string().nullable(),
+  detail: z.string().nullable(),
+  createdAt: z.string(),
+});
+export type AuditEntryDto = z.infer<typeof AuditEntrySchema>;
 
 export const AdminAppealSchema = z.object({
   id: IdSchema,
@@ -623,6 +653,15 @@ export const DecisionRequestSchema = z.object({
   reason: z.string().trim().max(1000).optional(),
 });
 export type DecisionRequest = z.infer<typeof DecisionRequestSchema>;
+
+const EvidenceDigestSchema = z.string().regex(/^[a-f0-9]{64}$/);
+// Deciding a report: the digest of the evidence the administrator was shown (see
+// AdminCaseDetailSchema.evidenceDigest). Upholding also requires a reason; the server enforces it.
+export const CaseDecisionRequestSchema = z.object({
+  reason: z.string().trim().max(1000).optional(),
+  evidenceDigest: EvidenceDigestSchema,
+});
+export type CaseDecisionRequest = z.infer<typeof CaseDecisionRequestSchema>;
 
 // ---------- the sender's side: violations, standing, appeals ----------
 // Nothing here ever names or hints at a reporter.
@@ -697,6 +736,7 @@ export const APPEAL_ACTION_SKIP = 'Skip appeal';
 export const CriticalDecisionRequestSchema = z.object({
   reason: z.string().trim().min(1).max(1000),
   classification: z.literal('critical_child_safety'),
+  evidenceDigest: z.string().regex(/^[a-f0-9]{64}$/),
 });
 export type CriticalDecisionRequest = z.infer<typeof CriticalDecisionRequestSchema>;
 

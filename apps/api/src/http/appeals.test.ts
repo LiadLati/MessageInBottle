@@ -18,6 +18,7 @@ import {
   loginAs as login,
   releaseInput,
   type TestWorld,
+  evidenceDigest,
 } from '../test/harness.js';
 
 const auth = (token: string) => ({
@@ -76,7 +77,7 @@ async function upheldOne(ctx: Awaited<ReturnType<typeof setup>>, caseId: string)
   const accepted = await ctx.app.request(`/api/admin/reports/${caseId}/accept`, {
     method: 'POST',
     headers: auth(ctx.cy.token),
-    body: JSON.stringify({ reason: 'upheld' }),
+    body: JSON.stringify({ reason: 'upheld', evidenceDigest: evidenceDigest(ctx.w, caseId) }),
   });
   expect(accepted.status).toBe(200);
   return caseId;
@@ -393,7 +394,19 @@ describe('the single appeal opportunity', () => {
       }),
     });
     const { caseId } = (await report.json()) as { caseId: string };
-    await upheldOne(ctx, caseId);
+    // Cy reported it, so Cy may not decide it (audit SEC-010): an uninvolved administrator does.
+    w.db
+      .update(t.users)
+      .set({ role: 'admin' })
+      .where(eq(t.users.id, w.user('dee').id))
+      .run();
+    const dee = await login(app, 'dee');
+    const upheld = await app.request(`/api/admin/reports/${caseId}/accept`, {
+      method: 'POST',
+      headers: auth(dee.token),
+      body: JSON.stringify({ reason: 'upheld', evidenceDigest: evidenceDigest(w, caseId) }),
+    });
+    expect(upheld.status).toBe(200);
 
     const body = await (
       await app.request('/api/moderation/standing', { headers: auth(ada.token) })
@@ -490,7 +503,10 @@ describe('violations never expire', () => {
     await app.request(`/api/admin/reports/${cases[0]!}/reject`, {
       method: 'POST',
       headers: auth(cy.token),
-      body: JSON.stringify({ reason: 'not a violation' }),
+      body: JSON.stringify({
+        reason: 'not a violation',
+        evidenceDigest: evidenceDigest(ctx.w, cases[0]!),
+      }),
     });
     const standing = await standingOfAda(ctx);
     expect(standing.standing).toBe('good');
@@ -523,7 +539,7 @@ describe('violations never expire', () => {
     await app.request(`/api/admin/reports/${caseId}/accept`, {
       method: 'POST',
       headers: auth(cy.token),
-      body: JSON.stringify({ reason: 'upheld once' }),
+      body: JSON.stringify({ reason: 'upheld once', evidenceDigest: evidenceDigest(w, caseId) }),
     });
     // One case, one violation, whatever the number of reports.
     expect(

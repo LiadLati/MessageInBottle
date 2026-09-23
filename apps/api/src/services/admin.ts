@@ -11,11 +11,11 @@ import type {
 } from '@mib/shared';
 import type { DbOrTx } from '../db/client.js';
 import * as t from '../db/schema.js';
-import { newId } from '../lib/ids.js';
-import { conflict, notFound } from '../lib/errors.js';
+import { newId, sha256 } from '../lib/ids.js';
+import { AppError, conflict, notFound } from '../lib/errors.js';
 import { badRequest } from '../lib/errors.js';
 import type { AppContext, AuthUser } from './context.js';
-import { appealAvailable, notifyStanding, standingOf } from './moderation.js';
+import { appealAvailable, notifyStanding, standingOf, violationsInForce } from './moderation.js';
 import { enqueueNotification } from './notifications.js';
 import { writeAudit } from './audit.js';
 import { finalityOf, holdOf } from './retention.js';
@@ -93,7 +93,12 @@ function summaryOf(db: DbOrTx, c: CaseRow): AdminCaseSummaryDto {
   };
 }
 
-function detailOf(db: DbOrTx, c: CaseRow, finalAfterMs: number): AdminCaseDetailDto {
+function detailOf(
+  db: DbOrTx,
+  c: CaseRow,
+  finalAfterMs: number,
+  viewerId: string | null,
+): AdminCaseDetailDto {
   const bottle = db.select().from(t.bottles).where(eq(t.bottles.id, c.bottleId)).get()!;
   const reports = db
     .select()
@@ -160,7 +165,49 @@ function detailOf(db: DbOrTx, c: CaseRow, finalAfterMs: number): AdminCaseDetail
           noticePresentedAt: isoOrNull(violation.noticePresentedAt),
         }
       : null,
+    evidenceDigest: sha256(c.evidenceText),
+    consequence: consequenceOf(db, c.senderId),
+    recused: viewerId !== null && partiesOf(db, c).has(viewerId),
   };
+}
+
+// The people a case is about or came from: its sender, its recipient and every reporter. An
+// administrator who is one of them may not decide it (audit SEC-010), however the case arose.
+export function partiesOf(db: DbOrTx, c: CaseRow): Set<string> {
+  const reporters = db
+    .select({ id: t.letterReports.reporterId })
+    .from(t.letterReports)
+    .where(eq(t.letterReports.caseId, c.id))
+    .all()
+    .map((r) => r.id);
+  return new Set([c.senderId, c.recipientId, ...reporters].filter((x): x is string => !!x));
+}
+
+function assertNotParty(db: DbOrTx, admin: AuthUser | null, c: CaseRow): void {
+  if (admin && partiesOf(db, c).has(admin.id))
+    throw new AppError(
+      403,
+      'recused',
+      'You are the sender, the recipient or a reporter on this case, so another administrator must decide it.',
+    );
+}
+
+// What upholding this case would do, from the violations in force now: the ladder is one
+// warns, two suspend, three ban (moderation.ts, standingOf).
+function consequenceOf(
+  db: DbOrTx,
+  senderId: string,
+): { violationsInForce: number; ifUpheld: 'warning' | 'suspension' | 'ban' } {
+  const inForce = violationsInForce(db, senderId);
+  const next = inForce.length + 1;
+  const ifUpheld = inForce.some((v) => v.severity === 'critical')
+    ? 'ban'
+    : next === 1
+      ? 'warning'
+      : next === 2
+        ? 'suspension'
+        : 'ban';
+  return { violationsInForce: inForce.length, ifUpheld };
 }
 
 export function listCases(ctx: AppContext, status: CaseStatus | 'all'): AdminCaseSummaryDto[] {
@@ -174,10 +221,14 @@ export function listCases(ctx: AppContext, status: CaseStatus | 'all'): AdminCas
   return rows.map((c) => summaryOf(ctx.db, c));
 }
 
-export function getCase(ctx: AppContext, caseId: string): AdminCaseDetailDto {
+export function getCase(
+  ctx: AppContext,
+  caseId: string,
+  viewer: AuthUser | null = null,
+): AdminCaseDetailDto {
   const c = ctx.db.select().from(t.moderationCases).where(eq(t.moderationCases.id, caseId)).get();
   if (!c) throw notFound('case');
-  return detailOf(ctx.db, c, ctx.config.retention.finalAfterMs);
+  return detailOf(ctx.db, c, ctx.config.retention.finalAfterMs, viewer?.id ?? null);
 }
 
 // Decides a pending case. `admin` is null when the model decides under MIB_AI_AUTO_DECIDE.
@@ -191,15 +242,24 @@ export function decideCase(
   caseId: string,
   outcome: 'accepted' | 'rejected',
   reason: string | null | undefined,
+  // The digest of the evidence the administrator was shown. Given by every HTTP decision; a
+  // mismatch means the screen is stale (audit SEC-010).
+  expectedDigest?: string,
 ): boolean {
   const now = ctx.realClock.now();
   return ctx.db.transaction((tx) => {
     const c = tx.select().from(t.moderationCases).where(eq(t.moderationCases.id, caseId)).get();
     if (!c) throw notFound('case');
+    assertNotParty(tx, admin, c);
     if (c.status !== 'pending') {
       if (c.decidedOutcome === outcome) return false;
       throw conflict('already_decided', `This case was already ${c.decidedOutcome}.`);
     }
+    if (expectedDigest !== undefined && expectedDigest !== sha256(c.evidenceText))
+      throw conflict(
+        'stale_case',
+        'This case changed since it was opened. Reload it and decide again.',
+      );
     const moved = tx
       .update(t.moderationCases)
       .set({
@@ -307,7 +367,7 @@ function appealOf(
       decidedAt: iso(v.decidedAt),
       revokedAt: isoOrNull(v.revokedAt),
     },
-    case: detailOf(db, c, finalAfterMs),
+    case: detailOf(db, c, finalAfterMs, null),
     decision:
       a.decidedAt && a.decidedByUserId && a.status !== 'pending'
         ? {
@@ -354,6 +414,11 @@ export function decideAppeal(
   return ctx.db.transaction((tx) => {
     const a = tx.select().from(t.appeals).where(eq(t.appeals.id, appealId)).get();
     if (!a) throw notFound('appeal');
+    const av = tx.select().from(t.violations).where(eq(t.violations.id, a.violationId)).get();
+    const ac = av
+      ? tx.select().from(t.moderationCases).where(eq(t.moderationCases.id, av.caseId)).get()
+      : undefined;
+    if (ac) assertNotParty(tx, admin, ac);
     if (a.status !== 'pending') {
       if (a.status === outcome) return false;
       throw conflict('already_decided', `This appeal was already ${a.status}.`);
@@ -458,6 +523,7 @@ export function decideCaseCritical(
   admin: AuthUser,
   caseId: string,
   reason: string,
+  expectedDigest?: string,
 ): AdminCaseDetailDto {
   const trimmed = reason.trim();
   if (!trimmed)
@@ -466,8 +532,14 @@ export function decideCaseCritical(
   ctx.db.transaction((tx) => {
     const c = tx.select().from(t.moderationCases).where(eq(t.moderationCases.id, caseId)).get();
     if (!c) throw notFound('case');
+    assertNotParty(tx, admin, c);
     if (c.status === 'rejected')
       throw conflict('already_decided', 'This case was already rejected.');
+    if (expectedDigest !== undefined && expectedDigest !== sha256(c.evidenceText))
+      throw conflict(
+        'stale_case',
+        'This case changed since it was opened. Reload it and decide again.',
+      );
 
     // Upholding it, if that has not happened yet. A case already accepted the ordinary way can
     // still be escalated: the classification is what changes, not the outcome.

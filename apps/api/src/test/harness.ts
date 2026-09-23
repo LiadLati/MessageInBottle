@@ -197,3 +197,11 @@ export function legacyAccount(
     .run();
   return { id, token };
 }
+
+// The evidence digest an administrator's screen would echo back when deciding a case (the
+// stale-decision guard in services/admin.ts).
+export function evidenceDigest(w: TestWorld, caseId: string): string {
+  const c = w.db.select().from(t.moderationCases).where(eq(t.moderationCases.id, caseId)).get();
+  if (!c) throw new Error(`no case ${caseId}`);
+  return sha256(c.evidenceText);
+}

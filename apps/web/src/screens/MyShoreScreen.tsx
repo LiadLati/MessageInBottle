@@ -3,7 +3,7 @@ import type { OpenedLetterDto, ShoreBottleDto } from '@mib/shared';
 import { api } from '../api/client.js';
 import { ShoreScene } from '../components/lazy.js';
 import { LetterModal } from '../components/LetterModal.js';
-import { Avatar, ErrorNote, Skeleton } from '../components/ui.js';
+import { Avatar, ErrorNote, LoadFailed, Skeleton } from '../components/ui.js';
 import { Icon } from '../design/Icon.js';
 import { formatDayTime, formatDuration } from '../lib/format.js';
 import { featuredBottle, sealedOnly, waitingBottles } from '../lib/shoreQueue.js';
@@ -117,7 +117,9 @@ export function MyShoreScreen({ onOpenProfile, onChooseShore }: Props) {
         </aside>
       ) : null}
       <section className="sheet on-3d" aria-label="Arrivals">
-        {shore.loading && !shore.data ? (
+        {shore.error && !shore.data ? (
+          <LoadFailed error={shore.error} onRetry={() => void shore.reload()} />
+        ) : shore.loading && !shore.data ? (
           <Skeleton />
         ) : !featured ? (
           <div className="stack">
@@ -195,7 +197,7 @@ export function MyShoreScreen({ onOpenProfile, onChooseShore }: Props) {
             ) : null}
           </div>
         )}
-        <ErrorNote error={error ?? shore.error} />
+        <ErrorNote error={error ?? (shore.data ? shore.error : null)} />
       </section>
       {opened ? (
         <LetterModal

@@ -14,6 +14,21 @@ export function ErrorNote({ error }: { error: Error | null }) {
   );
 }
 
+// A list that could not be loaded is not an empty list (audit FE-007): say that it failed and
+// offer to try again, instead of telling the person they have nothing.
+export function LoadFailed({ error, onRetry }: { error: Error; onRetry: () => void }) {
+  return (
+    <div className="glass-panel stack" role="alert">
+      <ErrorNote error={error} />
+      <div className="row">
+        <button type="button" className="btn-secondary" onClick={onRetry}>
+          Try again
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export function Skeleton() {
   return (
     <div className="skeleton" aria-label="Loading" role="status">

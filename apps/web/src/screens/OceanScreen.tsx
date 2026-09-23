@@ -4,7 +4,14 @@ import { ApiError, api } from '../api/client.js';
 import { LetterModal } from '../components/LetterModal.js';
 import { OceanMap, SeaViewer } from '../components/lazy.js';
 import type { HarborLabel, MapAnchor, MapRoute, OceanMapHandle } from '../components/OceanMap.js';
-import { Avatar, ErrorNote, OutcomeChip, Skeleton, StatusChip } from '../components/ui.js';
+import {
+  Avatar,
+  ErrorNote,
+  LoadFailed,
+  OutcomeChip,
+  Skeleton,
+  StatusChip,
+} from '../components/ui.js';
 import { Icon } from '../design/Icon.js';
 import { formatDate, formatDuration, formatTime } from '../lib/format.js';
 import { useAsync } from '../lib/useAsync.js';
@@ -520,9 +527,9 @@ export function OceanScreen({
           <section className="sheet" aria-label="Public ocean">
             <Skeleton />
           </section>
-        ) : publicOcean.error ? (
+        ) : publicOcean.error && !publicOcean.data ? (
           <section className="sheet" aria-label="Public ocean">
-            <ErrorNote error={publicOcean.error} />
+            <LoadFailed error={publicOcean.error} onRetry={() => void publicOcean.reload()} />
           </section>
         ) : view.kind === 'bottle' && (currentPublic || claimedIds.includes(view.id)) ? (
           <section className="sheet" aria-label="Adrift bottle">
@@ -552,6 +559,10 @@ export function OceanScreen({
             </div>
           </section>
         ) : null
+      ) : bottles.error && !bottles.data ? (
+        <section className="sheet" aria-label="Journey">
+          <LoadFailed error={bottles.error} onRetry={() => void bottles.reload()} />
+        </section>
       ) : bottles.loading && !bottles.data ? (
         <section className="sheet" aria-label="Journey">
           <Skeleton />

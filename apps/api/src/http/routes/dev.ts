@@ -15,7 +15,7 @@ import { activePlan, runJourneyTick } from '../../services/journey.js';
 import { devLoseBottle } from '../../services/outcomes.js';
 import type { AppEnv } from '../app.js';
 import { requireAuth } from '../middleware/auth.js';
-import { requireDeveloper } from '../middleware/admin.js';
+import { requireDeveloper, requireGoodStanding } from '../middleware/admin.js';
 import { jsonBody } from '../validate.js';
 
 // Deterministic development controls (spec §19: accelerated test journeys are kept separate).
@@ -31,7 +31,7 @@ import { jsonBody } from '../validate.js';
 export function devRoutes() {
   const r = new Hono<AppEnv>();
 
-  r.use('*', requireAuth, requireDeveloper);
+  r.use('*', requireAuth, requireDeveloper, requireGoodStanding);
 
   // The captured mail holds live password-reset links for every account, so it is behind the
   // same gate as every other control. A developer recovering a test account's password reads

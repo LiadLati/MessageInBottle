@@ -58,7 +58,7 @@ function readPolicyHash(): DocumentId | null {
 }
 
 function Shell() {
-  const { user, loading, logout } = useSession();
+  const { user, loading, reconnecting, logout } = useSession();
   // The document dialog is owned here so it can open over the sign-in screen, over the app,
   // and over the "updated terms" screen alike.
   const [policyDoc, setPolicyDoc] = useState<DocumentId | null>(readPolicyHash);
@@ -134,6 +134,26 @@ function Shell() {
   const [standingOpen, setStandingOpen] = useState(false);
   const [admin, setAdmin] = useState<AdminSection | null>(null);
 
+  // Everything that belongs to one signed-in account goes when that session ends, so the next
+  // account in the same tab never opens onto the last one's sheets (audit FE-012). Adjusted
+  // during render when the account changes, React's pattern for state derived from an input.
+  const userId = user?.id ?? null;
+  const [shownFor, setShownFor] = useState<string | null>(userId);
+  if (shownFor !== userId) {
+    setShownFor(userId);
+    setProfileOpen(false);
+    setDeletingAccount(false);
+    setChoosingShore(false);
+    setImmersive(false);
+    setInboxOpen(false);
+    setStandingOpen(false);
+    setAdmin(null);
+    setPassportId(null);
+    setFocusId(null);
+    setFocusPublicId(null);
+    setTab('ocean');
+  }
+
   // Visiting My Shore refreshes its count (a bottle opened there clears the badge); it no
   // longer marks notifications read — that is the inbox's job.
   useEffect(() => {
@@ -165,7 +185,16 @@ function Shell() {
       </>
     );
   }
-  if (loading) return <main className="deck-screen" aria-busy />;
+  if (loading)
+    return (
+      <main className="deck-screen" aria-busy>
+        {reconnecting ? (
+          <p className="note amber" role="status">
+            Cannot reach the SeaYou server right now. Still signed in; trying again…
+          </p>
+        ) : null}
+      </main>
+    );
   if (!user)
     return (
       <>

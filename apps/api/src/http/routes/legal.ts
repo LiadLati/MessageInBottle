@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import type { Context } from 'hono';
 import { clientAddress } from '../client-address.js';
+import { chargeSignIn, clearSignIn } from './auth.js';
 import {
   PUBLISHED_DOCUMENTS,
   SUPPORT_NAME,
@@ -63,10 +64,13 @@ export function legalRoutes(limiter = new RateLimiter()) {
     if (!username || !password) return back('Enter the username and password of the account.');
     if (!confirmed) return back('Tick the box to confirm that deletion is permanent.');
 
-    // One address cannot sit here guessing credentials.
+    // One address cannot sit here guessing credentials, and this form spends the same
+    // per-account sign-in budget as the sign-in endpoint: it is not a side door (ARCH-009).
     const key = clientAddress(c);
     if (!limiter.hit(`legal-delete:${key}`, DELETE_PER_ADDRESS).allowed)
       return back('Too many attempts from this device. Wait a few minutes and try again.');
+    if (!chargeSignIn(limiter, username, key).allowed)
+      return back('Too many attempts for this account. Wait a few minutes and try again.');
 
     const ctx = c.get('ctx');
     let userId: string;
@@ -81,6 +85,7 @@ export function legalRoutes(limiter = new RateLimiter()) {
         return back('That username and password do not match an account.');
       throw err;
     }
+    clearSignIn(limiter, username, key);
     deleteAccount(ctx, userId);
     return c.html(deletionDonePage(), 200, { 'cache-control': 'no-store' });
   });

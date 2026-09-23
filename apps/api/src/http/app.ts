@@ -4,6 +4,7 @@ import { bodyLimit } from 'hono/body-limit';
 import { logger } from 'hono/logger';
 import type { ZodError } from 'zod';
 import { AppError } from '../lib/errors.js';
+import { RateLimiter } from '../lib/rate-limit.js';
 import type { AppContext, AuthUser } from '../services/context.js';
 import { adminRoutes } from './routes/admin.js';
 import { authRoutes } from './routes/auth.js';
@@ -27,6 +28,9 @@ export type AppEnv = { Variables: { ctx: AppContext; user: AuthUser; token: stri
 
 export function createApp(ctx: AppContext) {
   const app = new Hono<AppEnv>();
+  // One limiter for the whole API, so every route that checks a password spends the same
+  // per-account budget (the public deletion form included).
+  const limiter = new RateLimiter();
   app.use('*', async (c, next) => {
     c.set('ctx', ctx);
     await next();
@@ -72,11 +76,11 @@ export function createApp(ctx: AppContext) {
         : {}),
     });
   });
-  app.route('/api/auth', authRoutes());
+  app.route('/api/auth', authRoutes(limiter));
   app.route('/api/policies', policyRoutes());
   app.route('/api/account', accountRoutes());
   // Public, unauthenticated HTML. Deliberately not under /api: these are pages, not endpoints.
-  app.route('/legal', legalRoutes());
+  app.route('/legal', legalRoutes(limiter));
   // The support page: reachable signed out, while a new policy version is waiting to be
   // accepted, while an account is suspended or banned, and while it is being deleted.
   app.get('/support', (c) =>
@@ -90,7 +94,7 @@ export function createApp(ctx: AppContext) {
   app.route('/api/shore', shoreRoutes());
   app.route('/api/ocean', oceanRoutes());
   app.route('/api/notifications', notificationRoutes());
-  app.route('/api/moderation', moderationRoutes());
+  app.route('/api/moderation', moderationRoutes(limiter));
   app.route('/api/admin', adminRoutes());
   if (ctx.config.devMode) app.route('/api/dev', devRoutes());
 

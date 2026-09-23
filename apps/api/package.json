@@ -24,7 +24,8 @@
     "ai:eval": "tsx src/tools/ai-eval.ts",
     "retention:plan": "tsx src/tools/retention.ts",
     "db:backup": "tsx src/tools/backup.ts",
-    "deletion:backfill": "tsx src/tools/deletion-backfill.ts"
+    "deletion:backfill": "tsx src/tools/deletion-backfill.ts",
+    "audit:export": "tsx src/tools/audit-export.ts"
   },
   "dependencies": {
     "@hono/node-server": "^1.19.0",

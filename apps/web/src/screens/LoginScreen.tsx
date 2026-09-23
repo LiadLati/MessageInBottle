@@ -135,7 +135,7 @@ function DevMailNotice({ health }: { health: HealthResponse }) {
 }
 
 export function LoginScreen({ resetToken, onResetDone, onOpenPolicy }: Props) {
-  const { login, register } = useSession();
+  const { login, register, endedNotice } = useSession();
   const [mode, setMode] = useState<Mode>(resetToken ? 'reset' : 'signin');
   const [consent, setConsent] = useState(EMPTY_CONSENT);
   const [username, setUsername] = useState('');
@@ -278,6 +278,11 @@ export function LoginScreen({ resetToken, onResetDone, onOpenPolicy }: Props) {
         </div>
         <h1 className="t-display">{title}</h1>
         <p className="secondary">{intro}</p>
+        {endedNotice && mode === 'signin' ? (
+          <p className="note amber" role="status">
+            {endedNotice}
+          </p>
+        ) : null}
         <form onSubmit={submit} className="stack" noValidate aria-busy={busy}>
           {mode === 'signin' || registering ? (
             <div className="field">

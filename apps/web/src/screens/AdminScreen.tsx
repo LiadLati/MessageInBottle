@@ -216,7 +216,9 @@ function CaseView({
   const decide = (reason: string) => {
     if (confirm !== 'accept' && confirm !== 'reject') return;
     const outcome = confirm;
-    void act(() => api.adminDecideCase(id, outcome, reason));
+    if (!c) return;
+    const digest = c.evidenceDigest;
+    void act(() => api.adminDecideCase(id, outcome, reason, digest));
   };
   return (
     <DeckScreen
@@ -226,7 +228,13 @@ function CaseView({
       wide
     >
       {res.loading || !c ? <Skeleton /> : <CaseBody c={c} />}
-      {c?.status === 'pending' ? (
+      {c?.recused ? (
+        <p className="note amber" role="status">
+          You are the sender, the recipient or a reporter on this case, so another administrator
+          must decide it, its appeal and any critical classification.
+        </p>
+      ) : null}
+      {c?.status === 'pending' && !c.recused ? (
         <div className="row" style={{ justifyContent: 'flex-end', gap: 8 }}>
           <button type="button" className="btn-secondary" onClick={() => setConfirm('reject')}>
             Reject report
@@ -236,7 +244,7 @@ function CaseView({
           </button>
         </div>
       ) : null}
-      {c && c.status !== 'rejected' && c.violation?.severity !== 'critical' ? (
+      {c && !c.recused && c.status !== 'rejected' && c.violation?.severity !== 'critical' ? (
         <div className="row" style={{ justifyContent: 'flex-end', gap: 8 }}>
           <button type="button" className="btn-destructive" onClick={() => setConfirm('critical')}>
             Confirmed critical child safety…
@@ -267,11 +275,12 @@ function CaseView({
           title={confirm === 'accept' ? 'Accept this report?' : 'Reject this report?'}
           body={
             confirm === 'accept'
-              ? `The letter from ${c.sender.displayName} will be removed from every reader and a violation recorded against their account (${c.sender.displayName} currently has ${violationWord(c)}). They will be told, but never who reported it.`
+              ? `The letter from ${c.sender.displayName} will be removed from every reader and a violation recorded against their account. ${consequenceSentence(c)} They will be told, but never who reported it.`
               : `The case will be closed with no violation. ${c.sender.displayName} will not be told anything.`
           }
           confirmLabel={confirm === 'accept' ? 'Accept report' : 'Reject report'}
           reasonLabel="Why (recorded with the decision)"
+          requireReason={confirm === 'accept'}
           destructive={confirm === 'accept'}
           busy={busy}
           error={error}
@@ -290,7 +299,9 @@ function CaseView({
           destructive
           busy={busy}
           error={error}
-          onConfirm={(reason) => void act(() => api.adminDecideCritical(id, reason))}
+          onConfirm={(reason) =>
+            void act(() => api.adminDecideCritical(id, reason, c.evidenceDigest))
+          }
           onCancel={() => setConfirm(null)}
         />
       ) : null}
@@ -311,8 +322,21 @@ function CaseView({
   );
 }
 
-function violationWord(_c: AdminCaseDetailDto): string {
-  return 'a record you can check under Appeals';
+// What upholding does to the sender's standing, as the server computed it (audit FE-009).
+function consequenceSentence(c: AdminCaseDetailDto): string {
+  const name = c.sender.displayName;
+  const prior = c.consequence.violationsInForce;
+  const had =
+    prior === 0
+      ? `${name} has no violation in force`
+      : `${name} already has ${prior} violation${prior === 1 ? '' : 's'} in force`;
+  const result =
+    c.consequence.ifUpheld === 'warning'
+      ? 'so this one is a warning'
+      : c.consequence.ifUpheld === 'suspension'
+        ? 'so this one suspends the account for seven days'
+        : 'so this one BANS the account permanently';
+  return `${had}, ${result}. Upheld violations never expire.`;
 }
 
 // Sender, intended recipient or finder context, the original letter (evidence), every report

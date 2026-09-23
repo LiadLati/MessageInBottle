@@ -1,6 +1,12 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { POLICY_DOCUMENTS, RISK_POLICY_VERSION, SUPPORT_EMAIL, policySetStatus } from '@mib/shared';
+import {
+  POLICY_DOCUMENTS,
+  RISK_POLICY_VERSION,
+  SUPPORT_EMAIL,
+  policySetStatus,
+  textOf,
+} from '@mib/shared';
 import type { PoliciesConfig } from './services/policies.js';
 import { SEVEN_DAYS_MS, type RetentionPolicy } from './services/retention.js';
 
@@ -172,6 +178,18 @@ export function loadConfig(
     throw new ConfigError(
       'MIB_APP_URL must be the public https:// address of the web app in production.',
     );
+  const autoDecide = envBool(env, 'MIB_AI_AUTO_DECIDE', false);
+  // The Terms, the Community Rules and the Child Safety Standards say a person decides every
+  // case. Letting the model decide while they say so would make them false (audit SEC-020), so
+  // the switch is refused until the published documents are changed to allow it.
+  if (
+    autoDecide &&
+    POLICY_DOCUMENTS.some((d) => /Every case is decided by a person/.test(textOf(d)))
+  )
+    throw new ConfigError(
+      'MIB_AI_AUTO_DECIDE=true is refused: the published documents state that every case is ' +
+        'decided by a person. Change the documents (a new policy version) before enabling it.',
+    );
   return {
     port: envInt(env, 'MIB_PORT', 3001),
     databasePath: databasePath || path.join(API_ROOT, 'data', 'mib.sqlite'),
@@ -202,7 +220,7 @@ export function loadConfig(
       model: env.MIB_AI_MODEL ?? 'qwen2.5:7b',
       timeoutMs: envInt(env, 'MIB_AI_TIMEOUT_MS', 60_000),
       tickMs: envInt(env, 'MIB_AI_TICK_MS', 10_000),
-      autoDecide: envBool(env, 'MIB_AI_AUTO_DECIDE', false),
+      autoDecide,
     },
   };
 }

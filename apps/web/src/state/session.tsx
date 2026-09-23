@@ -8,7 +8,10 @@ import {
   type ReactNode,
 } from 'react';
 import type { MeResponse, PolicyAcceptanceRequest, SessionResponse } from '@mib/shared';
-import { api, setAuthToken } from '../api/client.js';
+import { ApiError, api, onSessionEnded, setAuthToken } from '../api/client.js';
+
+export const SESSION_ENDED_NOTICE =
+  'You were signed out because this session ended — for example after a password reset or signing out on another device. Sign in again to continue.';
 
 const STORAGE_KEY = 'mib.session.token';
 // Client-side keys that belong to the signed-in person and must not survive a sign-out: the
@@ -37,6 +40,10 @@ export function clearPerUserStorage(): void {
 interface SessionState {
   user: MeResponse | null;
   loading: boolean;
+  /** Restoring a stored session is waiting for the server to become reachable. */
+  reconnecting: boolean;
+  /** Why the sign-in screen is showing, when the session ended without the person's say-so. */
+  endedNotice: string | null;
   login: (username: string, password: string) => Promise<void>;
   register: (
     username: string,
@@ -69,32 +76,73 @@ function storeToken(token: string | null) {
   }
 }
 
+// How long to wait before asking again when the server could not be reached at startup.
+export const RECONNECT_MS = 5_000;
+
 export function SessionProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<MeResponse | null>(null);
   const [loading, setLoading] = useState(() => readStoredToken() !== null);
+  // Set when the server could not be reached while restoring a stored session: the token is
+  // kept and the restore retried, rather than signing the person out (audit FE-003).
+  const [reconnecting, setReconnecting] = useState(false);
+  // Why the person is looking at the sign-in screen, when it was not their own choice.
+  const [endedNotice, setEndedNotice] = useState<string | null>(null);
 
-  const refresh = useCallback(async () => {
+  const end = useCallback((notice: string | null) => {
+    setAuthToken(null);
+    storeToken(null);
+    clearPerUserStorage();
+    setUser(null);
+    setEndedNotice(notice);
+  }, []);
+
+  // Only an answer from the server that this token is not valid ends the session. A network
+  // failure, a proxy error or a server that is restarting keeps it.
+  const refresh = useCallback(async (): Promise<'ok' | 'ended' | 'unreachable'> => {
     try {
       setUser(await api.me());
-    } catch {
-      setAuthToken(null);
-      storeToken(null);
-      setUser(null);
+      setReconnecting(false);
+      return 'ok';
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 401) {
+        end(SESSION_ENDED_NOTICE);
+        return 'ended';
+      }
+      setReconnecting(true);
+      return 'unreachable';
     }
-  }, []);
+  }, [end]);
 
   useEffect(() => {
     const token = readStoredToken();
     if (!token) return;
     setAuthToken(token);
-    void Promise.resolve()
-      .then(refresh)
-      .finally(() => setLoading(false));
+    let alive = true;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const attempt = async () => {
+      const outcome = await refresh();
+      if (!alive) return;
+      if (outcome === 'unreachable') timer = setTimeout(() => void attempt(), RECONNECT_MS);
+      else setLoading(false);
+    };
+    void attempt();
+    return () => {
+      alive = false;
+      if (timer) clearTimeout(timer);
+    };
   }, [refresh]);
+
+  // The server said this browser's session is over (audit FE-002): back to sign-in, with a
+  // sentence saying why, instead of a shell of "authentication required" errors.
+  useEffect(() => {
+    onSessionEnded(() => end(SESSION_ENDED_NOTICE));
+    return () => onSessionEnded(null);
+  }, [end]);
 
   const start = useCallback((session: SessionResponse) => {
     setAuthToken(session.token);
     storeToken(session.token);
+    setEndedNotice(null);
     setUser(session.user);
   }, []);
 
@@ -116,16 +164,26 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     } catch {
       /* the token is dropped regardless */
     } finally {
-      setAuthToken(null);
-      storeToken(null);
-      clearPerUserStorage();
-      setUser(null);
+      end(null);
     }
-  }, []);
+  }, [end]);
 
+  const refreshUser = useCallback(async () => {
+    await refresh();
+  }, [refresh]);
   const value = useMemo(
-    () => ({ user, loading, login, register, logout, refresh, setUser }),
-    [user, loading, login, register, logout, refresh],
+    () => ({
+      user,
+      loading,
+      reconnecting,
+      endedNotice,
+      login,
+      register,
+      logout,
+      refresh: refreshUser,
+      setUser,
+    }),
+    [user, loading, reconnecting, endedNotice, login, register, logout, refreshUser],
   );
   return <SessionContext.Provider value={value}>{children}</SessionContext.Provider>;
 }

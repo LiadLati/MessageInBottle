@@ -195,6 +195,7 @@ function receivedLetter(
   bottle: BottleRow,
   source: 'shore' | 'public',
   foundAt: number | null = null,
+  now: number | null = null,
 ): ReceivedLetterDto {
   if (source === 'public') {
     const endedAt = bottle.outcomeAt ?? bottle.releasedAt;
@@ -207,6 +208,24 @@ function receivedLetter(
       releasedAt: iso(bottle.releasedAt),
       deliveredAt: null,
       openedAt: isoOrNull(foundAt),
+      journeyDurationMs: Math.max(0, endedAt - bottle.releasedAt),
+    };
+  }
+  // A letter that reached a shore. A sender may also read their own letter while it is still at
+  // sea, after it was lost or after its journey was cancelled; such a letter has no delivery,
+  // so the time is measured to the end of the journey, or to now (audit ARCH-015 — it used to
+  // report 1970 and a negative duration).
+  if (bottle.deliveredAt === null) {
+    const endedAt = bottle.outcomeAt ?? bottle.completedAt ?? now ?? bottle.releasedAt;
+    return {
+      id: bottle.id,
+      source,
+      state: bottle.state as ReceivedLetterDto['state'],
+      sender: { id: bottle.senderId, displayName: bottle.senderNameSnapshot },
+      originShore: { id: bottle.originShoreId, name: bottle.originShoreName },
+      releasedAt: iso(bottle.releasedAt),
+      deliveredAt: null,
+      openedAt: isoOrNull(bottle.openedAt),
       journeyDurationMs: Math.max(0, endedAt - bottle.releasedAt),
     };
   }
@@ -284,7 +303,7 @@ export function openedLetter(
 ): OpenedLetterDto {
   const letter = ctx.db.select().from(t.letters).where(eq(t.letters.id, bottle.letterId)).get()!;
   return {
-    bottle: receivedLetter(bottle, source, foundAt),
+    bottle: receivedLetter(bottle, source, foundAt, ctx.clock.now()),
     letter: {
       text: letter.text,
       font: letter.originalFont as LetterFont,
