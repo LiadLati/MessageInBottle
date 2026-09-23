@@ -82,6 +82,15 @@ function envPositiveInt(env: Env, name: string, fallback: number): number {
   return n;
 }
 
+// 0 (no automatic outcomes for new journeys) or the one policy the worker implements. Any other
+// number was silently stamped on bottles and never applied (audit ARCH-019).
+function riskPolicyVersionOf(env: Env): number {
+  const v = envInt(env, 'MIB_RISK_POLICY_VERSION', RISK_POLICY_VERSION);
+  if (v !== 0 && v !== RISK_POLICY_VERSION)
+    throw new ConfigError(`MIB_RISK_POLICY_VERSION must be 0 or ${RISK_POLICY_VERSION}`);
+  return v;
+}
+
 export interface AppConfig {
   port: number;
   databasePath: string;
@@ -209,7 +218,7 @@ export function loadConfig(
     // The published set is the authority; there is no environment switch that can release
     // documents that are not released in code, or hold back ones that are.
     policies: { status: policySetStatus(POLICY_DOCUMENTS) },
-    riskPolicyVersion: envInt(env, 'MIB_RISK_POLICY_VERSION', RISK_POLICY_VERSION),
+    riskPolicyVersion: riskPolicyVersionOf(env),
     retention: loadRetentionPolicy(env),
     // Hourly. The pass is idempotent and the window is seven days, so the exact cadence only
     // decides how soon after the boundary the evidence actually goes.

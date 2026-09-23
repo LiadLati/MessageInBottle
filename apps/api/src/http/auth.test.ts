@@ -9,7 +9,7 @@ import { MIGRATIONS_FOLDER, createDb, runMigrations } from '../db/client.js';
 import * as t from '../db/schema.js';
 import { DEV_SEED_PASSWORD } from '../db/seed-data.js';
 import { seedChart, seedUsers } from '../db/seed.js';
-import { DUMMY_PASSWORD_HASH, hashPassword, verifyPassword } from '../lib/password.js';
+import { dummyPasswordHash, hashPassword, verifyPassword } from '../lib/password.js';
 import {
   T0,
   acceptCurrent,
@@ -114,8 +114,8 @@ describe('password hashing', () => {
     expect(verifyPassword('Same password', a)).toBe(false);
     expect(verifyPassword('same password', null)).toBe(false);
     expect(verifyPassword('same password', 'garbage')).toBe(false);
-    expect(verifyPassword('not-a-real-password', DUMMY_PASSWORD_HASH)).toBe(true);
-    expect(verifyPassword('', DUMMY_PASSWORD_HASH)).toBe(false);
+    expect(verifyPassword('not-a-real-password', dummyPasswordHash())).toBe(true);
+    expect(verifyPassword('', dummyPasswordHash())).toBe(false);
   });
 });
 

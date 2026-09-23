@@ -20,12 +20,22 @@ export const DAYLIGHT_DEFAULTS: DaylightConfig = { dayStartHour: 7, dayEndHour: 
 
 // The local hour of an instant in an IANA zone. The zone comes from the browser
 // (Intl.DateTimeFormat().resolvedOptions().timeZone) — never from coordinates or a device sensor.
+// Building an Intl.DateTimeFormat is far more expensive than using one, and the risk worker and
+// the map ask about the same few zones constantly (audit ARCH-011): one formatter per zone.
+const hourFormats = new Map<string, Intl.DateTimeFormat>();
+const partsFormats = new Map<string, Intl.DateTimeFormat>();
+
 export function localHourIn(instantMs: number, timeZone?: string): number {
-  const fmt = new Intl.DateTimeFormat('en-GB', {
-    hour: 'numeric',
-    hour12: false,
-    ...(timeZone ? { timeZone } : {}),
-  });
+  const key = timeZone ?? '';
+  let fmt = hourFormats.get(key);
+  if (!fmt) {
+    fmt = new Intl.DateTimeFormat('en-GB', {
+      hour: 'numeric',
+      hour12: false,
+      ...(timeZone ? { timeZone } : {}),
+    });
+    hourFormats.set(key, fmt);
+  }
   // 'en-GB' with hour12:false renders 00–23; midnight can come back as '24' in some engines.
   return Number(fmt.format(new Date(instantMs))) % 24;
 }
@@ -201,18 +211,22 @@ export interface LocalParts {
 }
 
 export function localParts(instantMs: number, timeZone: string): LocalParts {
-  const fmt = new Intl.DateTimeFormat('en-US', {
-    timeZone,
-    hourCycle: 'h23',
-    year: 'numeric',
-    month: 'numeric',
-    day: 'numeric',
-    hour: 'numeric',
-    minute: 'numeric',
-    second: 'numeric',
-  });
-  const get = (type: string) =>
-    Number(fmt.formatToParts(new Date(instantMs)).find((p) => p.type === type)?.value ?? '0');
+  let fmt = partsFormats.get(timeZone);
+  if (!fmt) {
+    fmt = new Intl.DateTimeFormat('en-US', {
+      timeZone,
+      hourCycle: 'h23',
+      year: 'numeric',
+      month: 'numeric',
+      day: 'numeric',
+      hour: 'numeric',
+      minute: 'numeric',
+      second: 'numeric',
+    });
+    partsFormats.set(timeZone, fmt);
+  }
+  const parts = fmt.formatToParts(new Date(instantMs));
+  const get = (type: string) => Number(parts.find((p) => p.type === type)?.value ?? '0');
   return {
     year: get('year'),
     month: get('month'),

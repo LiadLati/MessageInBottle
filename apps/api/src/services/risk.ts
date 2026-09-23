@@ -15,7 +15,7 @@ import { newId } from '../lib/ids.js';
 import type { AppContext } from './context.js';
 import { activePlan, appendEvent } from './journey.js';
 import { enqueueNotification } from './notifications.js';
-import { commitLoss } from './outcomes.js';
+import { commitLossIn } from './outcomes.js';
 
 // Automatic journey outcomes (spec §9.3). The worker walks every night a bottle has been at
 // sea and takes the night's decision exactly once, in a transaction keyed on (bottle, night).
@@ -128,11 +128,20 @@ function processBottle(
   // Every versioned journey walks the current rule's nights; the stamp records the version it
   // was released under and each decision row records the version it was taken under.
   const version = RISK_POLICY_VERSION;
-  const nights = journeyNights(ctx, bottle, bottle.releasedAt, now);
+  // Walk forward from the first night not yet resolved rather than from the release on every
+  // tick (audit ARCH-011): a 17-day journey cost ~8 ms per tick per bottle, all of it blocking.
+  const cursors = cursorsFor(ctx);
+  const from = cursors.get(bottle.id) ?? bottle.releasedAt;
+  const nights = journeyNights(ctx, bottle, from, now);
+  let resolvedUntil: number | null = null;
   for (const night of nights) {
     const storm = stormForNight(bottle.id, night, version);
-    // A decision in the future waits for its moment.
-    if (!storm || storm.decisionAt > now) continue;
+    // A decision in the future waits for its moment — and so does the cursor.
+    if (storm && storm.decisionAt > now) {
+      resolvedUntil ??= night.startsAt;
+      continue;
+    }
+    if (!storm) continue;
     const taken = ctx.db.transaction((tx) => {
       const already = tx
         .select({ id: t.riskDecisions.id })
@@ -156,6 +165,12 @@ function processBottle(
         arrivalAt: plannedArrivalAt(current),
         priorEligibleDecisions: prior?.n ?? 0,
       });
+      // The loss is applied in this same transaction, dated at the decision moment so its
+      // position is where the bottle was in that storm — even when the worker is catching up.
+      // If it cannot apply (the arrival won), the row records that nothing was lost.
+      let lostNow = false;
+      if (decision.lost && decision.reason)
+        lostNow = commitLossIn(ctx, tx, bottle.id, decision.reason, storm.decisionAt).committed;
       tx.insert(t.riskDecisions)
         .values({
           id: newId('rsk'),
@@ -166,25 +181,36 @@ function processBottle(
           stormEndsAt: storm.endsAt,
           decisionAt: storm.decisionAt,
           eligible: decision.eligible,
-          lost: decision.lost,
+          lost: lostNow,
           reason: decision.reason,
           createdAt: now,
         })
         .run();
-      return decision;
+      return { decision, lostNow };
     });
     if (!taken) continue;
     result.decided++;
-    if (taken.lost && taken.reason) {
-      // The outcome is dated at the decision moment, so its position is where the bottle was
-      // in that storm — even when the worker is catching up hours later.
-      const committed = commitLoss(ctx, bottle.id, taken.reason, storm.decisionAt);
-      if (committed.committed) result.lost++;
+    if (taken.decision.lost) {
+      if (taken.lostNow) result.lost++;
       // Whether or not the loss committed (arrival may have won), nothing later can apply.
       break;
     }
   }
+  const last = nights.at(-1);
+  if (resolvedUntil !== null) cursors.set(bottle.id, resolvedUntil);
+  else if (last) cursors.set(bottle.id, last.startsAt + 1);
   return result;
+}
+
+// Per database connection: how far each bottle's nights are resolved (every night starting
+// before the cursor has either no storm or a decision). In memory only — it is a pure
+// function of the stored decisions, so after a restart one full walk rebuilds it.
+const riskCursors = new WeakMap<object, Map<string, number>>();
+function cursorsFor(ctx: AppContext): Map<string, number> {
+  const key = (ctx.db as unknown as { session?: { client?: object } }).session?.client ?? ctx.db;
+  let map = riskCursors.get(key);
+  if (!map) riskCursors.set(key, (map = new Map<string, number>()));
+  return map;
 }
 
 // ---------- public listing deadline ----------

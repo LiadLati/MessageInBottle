@@ -5,6 +5,7 @@ import { logger } from 'hono/logger';
 import type { ZodError } from 'zod';
 import { AppError } from '../lib/errors.js';
 import { RateLimiter } from '../lib/rate-limit.js';
+import { PasswordHashingBusyError } from '../lib/password.js';
 import type { AppContext, AuthUser } from '../services/context.js';
 import { adminRoutes } from './routes/admin.js';
 import { authRoutes } from './routes/auth.js';
@@ -90,7 +91,7 @@ export function createApp(ctx: AppContext) {
   );
   app.route('/api/chart', chartRoutes());
   app.route('/api/friends', friendRoutes());
-  app.route('/api/bottles', bottleRoutes());
+  app.route('/api/bottles', bottleRoutes(limiter));
   app.route('/api/shore', shoreRoutes());
   app.route('/api/ocean', oceanRoutes());
   app.route('/api/notifications', notificationRoutes());
@@ -104,6 +105,13 @@ export function createApp(ctx: AppContext) {
       return c.json(
         { error: { code: err.code, message: err.message, details: err.details } },
         err.status as 400,
+      );
+    }
+    if (err instanceof PasswordHashingBusyError) {
+      c.header('Retry-After', '2');
+      return c.json(
+        { error: { code: 'busy', message: 'The server is busy. Try again in a moment.' } },
+        503,
       );
     }
     if (isZodError(err)) {

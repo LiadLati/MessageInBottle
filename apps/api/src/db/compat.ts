@@ -2,6 +2,9 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import type Database from 'better-sqlite3';
+import { is } from 'drizzle-orm';
+import { SQLiteTable, getTableConfig } from 'drizzle-orm/sqlite-core';
+import * as schema from './schema.js';
 
 // Compatibility for a development database that applied the policy-acceptance migration while
 // it was briefly numbered 0010, before the moderation branch was merged and it was renumbered
@@ -275,34 +278,24 @@ function countPolicyRows(sqlite: Database.Database): number {
 // catches the failure mode that made this module necessary — a migration skipped in silence
 // because the bookkeeping said the database was newer than it was — instead of leaving it to
 // surface as a confusing runtime error much later.
-const REQUIRED_TABLES = [
-  'users',
-  'moderation_audit',
-  'sessions',
-  'letters',
-  'bottles',
-  'policy_acceptances',
-  'moderation_cases',
-  'letter_reports',
-  'violations',
-  'appeals',
-  'risk_decisions',
-  'public_openings',
-];
-const REQUIRED_COLUMNS: Array<[table: string, column: string]> = [
-  ['users', 'time_zone'],
-  ['users', 'role'],
-  ['users', 'deleted_at'],
-  ['moderation_cases', 'evidence_redacted_at'],
-  ['moderation_cases', 'hold_reason'],
-  ['violations', 'appeal_waived_at'],
-  ['violations', 'severity'],
-  ['bottles', 'public_deadline_at'],
-];
+// Derived from schema.ts itself, so a new table or column is covered the moment it is declared
+// — the hand-kept list this replaced silently fell behind every new migration (audit ARCH-020).
+function requiredSchema(): { tables: string[]; columns: Array<[table: string, column: string]> } {
+  const tables: string[] = [];
+  const columns: Array<[string, string]> = [];
+  for (const value of Object.values(schema)) {
+    if (!is(value, SQLiteTable)) continue;
+    const config = getTableConfig(value);
+    tables.push(config.name);
+    for (const column of config.columns) columns.push([config.name, column.name]);
+  }
+  return { tables, columns };
+}
 
 export function assertSchemaComplete(sqlite: Database.Database): void {
-  const missingTables = REQUIRED_TABLES.filter((t) => !tableExists(sqlite, t));
-  const missingColumns = REQUIRED_COLUMNS.filter(([table, column]) => {
+  const required = requiredSchema();
+  const missingTables = required.tables.filter((t) => !tableExists(sqlite, t));
+  const missingColumns = required.columns.filter(([table, column]) => {
     if (missingTables.includes(table) || !tableExists(sqlite, table)) return false;
     const columns = sqlite.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>;
     return !columns.some((c) => c.name === column);

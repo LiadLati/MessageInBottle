@@ -5,7 +5,7 @@ import * as t from '../db/schema.js';
 import { AppError, notFound } from '../lib/errors.js';
 import { newSecretToken } from '../lib/ids.js';
 import { appendEvent, releaseCapacityOnce } from './journey.js';
-import { DUMMY_PASSWORD_HASH, verifyPassword } from '../lib/password.js';
+import { dummyPasswordHash, verifyPasswordAsync } from '../lib/password.js';
 import type { AppContext } from './context.js';
 import { enqueueNotification } from './notifications.js';
 import { writeAudit } from './audit.js';
@@ -63,9 +63,13 @@ export const invalidPassword = () =>
 
 // Re-authentication: the person at the keyboard must know the password, not merely hold the
 // session. Runs in constant time for a missing hash so it cannot be used to probe accounts.
-export function verifyAccountPassword(ctx: AppContext, userId: string, password: string): void {
+export async function verifyAccountPassword(
+  ctx: AppContext,
+  userId: string,
+  password: string,
+): Promise<void> {
   const row = ctx.db.select().from(t.users).where(eq(t.users.id, userId)).get();
-  const ok = verifyPassword(password, row?.passwordHash ?? DUMMY_PASSWORD_HASH);
+  const { ok } = await verifyPasswordAsync(password, row?.passwordHash ?? dummyPasswordHash());
   if (!row || !row.passwordHash || !ok) throw invalidPassword();
 }
 

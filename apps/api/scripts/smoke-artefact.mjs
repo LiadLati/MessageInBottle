@@ -176,6 +176,17 @@ try {
     h.ok === true && !('devMode' in h) && !('mail' in h),
   );
   check('startup log says devMode=false', /devMode=false/.test(output));
+  const second = spawnSync(node, [dist('server.js')], {
+    cwd: tmp,
+    env: { ...env, MIB_PORT: String(port + 1) },
+    encoding: 'utf8',
+    timeout: 30_000,
+  });
+  check(
+    'a second API process on the same database is refused',
+    second.status !== 0 && /Another SeaYou API process/.test(second.stderr),
+    `exit ${second.status}`,
+  );
   check(
     'security headers are set (frame, sniffing, CSP, HSTS)',
     health.headers.get('x-frame-options') === 'DENY' &&

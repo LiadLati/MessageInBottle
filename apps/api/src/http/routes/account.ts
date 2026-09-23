@@ -11,10 +11,10 @@ import { jsonBody } from '../validate.js';
 export function accountRoutes() {
   const r = new Hono<AppEnv>();
   r.use('*', requireAuth);
-  r.post('/delete', jsonBody(DeleteAccountRequestSchema), (c) => {
+  r.post('/delete', jsonBody(DeleteAccountRequestSchema), async (c) => {
     const ctx = c.get('ctx');
     const user = c.get('user');
-    verifyAccountPassword(ctx, user.id, c.req.valid('json').password);
+    await verifyAccountPassword(ctx, user.id, c.req.valid('json').password);
     const summary = deleteAccount(ctx, user.id);
     return c.json({ deletedAt: summary.deletedAt, alreadyDeleted: summary.alreadyDeleted });
   });

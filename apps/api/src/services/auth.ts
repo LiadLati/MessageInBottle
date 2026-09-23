@@ -1,10 +1,10 @@
-import { and, eq, gt, isNull } from 'drizzle-orm';
+import { and, eq, gt, isNull, ne } from 'drizzle-orm';
 import type { PolicyAcceptanceRequest } from '@mib/shared';
 import { RESET_TOKEN_TTL_MS, normalizeEmail, normalizeUsername } from '@mib/shared';
 import * as t from '../db/schema.js';
 import { newId, newSecretToken, sha256 } from '../lib/ids.js';
 import { AppError, badRequest, conflict } from '../lib/errors.js';
-import { DUMMY_PASSWORD_HASH, hashPassword, verifyPassword } from '../lib/password.js';
+import { dummyPasswordHash, hashPasswordAsync, verifyPasswordAsync } from '../lib/password.js';
 import type { AppContext, AuthUser } from './context.js';
 import { assertAcceptancesAllowed, recordAcceptances } from './policies.js';
 
@@ -67,17 +67,17 @@ function issueSession(ctx: AppContext, userId: string): string {
   return token;
 }
 
-export function register(
+export async function register(
   ctx: AppContext,
   input: { username: string; email: string; password: string; policies: PolicyAcceptanceRequest },
-): { token: string; user: AuthUser } {
+): Promise<{ token: string; user: AuthUser }> {
   // Nobody is asked to agree to unfinished legal text outside development.
   assertAcceptancesAllowed(ctx);
   const username = normalizeUsername(input.username);
   const email = normalizeEmail(input.email);
   const displayName = input.username.trim();
+  const passwordHash = await hashPasswordAsync(input.password);
   const now = ctx.clock.now();
-  const passwordHash = hashPassword(input.password);
   const id = newId('usr');
   try {
     // The account and its acceptances are one write: no account exists without its record of
@@ -130,18 +130,31 @@ export function emailTaken(ctx: AppContext, email: string): boolean {
   );
 }
 
-export function login(
+export async function login(
   ctx: AppContext,
   input: { username: string; password: string },
-): { token: string; user: AuthUser } {
+): Promise<{ token: string; user: AuthUser }> {
   const row = ctx.db
     .select()
     .from(t.users)
     .where(eq(t.users.username, normalizeUsername(input.username)))
     .get();
   // Always verify against some hash so timing does not differ for unknown usernames.
-  const ok = verifyPassword(input.password, row?.passwordHash ?? DUMMY_PASSWORD_HASH);
+  const { ok, needsRehash } = await verifyPasswordAsync(
+    input.password,
+    row?.passwordHash ?? dummyPasswordHash(),
+  );
   if (!row || !row.passwordHash || !ok || row.status !== 'active') throw invalidCredentials();
+  // A hash made at an older cost is replaced while the password is at hand (audit SEC-007).
+  // Guarded on the old hash, so a password changed meanwhile is never overwritten.
+  if (needsRehash) {
+    const upgraded = await hashPasswordAsync(input.password);
+    ctx.db
+      .update(t.users)
+      .set({ passwordHash: upgraded })
+      .where(and(eq(t.users.id, row.id), eq(t.users.passwordHash, row.passwordHash)))
+      .run();
+  }
   return { token: issueSession(ctx, row.id), user: toAuthUser(row) };
 }
 
@@ -172,56 +185,91 @@ export const resetInvalid = () =>
 // Always completes the same way whether or not the address belongs to an account. When it
 // does, earlier unused tokens are superseded and one fresh token is mailed. The token itself
 // exists only in the message; the database keeps its hash.
-export async function requestPasswordReset(ctx: AppContext, email: string): Promise<void> {
+// Returns at once with the delivery still in flight, so the HTTP answer — and how long it takes
+// — is the same whether or not the address is known and whether or not the mail server is up
+// (audits ARCH-008 / QA-004 and SEC-017: a failing transport used to answer 500 only for known
+// addresses, and a slow one made known addresses measurably slower).
+//
+// The new link replaces older ones only once it has actually been handed to the mail server.
+// If sending fails, the new link is withdrawn and any earlier one still works, so a transient
+// outage never leaves the person worse off than before they asked.
+export function requestPasswordReset(ctx: AppContext, email: string): Promise<void> {
   const normalized = normalizeEmail(email);
   // Reset tokens are an authentication lifetime: real time, like sessions.
   const now = ctx.realClock.now();
   const user = normalized
     ? ctx.db.select().from(t.users).where(eq(t.users.email, normalized)).get()
     : undefined;
-  if (!user || user.status !== 'active') return;
+  if (!user || user.status !== 'active') return Promise.resolve();
   const token = newSecretToken();
-  ctx.db.transaction((tx) => {
-    tx.update(t.passwordResets)
-      .set({ invalidatedAt: now })
-      .where(
-        and(
-          eq(t.passwordResets.userId, user.id),
-          isNull(t.passwordResets.usedAt),
-          isNull(t.passwordResets.invalidatedAt),
-        ),
-      )
-      .run();
-    tx.insert(t.passwordResets)
-      .values({
-        id: newId('prs'),
-        userId: user.id,
-        tokenHash: sha256(token),
-        createdAt: now,
-        expiresAt: now + RESET_TOKEN_TTL_MS,
-      })
-      .run();
-  });
+  const id = newId('prs');
+  ctx.db
+    .insert(t.passwordResets)
+    .values({
+      id,
+      userId: user.id,
+      tokenHash: sha256(token),
+      createdAt: now,
+      expiresAt: now + RESET_TOKEN_TTL_MS,
+    })
+    .run();
   const link = `${ctx.config.appUrl.replace(/\/$/, '')}/?reset=${token}`;
-  await ctx.mailer.send({
-    to: user.email!,
-    subject: 'Reset your SeaYou password',
-    text: [
-      `Hello ${user.displayName},`,
-      '',
-      'Someone asked to reset the password for your SeaYou account.',
-      'If that was you, open this link within 30 minutes:',
-      '',
-      link,
-      '',
-      'If it was not you, ignore this message; your password stays as it is.',
-    ].join('\n'),
-  });
+  let sending: Promise<void>;
+  try {
+    sending = ctx.mailer.send({
+      to: user.email!,
+      subject: 'Reset your SeaYou password',
+      text: [
+        `Hello ${user.displayName},`,
+        '',
+        'Someone asked to reset the password for your SeaYou account.',
+        'If that was you, open this link within 30 minutes:',
+        '',
+        link,
+        '',
+        'If it was not you, ignore this message; your password stays as it is.',
+      ].join('\n'),
+    });
+  } catch (err) {
+    sending = Promise.reject(err instanceof Error ? err : new Error(String(err)));
+  }
+  return sending.then(
+    () => {
+      ctx.db
+        .update(t.passwordResets)
+        .set({ invalidatedAt: ctx.realClock.now() })
+        .where(
+          and(
+            eq(t.passwordResets.userId, user.id),
+            ne(t.passwordResets.id, id),
+            isNull(t.passwordResets.usedAt),
+            isNull(t.passwordResets.invalidatedAt),
+          ),
+        )
+        .run();
+    },
+    (err: unknown) => {
+      ctx.db
+        .update(t.passwordResets)
+        .set({ invalidatedAt: ctx.realClock.now() })
+        .where(and(eq(t.passwordResets.id, id), isNull(t.passwordResets.usedAt)))
+        .run();
+      // Logged for the operator; never shown to the requester, who is told the same thing
+      // either way. The message carries no token and no address.
+      console.error(
+        'password-reset mail could not be sent:',
+        err instanceof Error ? err.message : String(err),
+      );
+    },
+  );
 }
 
 // Consumes one valid token: sets the password, marks the token used, supersedes every other
 // open token for the account and revokes all of its sessions.
-export function resetPassword(ctx: AppContext, input: { token: string; password: string }): void {
+export async function resetPassword(
+  ctx: AppContext,
+  input: { token: string; password: string },
+): Promise<void> {
   const now = ctx.realClock.now();
   const hash = sha256(input.token);
   const row = ctx.db
@@ -233,7 +281,7 @@ export function resetPassword(ctx: AppContext, input: { token: string; password:
     throw resetInvalid();
   const user = ctx.db.select().from(t.users).where(eq(t.users.id, row.userId)).get();
   if (!user || user.status !== 'active') throw resetInvalid();
-  const passwordHash = hashPassword(input.password);
+  const passwordHash = await hashPasswordAsync(input.password);
   ctx.db.transaction((tx) => {
     // Guarded update: a concurrent use of the same token loses.
     const used = tx

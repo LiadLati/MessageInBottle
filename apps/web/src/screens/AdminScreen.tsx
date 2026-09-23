@@ -445,8 +445,9 @@ function CaseBody({ c }: { c: AdminCaseDetailDto }) {
               {c.ai.translation ? (
                 <div className="stack">
                   <span className="t-label">
-                    Translation{c.ai.language ? ` (from ${c.ai.language})` : ''} — the original is
-                    above
+                    Machine translation{c.ai.language ? ` (from ${c.ai.language})` : ''} — produced
+                    by the review model from text the sender wrote, so it can be wrong or
+                    manipulated. The original above is the evidence.
                   </span>
                   <p className="secondary" dir="auto">
                     {c.ai.translation}

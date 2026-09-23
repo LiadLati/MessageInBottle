@@ -340,7 +340,7 @@ export function decideCase(
       c.senderId,
       { id: violationId, recipientName: bottle.recipientNameSnapshot },
       standing,
-      ctx.clock.now(),
+      now,
     );
     return true;
   });
@@ -480,7 +480,7 @@ export function decideAppeal(
               ? '.'
               : ' and your account is no longer suspended or banned for it.'
         }`,
-        now: ctx.clock.now(),
+        now,
       });
     } else {
       enqueueNotification(tx, {
@@ -490,7 +490,7 @@ export function decideAppeal(
         bottleId: null,
         dedupeKey: `appeal_rejected:${a.id}`,
         message: `Your appeal about the letter to ${bottle.recipientNameSnapshot} was reviewed and rejected. The decision stands and cannot be appealed again.`,
-        now: ctx.clock.now(),
+        now,
       });
     }
     return true;
@@ -613,7 +613,7 @@ export function decideCaseCritical(
       c.senderId,
       { id: violation.id, recipientName: bottle.recipientNameSnapshot },
       standingOf(tx, c.senderId, now),
-      ctx.clock.now(),
+      now,
     );
   });
   return getCase(ctx, caseId);

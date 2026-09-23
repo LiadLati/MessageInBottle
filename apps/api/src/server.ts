@@ -22,12 +22,16 @@ async function main(): Promise<void> {
   const { createOllamaReviewer, releaseStaleAiClaims, runAiReviewTick } =
     await import('./services/ai-review.js');
   const { applyRetention } = await import('./services/retention.js');
+  const { pruneExpiredRecords } = await import('./services/housekeeping.js');
   const { serve } = await import('@hono/node-server');
   const { assertPolicySetServeable } = await import('./services/policies.js');
 
   const config = loadConfig();
   // A released document set that still carries an unresolved field must never be served.
   assertPolicySetServeable();
+  const { acquireProcessLock } = await import('./lib/process-lock.js');
+  const releaseLock = acquireProcessLock(config.databasePath);
+  process.once('exit', releaseLock);
   const { db, sqlite } = createDb(config.databasePath);
   prepareDatabase(db, config, Date.now());
   // One API process per database: any review still marked running was interrupted by the last
@@ -79,6 +83,11 @@ async function main(): Promise<void> {
   // The pass is idempotent and re-checks every case inside its own transaction, so an hourly
   // tick that overlaps a decision, an appeal or a hold does the right thing.
   const retentionWorker = setInterval(() => {
+    try {
+      pruneExpiredRecords(db, Date.now());
+    } catch (err) {
+      console.error('housekeeping tick failed', err);
+    }
     if (!config.retention.enabled) return;
     try {
       const result = applyRetention(db, Date.now(), config.retention);
@@ -146,7 +155,11 @@ function fatal(err: unknown, port?: number): never {
   const code = (err as { code?: string } | null)?.code;
   const rule = '='.repeat(72);
   console.error(`\n${rule}\nSeaYou API failed to start.\n\n  ${message}\n`);
-  if ((err as { name?: string } | null)?.name === 'ConfigError') {
+  if ((err as { name?: string } | null)?.name === 'ProcessLockError') {
+    console.error(
+      '  Stop the other process first. This API keeps its workers and limits in memory.',
+    );
+  } else if ((err as { name?: string } | null)?.name === 'ConfigError') {
     console.error('  The configuration is invalid, so nothing was started. See .env.example.');
   } else if (code === 'ERR_MODULE_NOT_FOUND' || /Cannot find (module|package)/i.test(message)) {
     console.error('  A dependency is missing. After pulling changes, run:  pnpm install');

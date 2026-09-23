@@ -3,15 +3,28 @@ import { ReleasePreviewRequestSchema, ReleaseRequestSchema } from '@mib/shared';
 import { getSentBottle, listSentBottles, readOwnLetter } from '../../services/bottles.js';
 import { acknowledgeOutcome, markOutcomeSeen } from '../../services/outcomes.js';
 import { previewRelease, releaseBottle } from '../../services/release.js';
+import { createMiddleware } from 'hono/factory';
+import { tooManyRequests } from '../../lib/errors.js';
+import { RateLimiter, type RateLimitRule } from '../../lib/rate-limit.js';
 import type { AppEnv } from '../app.js';
 import { requireAuth } from '../middleware/auth.js';
 import { requireGoodStanding } from '../middleware/admin.js';
 import { requirePolicies } from '../middleware/policies.js';
 import { jsonBody } from '../validate.js';
 
-export function bottleRoutes() {
+// Planning a route is the most expensive thing a request can ask for (audit ARCH-012). Routes
+// are cached per graph, but one account asking for previews and releases in a loop is still
+// bounded: generous for a person choosing a recipient, small for a script.
+export const PLAN_PER_ACCOUNT: RateLimitRule = { limit: 120, windowMs: 15 * 60 * 1000 };
+
+export function bottleRoutes(limiter = new RateLimiter()) {
   const r = new Hono<AppEnv>();
   r.use('*', requireAuth, requirePolicies, requireGoodStanding);
+  const plan = createMiddleware<AppEnv>(async (c, next) => {
+    const d = limiter.hit(`plan:${c.get('user').id}`, PLAN_PER_ACCOUNT);
+    if (!d.allowed) throw tooManyRequests(d.retryAfterMs);
+    await next();
+  });
   r.get('/sent', (c) => c.json({ bottles: listSentBottles(c.get('ctx'), c.get('user')) }));
   r.get('/sent/:id', (c) =>
     c.json({ bottle: getSentBottle(c.get('ctx'), c.get('user'), c.req.param('id')) }),
@@ -28,10 +41,10 @@ export function bottleRoutes() {
   r.post('/sent/:id/acknowledge', (c) =>
     c.json({ visibility: acknowledgeOutcome(c.get('ctx'), c.get('user'), c.req.param('id')) }),
   );
-  r.post('/preview', jsonBody(ReleasePreviewRequestSchema), (c) =>
+  r.post('/preview', plan, jsonBody(ReleasePreviewRequestSchema), (c) =>
     c.json(previewRelease(c.get('ctx'), c.get('user'), c.req.valid('json').recipientId)),
   );
-  r.post('/release', jsonBody(ReleaseRequestSchema), (c) => {
+  r.post('/release', plan, jsonBody(ReleaseRequestSchema), (c) => {
     const ctx = c.get('ctx');
     const user = c.get('user');
     const outcome = releaseBottle(ctx, user, c.req.valid('json'));

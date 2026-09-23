@@ -77,9 +77,9 @@ export function legalRoutes(limiter = new RateLimiter()) {
     try {
       // Signing in proves the account exists and the password is right; the second check keeps
       // the in-app path and this one on exactly the same rule.
-      const session = login(ctx, { username: normalizeUsername(username), password });
+      const session = await login(ctx, { username: normalizeUsername(username), password });
       userId = session.user.id;
-      verifyAccountPassword(ctx, userId, password);
+      await verifyAccountPassword(ctx, userId, password);
     } catch (err) {
       if (err instanceof AppError && (err.status === 401 || err.status === 404))
         return back('That username and password do not match an account.');
