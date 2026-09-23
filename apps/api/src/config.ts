@@ -5,14 +5,48 @@ import type { PoliciesConfig } from './services/policies.js';
 import { SEVEN_DAYS_MS, type RetentionPolicy } from './services/retention.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
+// src/config.ts in development, dist/<entry>.js in the built artefact: both sit one directory
+// below the API root, so the migrations folder and the default .env resolve identically from
+// either. Nothing here depends on the current working directory.
 export const API_ROOT = path.resolve(here, '..');
 
-function envDays(name: string): number | null {
-  const raw = process.env[name];
+// Replaced with `true` by the production build (scripts/build.mjs). Running from source under
+// tsx it is undeclared, so it reads as false. The compiled artefact is therefore production by
+// construction: it cannot be talked into development mode by an environment variable.
+declare const __MIB_PRODUCTION_BUILD__: boolean | undefined;
+export const PRODUCTION_BUILD: boolean =
+  typeof __MIB_PRODUCTION_BUILD__ !== 'undefined' && __MIB_PRODUCTION_BUILD__ === true;
+
+export type Env = Record<string, string | undefined>;
+
+// A configuration mistake the server refuses to start with. The message is the whole report:
+// it names the variable and the remedy, and never echoes a value that could be a secret.
+export class ConfigError extends Error {
+  override readonly name = 'ConfigError';
+}
+
+// Booleans are exactly `true` or `false`. Anything else — `1`, `yes`, `TRUE `, a typo — is a
+// configuration error rather than a silent guess, because a guess in either direction can be
+// the dangerous one (a mistyped MIB_DEV_MODE, or a mistyped MIB_RETENTION_ENABLED).
+export function envBool(env: Env, name: string, fallback: boolean): boolean {
+  const raw = env[name];
+  if (raw === undefined || raw === '') return fallback;
+  if (raw === 'true') return true;
+  if (raw === 'false') return false;
+  throw new ConfigError(`${name} must be exactly "true" or "false"`);
+}
+
+// Production is the compiled artefact, or NODE_ENV=production for anything run from source.
+export function isProductionRuntime(env: Env, productionBuild = PRODUCTION_BUILD): boolean {
+  return productionBuild || env.NODE_ENV === 'production';
+}
+
+function envDays(env: Env, name: string): number | null {
+  const raw = env[name];
   if (raw === undefined || raw === '') return null;
   const n = Number(raw);
   if (!Number.isFinite(n) || n < 0)
-    throw new Error(`${name} must be a non-negative number of days`);
+    throw new ConfigError(`${name} must be a non-negative number of days`);
   return n * 24 * 60 * 60 * 1000;
 }
 
@@ -20,18 +54,18 @@ function envDays(name: string): number | null {
 // MIB_RETENTION_ENABLED=false stops it removing anything (the dry-run plan still works), and
 // MIB_RETENTION_FINAL_DAYS shortens or lengthens the window for a staging environment. Neither
 // is needed in an ordinary deployment.
-function loadRetentionPolicy(): RetentionPolicy {
+function loadRetentionPolicy(env: Env): RetentionPolicy {
   return {
-    enabled: (process.env.MIB_RETENTION_ENABLED ?? 'true') === 'true',
-    finalAfterMs: envDays('MIB_RETENTION_FINAL_DAYS') ?? SEVEN_DAYS_MS,
+    enabled: envBool(env, 'MIB_RETENTION_ENABLED', true),
+    finalAfterMs: envDays(env, 'MIB_RETENTION_FINAL_DAYS') ?? SEVEN_DAYS_MS,
   };
 }
 
-function envInt(name: string, fallback: number): number {
-  const raw = process.env[name];
+function envInt(env: Env, name: string, fallback: number): number {
+  const raw = env[name];
   if (raw === undefined || raw === '') return fallback;
   const n = Number(raw);
-  if (!Number.isFinite(n)) throw new Error(`${name} must be a number`);
+  if (!Number.isFinite(n)) throw new ConfigError(`${name} must be a number`);
   return n;
 }
 
@@ -97,57 +131,78 @@ export interface MailConfig {
   smtp: { host: string; port: number; secure: boolean; user: string; pass: string };
 }
 
-export function loadConfig(): AppConfig {
-  const devMode = (process.env.MIB_DEV_MODE ?? 'true') === 'true';
+// Reads and validates the whole configuration before anything listens. Development mode is off
+// unless MIB_DEV_MODE is exactly `true`, and it is refused outright in production: a forgotten
+// variable must never be what turns on seeded accounts, the dev clock or /api/dev.
+export function loadConfig(
+  env: Env = process.env,
+  options: { productionBuild?: boolean } = {},
+): AppConfig {
+  const production = isProductionRuntime(env, options.productionBuild ?? PRODUCTION_BUILD);
+  const devMode = envBool(env, 'MIB_DEV_MODE', false);
+  if (production && devMode)
+    throw new ConfigError(
+      'MIB_DEV_MODE=true is refused in production. Development mode enables seeded accounts ' +
+        'with a published password, a movable clock and the /api/dev routes; unset it or set ' +
+        'MIB_DEV_MODE=false.',
+    );
+  const databasePath = env.MIB_DATABASE_PATH;
+  // The default path lives inside the application directory, which a redeploy replaces. A
+  // production server must be told explicitly where its data lives.
+  if (production && (!databasePath || !path.isAbsolute(databasePath)))
+    throw new ConfigError(
+      'MIB_DATABASE_PATH must be set to an absolute path in production (a file on persistent ' +
+        'storage outside the application directory).',
+    );
   return {
-    port: envInt('MIB_PORT', 3001),
-    databasePath: process.env.MIB_DATABASE_PATH ?? path.join(API_ROOT, 'data', 'mib.sqlite'),
+    port: envInt(env, 'MIB_PORT', 3001),
+    databasePath: databasePath || path.join(API_ROOT, 'data', 'mib.sqlite'),
     devMode,
-    logRequests: (process.env.MIB_LOG_REQUESTS ?? 'true') === 'true',
-    msPerChartUnit: envInt('MIB_MS_PER_CHART_UNIT', 60 * 60 * 1000),
-    minJourneyMs: envInt('MIB_MIN_JOURNEY_MS', 6 * 60 * 60 * 1000),
-    defaultShoreCapacity: envInt('MIB_DEFAULT_SHORE_CAPACITY', 5),
-    journeyTickMs: envInt('MIB_JOURNEY_TICK_MS', 15_000),
-    sessionTtlMs: envInt('MIB_SESSION_TTL_MS', 30 * 24 * 60 * 60 * 1000),
-    corsOrigin: process.env.MIB_CORS_ORIGIN ?? 'http://localhost:5173',
-    trustProxy: (process.env.MIB_TRUST_PROXY ?? 'false') === 'true',
-    appUrl: process.env.MIB_APP_URL ?? 'http://localhost:5173',
-    supportEmail: process.env.MIB_SUPPORT_EMAIL ?? SUPPORT_EMAIL,
-    mail: loadMailConfig(devMode),
+    logRequests: envBool(env, 'MIB_LOG_REQUESTS', true),
+    msPerChartUnit: envInt(env, 'MIB_MS_PER_CHART_UNIT', 60 * 60 * 1000),
+    minJourneyMs: envInt(env, 'MIB_MIN_JOURNEY_MS', 6 * 60 * 60 * 1000),
+    defaultShoreCapacity: envInt(env, 'MIB_DEFAULT_SHORE_CAPACITY', 5),
+    journeyTickMs: envInt(env, 'MIB_JOURNEY_TICK_MS', 15_000),
+    sessionTtlMs: envInt(env, 'MIB_SESSION_TTL_MS', 30 * 24 * 60 * 60 * 1000),
+    corsOrigin: env.MIB_CORS_ORIGIN ?? 'http://localhost:5173',
+    trustProxy: envBool(env, 'MIB_TRUST_PROXY', false),
+    appUrl: env.MIB_APP_URL ?? 'http://localhost:5173',
+    supportEmail: env.MIB_SUPPORT_EMAIL ?? SUPPORT_EMAIL,
+    mail: loadMailConfig(env, devMode),
     // The published set is the authority; there is no environment switch that can release
     // documents that are not released in code, or hold back ones that are.
     policies: { status: policySetStatus(POLICY_DOCUMENTS) },
-    riskPolicyVersion: envInt('MIB_RISK_POLICY_VERSION', RISK_POLICY_VERSION),
-    retention: loadRetentionPolicy(),
+    riskPolicyVersion: envInt(env, 'MIB_RISK_POLICY_VERSION', RISK_POLICY_VERSION),
+    retention: loadRetentionPolicy(env),
     // Hourly. The pass is idempotent and the window is seven days, so the exact cadence only
     // decides how soon after the boundary the evidence actually goes.
-    retentionTickMs: envInt('MIB_RETENTION_TICK_MS', 60 * 60 * 1000),
+    retentionTickMs: envInt(env, 'MIB_RETENTION_TICK_MS', 60 * 60 * 1000),
     ai: {
-      enabled: (process.env.MIB_AI_ENABLED ?? 'true') === 'true',
-      endpoint: (process.env.MIB_AI_ENDPOINT ?? 'http://127.0.0.1:11434').replace(/\/+$/, ''),
-      model: process.env.MIB_AI_MODEL ?? 'qwen2.5:7b',
-      timeoutMs: envInt('MIB_AI_TIMEOUT_MS', 60_000),
-      tickMs: envInt('MIB_AI_TICK_MS', 10_000),
-      autoDecide: (process.env.MIB_AI_AUTO_DECIDE ?? 'false') === 'true',
+      enabled: envBool(env, 'MIB_AI_ENABLED', true),
+      endpoint: (env.MIB_AI_ENDPOINT ?? 'http://127.0.0.1:11434').replace(/\/+$/, ''),
+      model: env.MIB_AI_MODEL ?? 'qwen2.5:7b',
+      timeoutMs: envInt(env, 'MIB_AI_TIMEOUT_MS', 60_000),
+      tickMs: envInt(env, 'MIB_AI_TICK_MS', 10_000),
+      autoDecide: envBool(env, 'MIB_AI_AUTO_DECIDE', false),
     },
   };
 }
 
-function loadMailConfig(devMode: boolean): MailConfig {
-  const raw = process.env.MIB_MAIL_PROVIDER ?? (devMode ? 'outbox' : 'disabled');
+function loadMailConfig(env: Env, devMode: boolean): MailConfig {
+  const raw = env.MIB_MAIL_PROVIDER ?? (devMode ? 'outbox' : 'disabled');
   if (raw !== 'outbox' && raw !== 'smtp' && raw !== 'disabled')
-    throw new Error('MIB_MAIL_PROVIDER must be outbox, smtp or disabled');
+    throw new ConfigError('MIB_MAIL_PROVIDER must be outbox, smtp or disabled');
   if (raw === 'outbox' && !devMode)
-    throw new Error('MIB_MAIL_PROVIDER=outbox is development-only; use smtp or disabled');
+    throw new ConfigError('MIB_MAIL_PROVIDER=outbox is development-only; use smtp or disabled');
   return {
     provider: raw,
-    from: process.env.MIB_MAIL_FROM ?? 'SeaYou <no-reply@localhost>',
+    from: env.MIB_MAIL_FROM ?? 'SeaYou <no-reply@localhost>',
     smtp: {
-      host: process.env.MIB_SMTP_HOST ?? '',
-      port: envInt('MIB_SMTP_PORT', 587),
-      secure: (process.env.MIB_SMTP_SECURE ?? 'false') === 'true',
-      user: process.env.MIB_SMTP_USER ?? '',
-      pass: process.env.MIB_SMTP_PASS ?? '',
+      host: env.MIB_SMTP_HOST ?? '',
+      port: envInt(env, 'MIB_SMTP_PORT', 587),
+      secure: envBool(env, 'MIB_SMTP_SECURE', false),
+      user: env.MIB_SMTP_USER ?? '',
+      pass: env.MIB_SMTP_PASS ?? '',
     },
   };
 }

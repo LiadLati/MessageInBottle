@@ -1,8 +1,8 @@
 import type Database from 'better-sqlite3';
 import { and, eq, isNull } from 'drizzle-orm';
 import { POLICY_ACTION, POLICY_IDS, currentPolicyVersions } from '@mib/shared';
-import { loadConfig } from '../config.js';
-import { createDb, runMigrations, type Db } from './client.js';
+import { PRODUCTION_BUILD, type AppConfig } from '../config.js';
+import { runMigrations, type Db } from './client.js';
 import * as t from './schema.js';
 import {
   SEED_EDGES,
@@ -156,6 +156,10 @@ function seedGlobalChart(db: Db, capacity: number, now: number): void {
 // Development-only accounts. Callers must guard with devMode (server.ts, reset.ts, the seed
 // script and the test harness do); the function itself never runs in production paths.
 export function seedUsers(db: Db, now: number): void {
+  // The development accounts share one published password. Defence in depth behind the
+  // configuration check: the compiled production artefact cannot create them at all.
+  if (PRODUCTION_BUILD)
+    throw new Error('refusing to seed development accounts in a production build');
   const devHash = hashPassword(DEV_SEED_PASSWORD);
   db.transaction((tx) => {
     const ids = new Map<string, string>();
@@ -222,16 +226,15 @@ export function seedUsers(db: Db, now: number): void {
   });
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
-  const config = loadConfig();
-  const { db } = createDb(config.databasePath);
+// What the API does to its database on every start: apply migrations, make sure the chart is
+// present, and — only in explicit development mode — create the development accounts. A
+// production database therefore never gains an account the operator did not create.
+export function prepareDatabase(
+  db: Db,
+  config: Pick<AppConfig, 'devMode' | 'defaultShoreCapacity'>,
+  now: number,
+): void {
   runMigrations(db);
-  const now = Date.now();
   seedChart(db, config.defaultShoreCapacity, now);
-  if (config.devMode) {
-    seedUsers(db, now);
-    console.log(`Seeded chart and development users into ${config.databasePath}`);
-  } else {
-    console.log(`Seeded chart into ${config.databasePath} (no users outside dev mode)`);
-  }
+  if (config.devMode) seedUsers(db, now);
 }

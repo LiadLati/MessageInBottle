@@ -24,8 +24,9 @@ integration notes.
 
 ## Requirements
 
-- Node.js 22+
-- pnpm 10 (`corepack enable` or `npm i -g pnpm`)
+- Node.js 22+ (CI runs Node 22)
+- pnpm 10.33.0, pinned by `packageManager` in `package.json` (`corepack enable` picks it up,
+  or `npm i -g pnpm@10`)
 
 No external services, accounts, or paid providers are used. The database is a local SQLite file.
 
@@ -33,10 +34,16 @@ No external services, accounts, or paid providers are used. The database is a lo
 
 ```bash
 pnpm install
-cp .env.example .env        # optional; defaults are fine for development
+cp .env.example .env        # then set MIB_DEV_MODE=true in it for local development
 pnpm db:reset               # create ./apps/api/data/mib.sqlite, apply migrations, seed chart + users
 pnpm dev                    # API on http://localhost:3001, web on http://localhost:5173
 ```
+
+**Development mode is off unless you turn it on.** Without `MIB_DEV_MODE=true` (in `.env`, in
+`apps/api/.env`, or in the shell) the API starts in safe mode: no seeded accounts, no dev clock,
+no dev bar and no `/api/dev/*` routes, and `db:reset` refuses to run. The API's startup output
+says so. The value must be exactly `true` or `false`; anything else stops the API with an
+explanation instead of being guessed.
 
 **After pulling changes, run `pnpm install` again** before `pnpm dev`: new dependencies and
 migrations arrive with the code, and the API applies pending migrations to the existing database
@@ -48,8 +55,11 @@ navigation becomes a left rail and world screens split into map/scene + side pan
 account with a username and a password (8+ characters), or sign in as one of the seeded
 development accounts `ada`, `bo`, `cy` (all mutual friends, each with a shore) and `dee` (no
 shore, pending request to ada). **Development only:** the seed gives those four accounts the
-password `dev-password-2026`; they are created solely by the dev-mode seed (`MIB_DEV_MODE=true`),
-never by the API, so a production database never contains them. Use two browser profiles or a
+password `dev-password-2026`; they are created only when `MIB_DEV_MODE=true` is set explicitly,
+which a production server refuses, so a production database never contains them. The DEV bar
+(dev clock and development outbox) appears only for an account holding the `developer` role;
+grant it to one of the seeded accounts with `developer:grant` (see "Reporting, moderation,
+appeals and admins"). Use two browser profiles or a
 private window to play both sides. The map and the 3D shore need WebGL.
 
 Walkthrough of the vertical slice:
@@ -76,22 +86,68 @@ Walkthrough of the vertical slice:
 | `pnpm dev:api`      | API only (`tsx watch`)                                              |
 | `pnpm dev:web`      | Web only (Vite, proxies `/api` to the API)                          |
 | `pnpm db:migrate`   | Apply SQL migrations in `apps/api/drizzle`                          |
-| `pnpm db:seed`      | Seed the sea chart and development users (idempotent)               |
+| `pnpm db:seed`      | Seed the sea chart, plus development users in dev mode (idempotent) |
 | `pnpm db:reset`     | Delete the dev database, migrate and seed (dev mode only)           |
 | `pnpm typecheck`    | `tsc --noEmit` for every package                                    |
 | `pnpm lint`         | ESLint (type-aware) across the monorepo                             |
 | `pnpm format:check` | Prettier check                                                      |
 | `pnpm test`         | Vitest in every package                                             |
-| `pnpm build`        | Typecheck API/shared and produce the production web bundle          |
+| `pnpm build`        | Typecheck, build the API into `apps/api/dist`, bundle the web app   |
+| `pnpm start`        | Run the compiled API (`node apps/api/dist/server.js`), production   |
+| `pnpm smoke:artefact` | Start the compiled API on a temporary database and check it       |
 
 Schema changes: edit `apps/api/src/db/schema.ts`, then `pnpm --filter @mib/api db:generate`.
+
+### Production build and start
+
+The API ships as compiled JavaScript and runs on plain Node — no `tsx`, no TypeScript at run
+time. `pnpm build` bundles it with esbuild into `apps/api/dist` (the shared package is bundled
+in; npm dependencies stay external; no source maps, so no source is shipped) and copies the one
+data file it reads at start, `dist/data/sea-graph.v2.json`. The migrations are read from
+`apps/api/drizzle`.
+
+A self-contained, production-only copy of the API (compiled output, migrations and production
+dependencies — nothing else) is produced with `pnpm deploy`:
+
+```bash
+pnpm install --frozen-lockfile
+pnpm build
+pnpm --filter @mib/api deploy --prod --legacy /srv/seayou-api    # any empty directory
+
+cd /srv/seayou-api
+MIB_DATABASE_PATH=/var/lib/seayou/seayou.sqlite node dist/migrate.js   # optional: the server also migrates on start
+MIB_DATABASE_PATH=/var/lib/seayou/seayou.sqlite node dist/server.js
+```
+
+The compiled artefact is production by construction:
+
+- `MIB_DEV_MODE=true` is refused at startup (so is any value other than `true`/`false`);
+- `MIB_DATABASE_PATH` is required and must be absolute — the default path is inside the
+  application directory, which a redeploy replaces;
+- the development outbox mail provider is refused; mail is `disabled` unless SMTP is configured;
+- no development accounts are ever created, and the seed and reset scripts are not included;
+- `/api/dev/*` does not exist (404);
+- `SIGTERM`/`SIGINT` stop it cleanly (requests stop, workers stop, SQLite is closed).
+
+Role provisioning is included: `node dist/grant-admin.js -- …` and `node dist/grant-developer.js
+-- …` take the same arguments as `admin:grant` / `developer:grant`. The web app is a static
+bundle in `apps/web/dist`. Hosting, TLS, the reverse proxy, persistent storage, backups and SMTP
+are deliberately not decided here (see `docs/REMEDIATION.md`).
+
+`pnpm smoke:artefact` starts the compiled API on a temporary database and checks all of the above;
+`node apps/api/scripts/smoke-artefact.mjs --artefact <dir> --prod-only` does the same against a
+`pnpm deploy` output and additionally proves that no TypeScript runtime is installed there. CI
+(`.github/workflows/ci.yml`) runs it on every pull request.
 
 ### Environment
 
 All variables are optional and documented in `.env.example`. The important ones:
 
-- `MIB_DEV_MODE` (default `true`): enables the seeded development accounts, the persisted
-  development clock and the `/api/dev/*` routes. Must be `false` for any shared deployment.
+- `MIB_DEV_MODE` (default `false`; exactly `true` or `false`): `true` enables the seeded
+  development accounts, the persisted development clock and the `/api/dev/*` routes (every one
+  of which, the mail outbox included, requires a signed-in `developer` account). It is refused
+  in production: the compiled API, or anything run with `NODE_ENV=production`, will not start
+  with it.
 - `MIB_SESSION_TTL_MS` (default 30 days): lifetime of a sign-in token.
   The in-app dev clock bar is additionally compiled out of production bundles: it renders only
   in `vite` development builds (`import.meta.env.DEV`) and only while the API reports dev mode.
@@ -226,7 +282,7 @@ delivers nothing**:
 
 | Provider   | What happens                                                                   |
 | ---------- | ------------------------------------------------------------------------------ |
-| `outbox`   | Default in dev mode. Captured in memory; read it in the app's dev bar under "Dev outbox", on the Forgot-password screen, or at `GET /api/dev/outbox`. Refused outside dev mode. |
+| `outbox`   | Default in dev mode. Captured in memory; a signed-in `developer` account reads it in the dev bar under "Dev outbox" or at `GET /api/dev/outbox`. It is never shown to a signed-out visitor. Refused outside dev mode. |
 | `smtp`     | Sent through your own SMTP provider using `MIB_SMTP_*`.                          |
 | `disabled` | Default outside dev mode. Silently dropped.                                      |
 
@@ -456,7 +512,7 @@ All routes are under `/api`, JSON, bearer-token authenticated except sign-in.
 | GET    | `/shore/bottles/:id/letter`   | Re-read an opened letter                                      |
 | GET    | `/notifications`              | Inbox events with a `kind`, newest first; `POST /notifications/read-all` marks them read |
 | GET    | `/dev/status`, POST `/dev/advance`, `/dev/arrive`, `/dev/tick` | Dev-mode clock and worker controls |
-| GET    | `/dev/outbox`                 | Dev-mode captured e-mails (password-reset links)              |
+| GET    | `/dev/outbox`                 | Dev-mode captured e-mails; developer role only                |
 
 Non-participants get `404` for any bottle, never `403`, so IDs disclose nothing.
 
@@ -479,5 +535,6 @@ New accounts register with an e-mail address, stored normalized and unique. Pass
 mailed and only its SHA-256 is stored, valid for 30 minutes, single-use, superseding earlier
 tokens. A successful reset revokes every session of the account. Mail goes through a
 provider-neutral adapter (`MIB_MAIL_PROVIDER`: `smtp`, `disabled`, or the development-only
-`outbox`, which the dev bar and `GET /api/dev/outbox` expose so the flow can be tested locally).
+`outbox`, which the dev bar and `GET /api/dev/outbox` expose to a signed-in developer account so
+the flow can be tested locally).
 Reset tokens are never logged.

@@ -1,0 +1,92 @@
+# Quality gates for every pull request and every push to main.
+#
+# Runs in a clean environment with no application secrets and only temporary databases. It
+# does not deploy anything. Each gate is its own named step, so a red run says which one failed.
+#
+# Toolchain: Node 22 (see "engines" in package.json) and pnpm 10.33.0 (the "packageManager"
+# field, which pnpm/action-setup reads).
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  gates:
+    name: Quality gates and production artefact
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      # Nothing here may reach a real service or a real database.
+      CI: 'true'
+      ARTEFACT_DIR: ${{ runner.temp }}/seayou-api
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          # Caches only pnpm's content-addressed package store, keyed on the lockfile.
+          cache: pnpm
+
+      - name: Install (frozen lockfile)
+        run: pnpm install --frozen-lockfile
+
+      - name: Format check
+        run: pnpm format:check
+
+      - name: Lint
+        run: pnpm lint
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      # The whole suite, once. It includes the fail-closed configuration tests and the
+      # development-route security tests (apps/api/src/config.test.ts, http/dev-mode.test.ts).
+      - name: Unit and integration tests
+        run: pnpm test
+
+      - name: Production builds (web and API)
+        run: pnpm build
+
+      # What would ship: the compiled API plus production dependencies only — no tsx, no
+      # TypeScript, no source, no .env, no database.
+      - name: Assemble the production-only API artefact
+        run: pnpm --filter @mib/api deploy --prod --legacy "$ARTEFACT_DIR"
+
+      - name: Fresh migration with the compiled migrator
+        run: |
+          db="$RUNNER_TEMP/migrate-check/fresh.sqlite"
+          mkdir -p "$(dirname "$db")"
+          MIB_DATABASE_PATH="$db" node "$ARTEFACT_DIR/dist/migrate.js"
+          # Idempotent: a second run applies nothing and still succeeds.
+          MIB_DATABASE_PATH="$db" node "$ARTEFACT_DIR/dist/migrate.js"
+          cd "$ARTEFACT_DIR" && node --input-type=module -e "
+            import Database from 'better-sqlite3';
+            import fs from 'node:fs';
+            const expected = JSON.parse(fs.readFileSync('drizzle/meta/_journal.json', 'utf8')).entries.length;
+            const db = new Database(process.argv[1], { readonly: true });
+            const applied = db.prepare('select count(*) as n from __drizzle_migrations').get().n;
+            console.log('migrations applied:', applied, 'expected:', expected);
+            if (applied !== expected) process.exit(1);
+          " "$db"
+
+      # Starts node dist/server.js from the artefact against a temporary database and asserts:
+      # startup refuses MIB_DEV_MODE=true; /api/health, /legal/* and /support answer; every
+      # /api/dev/* route is 404; the seeded development accounts cannot sign in; register and
+      # sign-in work; the audited reset-link takeover chain fails; SIGTERM stops it cleanly.
+      - name: Production artefact smoke (dev endpoints absent, seeded credentials refused)
+        run: node apps/api/scripts/smoke-artefact.mjs --artefact "$ARTEFACT_DIR" --prod-only

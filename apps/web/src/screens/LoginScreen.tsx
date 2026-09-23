@@ -117,65 +117,19 @@ function PasswordInput({
 }
 
 // Development builds do not deliver mail: the outbox captures it in memory instead. Saying so
-// on the recovery screen — and offering the captured messages — is the difference between a
-// flow that looks broken and one that is simply not wired to a mail provider yet. It states
-// nothing about the address that was just submitted, so it cannot reveal whether it is known.
+// on the recovery screen is the difference between a flow that looks broken and one that is
+// simply not wired to a mail provider yet. The captured messages themselves hold live reset
+// links for every account, so they are never offered here to a signed-out visitor: only a
+// signed-in `developer` account can read them, from the dev bar. The notice states nothing
+// about the address that was just submitted, so it cannot reveal whether it is known.
 function DevMailNotice({ health }: { health: HealthResponse }) {
-  const [messages, setMessages] = useState<Array<{ id: number; to: string; text: string }> | null>(
-    null,
-  );
-  const [busy, setBusy] = useState(false);
   const provider = health.mail?.provider ?? 'disabled';
-
-  const load = async () => {
-    setBusy(true);
-    try {
-      setMessages((await api.devOutbox()).messages);
-    } catch {
-      setMessages([]);
-    } finally {
-      setBusy(false);
-    }
-  };
-
   return (
     <div className="note amber dev-mail" role="status">
       <strong>Development mode: no email is sent.</strong>{' '}
       {provider === 'outbox'
-        ? 'Messages are captured inside the app. Open the development outbox to find the reset link.'
+        ? 'Messages are captured by the server. Sign in with a developer account and open the dev bar to read the development outbox.'
         : 'Mail is switched off entirely. Configure an SMTP provider to deliver messages.'}
-      {provider === 'outbox' ? (
-        <>
-          <button type="button" className="btn-text" disabled={busy} onClick={() => void load()}>
-            {busy
-              ? 'Opening…'
-              : messages
-                ? 'Refresh development outbox'
-                : 'Open development outbox'}
-          </button>
-          {messages ? (
-            messages.length === 0 ? (
-              <span className="t-meta">Nothing captured yet.</span>
-            ) : (
-              <ul className="list dev-mail-list">
-                {[...messages].reverse().map((m) => {
-                  const link = /https?:\/\/\S+/.exec(m.text)?.[0];
-                  return (
-                    <li key={m.id}>
-                      <span className="t-meta">{m.to}</span>
-                      {link ? (
-                        <a className="btn-secondary" href={link}>
-                          Open reset link
-                        </a>
-                      ) : null}
-                    </li>
-                  );
-                })}
-              </ul>
-            )
-          ) : null}
-        </>
-      ) : null}
     </div>
   );
 }
@@ -446,7 +400,7 @@ export function LoginScreen({ resetToken, onResetDone, onOpenPolicy }: Props) {
               {success}
             </p>
           ) : null}
-          {forgot && health?.devMode && health.mail?.delivers === false ? (
+          {import.meta.env.DEV && forgot && health?.devMode && health.mail?.delivers === false ? (
             <DevMailNotice health={health} />
           ) : null}
           {forgot && success ? null : (

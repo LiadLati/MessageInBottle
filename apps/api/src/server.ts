@@ -11,9 +11,9 @@ async function main(): Promise<void> {
   // SMTP credentials, so it has to be in process.env by the time loadConfig runs.
   const { loadEnvFiles } = await import('./lib/env.js');
   const loadedEnv = loadEnvFiles();
-  const { loadConfig } = await import('./config.js');
-  const { createDb, runMigrations } = await import('./db/client.js');
-  const { seedChart, seedUsers } = await import('./db/seed.js');
+  const { loadConfig, PRODUCTION_BUILD } = await import('./config.js');
+  const { createDb } = await import('./db/client.js');
+  const { prepareDatabase } = await import('./db/seed.js');
   const { createApp } = await import('./http/app.js');
   const { DevClock, SystemClock } = await import('./lib/clock.js');
   const { createMailer } = await import('./lib/mail.js');
@@ -27,10 +27,8 @@ async function main(): Promise<void> {
   const config = loadConfig();
   // A released document set that still carries an unresolved field must never be served.
   assertPolicySetServeable();
-  const { db } = createDb(config.databasePath);
-  runMigrations(db);
-  seedChart(db, config.defaultShoreCapacity, Date.now());
-  if (config.devMode) seedUsers(db, Date.now());
+  const { db, sqlite } = createDb(config.databasePath);
+  prepareDatabase(db, config, Date.now());
 
   const ctx: AppContext = {
     db,
@@ -99,15 +97,40 @@ async function main(): Promise<void> {
         ? `  AI review: ${config.ai.model} at ${config.ai.endpoint} (${config.ai.autoDecide ? 'automatic decisions ON' : 'recommendations only'}); reports queue while it is offline.`
         : '  AI review is OFF: reports wait for an admin.',
     );
+    if (!config.devMode && !PRODUCTION_BUILD && process.env.NODE_ENV !== 'production')
+      console.log(
+        '  Development mode is OFF (the default). For local development with seeded accounts, the\n' +
+          '  dev clock and the dev bar, set MIB_DEV_MODE=true in apps/api/.env or the root .env.',
+      );
     if (config.mail.provider !== 'smtp') {
       console.log(
         config.mail.provider === 'outbox'
-          ? '  Mail is CAPTURED, not delivered: read it at GET /api/dev/outbox or in the app’s dev bar.'
+          ? '  Mail is CAPTURED, not delivered: a signed-in developer account reads it in the app’s dev bar.'
           : '  Mail is DISABLED: nothing is delivered. Set MIB_MAIL_PROVIDER=smtp with MIB_SMTP_* to send.',
       );
     }
   });
   server.on('error', (err) => fatal(err, config.port));
+
+  // A stop request from a process manager or Ctrl-C: stop accepting requests, stop the workers,
+  // and close SQLite so the WAL is checkpointed rather than left for the next start to recover.
+  let stopping = false;
+  const stop = (signal: NodeJS.Signals) => {
+    if (stopping) return;
+    stopping = true;
+    console.log(`Received ${signal}; stopping.`);
+    clearInterval(worker);
+    clearInterval(aiWorker);
+    clearInterval(retentionWorker);
+    server.close(() => {
+      sqlite.close();
+      process.exit(0);
+    });
+    // Idle keep-alive connections would otherwise hold close() open.
+    (server as { closeAllConnections?: () => void }).closeAllConnections?.();
+  };
+  process.once('SIGTERM', stop);
+  process.once('SIGINT', stop);
 }
 
 // Turns a startup failure into an explanation. The common ones have a one-line remedy, because
@@ -117,7 +140,9 @@ function fatal(err: unknown, port?: number): never {
   const code = (err as { code?: string } | null)?.code;
   const rule = '='.repeat(72);
   console.error(`\n${rule}\nSeaYou API failed to start.\n\n  ${message}\n`);
-  if (code === 'ERR_MODULE_NOT_FOUND' || /Cannot find (module|package)/i.test(message)) {
+  if ((err as { name?: string } | null)?.name === 'ConfigError') {
+    console.error('  The configuration is invalid, so nothing was started. See .env.example.');
+  } else if (code === 'ERR_MODULE_NOT_FOUND' || /Cannot find (module|package)/i.test(message)) {
     console.error('  A dependency is missing. After pulling changes, run:  pnpm install');
   } else if (/NODE_MODULE_VERSION|was compiled against|better[-_]sqlite3|\.node\b/i.test(message)) {
     console.error(

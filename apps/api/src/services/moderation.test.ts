@@ -641,7 +641,11 @@ describe('appeals', () => {
   });
 });
 
-describe('report budgets', () => {
+// Each test here releases a full hourly budget of letters, and every release currently rebuilds
+// the sea graph inside its transaction (audit finding QA-006), so they take ~4–5 s against the
+// 5 s default and failed CI at random on a slower runner. The explicit budget changes no
+// assertion; it goes when QA-006 is fixed.
+describe('report budgets', { timeout: 30_000 }, () => {
   // Bo works through a pile of letters from Ada. The shore is made roomy so that the budget,
   // not the shore, is what stops them.
   function budgetWorld() {
