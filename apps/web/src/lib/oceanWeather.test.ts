@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { OCEAN_SCHEDULE, SHORE_SCHEDULE, activeStormAt, phaseAt } from '@mib/shared';
+import { OCEAN_SCHEDULE, SHORE_SCHEDULE, activeStormAt } from '@mib/shared';
 import { bottleWeatherAt, oceanWeatherMap } from './oceanWeather.js';
 import { shoreWeatherAt } from './shoreWeather.js';
 
@@ -21,22 +21,6 @@ describe("per-bottle weather from the server's storm windows", () => {
     expect(bottleWeatherAt(b, T + 60_000)).toBe('calm'); // end is exclusive
     expect(bottleWeatherAt(b, T - 60_001)).toBe('calm');
     expect(bottleWeatherAt(bottle('btl_b', []), T)).toBe('calm');
-  });
-
-  it('draws exactly the server window, with no second clock gating it here', () => {
-    // The server schedules every window inside one of the account's own nights — the nights
-    // this map is drawn in — so nothing here needs to (or may) hide a storm by the hour.
-    const b = bottle('btl_zones', [win(T - 60_000, T + 60_000)]);
-    for (const zone of ['Asia/Tokyo', 'America/Los_Angeles', 'Europe/Berlin', 'UTC']) {
-      expect(bottleWeatherAt(b, T)).toBe('storm');
-      // …and at least one of those zones really is in daylight at that instant.
-      void phaseAt(T, zone);
-    }
-    expect(
-      ['Asia/Tokyo', 'America/Los_Angeles', 'Europe/Berlin', 'UTC'].some(
-        (z) => phaseAt(T, z) === 'day',
-      ),
-    ).toBe(true);
   });
 
   it('is calm for anything not at sea, so no storm is ever invented for a landed bottle', () => {
@@ -68,14 +52,19 @@ describe("per-bottle weather from the server's storm windows", () => {
 describe('My Shore weather is independent and cosmetic', () => {
   it('runs on the user, on its own schedule, never on a bottle', () => {
     const base = Date.parse('2026-09-16T00:00:00.000Z');
-    const oceanish: boolean[] = [];
+    const onShoreSchedule: boolean[] = [];
+    const onOceanSchedule: boolean[] = [];
     const shoreish: boolean[] = [];
     for (let i = 0; i < 48; i++) {
       const t = base + i * 3600_000;
-      oceanish.push(Boolean(activeStormAt('usr_1', t, OCEAN_SCHEDULE)));
+      onShoreSchedule.push(Boolean(activeStormAt('usr_1', t, SHORE_SCHEDULE)));
+      onOceanSchedule.push(Boolean(activeStormAt('usr_1', t, OCEAN_SCHEDULE)));
       shoreish.push(shoreWeatherAt('usr_1', t) === 'storm');
     }
-    expect(oceanish).not.toEqual(shoreish);
+    // Precondition: over this sample the two schedules really disagree, so the next line would
+    // fail if the shore were drawn from the ocean's schedule.
+    expect(onOceanSchedule).not.toEqual(onShoreSchedule);
+    expect(shoreish).toEqual(onShoreSchedule);
     expect(new Set(shoreish).size).toBe(2);
   });
 
@@ -88,6 +77,7 @@ describe('My Shore weather is independent and cosmetic', () => {
   });
 
   it('uses a different schedule shape from the ocean (documented defaults)', () => {
-    expect(SHORE_SCHEDULE.windowMs).not.toBe(OCEAN_SCHEDULE.windowMs);
+    expect(OCEAN_SCHEDULE.windowMs).toBe(3 * 3600_000);
+    expect(SHORE_SCHEDULE.windowMs).toBe(4 * 3600_000);
   });
 });

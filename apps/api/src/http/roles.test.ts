@@ -1,7 +1,11 @@
 import { eq } from 'drizzle-orm';
+import { Hono } from 'hono';
 import { describe, expect, it } from 'vitest';
 import * as t from '../db/schema.js';
-import { createApp } from './app.js';
+import { AppError } from '../lib/errors.js';
+import { createApp, type AppEnv } from './app.js';
+import { requireAuth } from './middleware/auth.js';
+import { requireAdmin } from './middleware/admin.js';
 import {
   acceptCurrent,
   createTestWorld,
@@ -17,19 +21,46 @@ const auth = (token: string) => ({
 // The admin and developer roles are deliberately disjoint. These tests are the proof: an
 // administrator must get nothing from the DEV controls, and a developer must get nothing from
 // the moderation console — neither by role, nor by asking nicely in a header or a body.
-const ADMIN_ROUTES = [
-  { method: 'GET', path: '/api/admin/reports' },
-  { method: 'GET', path: '/api/admin/appeals' },
-  { method: 'POST', path: '/api/admin/reports/cas_whatever/accept' },
-  { method: 'POST', path: '/api/admin/reports/cas_whatever/critical' },
-  { method: 'POST', path: '/api/admin/reports/cas_whatever/hold' },
-];
-const DEV_ROUTES = [
-  { method: 'GET', path: '/api/dev/status' },
-  { method: 'POST', path: '/api/dev/tick' },
-  { method: 'POST', path: '/api/dev/advance' },
-  { method: 'POST', path: '/api/dev/forget-policy-acceptances' },
-];
+//
+// The routes are read from the assembled app rather than listed by hand (audit QA-012), so a
+// route added later is probed without anyone remembering to add it here — including one
+// registered ahead of, or outside, its router's role middleware.
+type Route = { method: string; path: string };
+type App = { routes: Array<{ method: string; path: string }> };
+function routesUnder(app: App, prefix: string): Route[] {
+  const seen = new Map<string, Route>();
+  for (const r of app.routes) {
+    // `use('*', …)` middleware shows up as ALL on a wildcard path; it is not a route.
+    if (!r.path.startsWith(`${prefix}/`) || r.path.endsWith('*')) continue;
+    const route = {
+      method: r.method === 'ALL' ? 'GET' : r.method,
+      path: r.path.replace(/:\w+(\{[^}]*\})?/g, 'probe_id'),
+    };
+    seen.set(`${route.method} ${route.path}`, route);
+  }
+  return [...seen.values()];
+}
+const ADMIN_ROUTES = routesUnder(createApp(createTestWorld().ctx), '/api/admin');
+const DEV_ROUTES = routesUnder(createApp(createTestWorld().ctx), '/api/dev');
+
+// Every route that does not answer `expected` to this caller, as "METHOD path → status".
+async function answering(
+  app: { request: ReturnType<typeof createApp>['request'] },
+  routes: Route[],
+  token: string,
+  expected: number,
+): Promise<string[]> {
+  const wrong: string[] = [];
+  for (const r of routes) {
+    const res = await app.request(r.path, {
+      method: r.method,
+      headers: auth(token),
+      ...(r.method === 'GET' ? {} : { body: JSON.stringify({ reason: 'x', ms: 1000 }) }),
+    });
+    if (res.status !== expected) wrong.push(`${r.method} ${r.path} → ${res.status}`);
+  }
+  return wrong;
+}
 
 async function worlds() {
   const w = createTestWorld();
@@ -56,17 +87,46 @@ describe('admin and developer are separate roles', () => {
       expect((await app.request(path, { headers: auth(admin.token) })).status).toBe(200);
   });
 
+  it('finds every admin and DEV route in the app, not just the ones someone listed', () => {
+    // The routes an earlier hand-written list missed are among them.
+    expect(ADMIN_ROUTES.length).toBeGreaterThanOrEqual(11);
+    expect(DEV_ROUTES.length).toBeGreaterThanOrEqual(7);
+    for (const r of [
+      'GET /api/admin/reports/probe_id',
+      'POST /api/admin/appeals/probe_id/accept',
+      'POST /api/admin/reports/probe_id/hold/release',
+    ])
+      expect(ADMIN_ROUTES.map((x) => `${x.method} ${x.path}`)).toContain(r);
+    for (const r of ['GET /api/dev/outbox', 'POST /api/dev/arrive', 'POST /api/dev/lose'])
+      expect(DEV_ROUTES.map((x) => `${x.method} ${x.path}`)).toContain(r);
+  });
+
   it('refuses every admin route to a developer and to an ordinary member', async () => {
     const { app, developer, member } = await worlds();
     for (const who of [developer, member])
-      for (const r of ADMIN_ROUTES) {
-        const res = await app.request(r.path, {
-          method: r.method,
-          headers: auth(who.token),
-          ...(r.method === 'POST' ? { body: JSON.stringify({ reason: 'x' }) } : {}),
-        });
-        expect(res.status, `${r.method} ${r.path}`).toBe(403);
-      }
+      expect(await answering(app, ADMIN_ROUTES, who.token, 403)).toEqual([]);
+  });
+
+  it("would notice a route registered ahead of its router's role middleware", async () => {
+    // A router that serves one route before its `use` guard, mounted in front of the real app:
+    // the guard never runs for that route. The enumeration must find it and the probe flag it.
+    const w = createTestWorld();
+    const leaky = new Hono<AppEnv>();
+    leaky.get('/leak', (c) => c.json({ ok: true }));
+    leaky.use('*', requireAuth, requireAdmin);
+    leaky.get('/guarded', (c) => c.json({ ok: true }));
+    const app = new Hono<AppEnv>();
+    app.use('*', async (c, next) => {
+      c.set('ctx', w.ctx);
+      await next();
+    });
+    app.route('/api/admin', leaky);
+    app.route('/', createApp(w.ctx));
+    app.onError((err, c) => c.json({}, err instanceof AppError ? (err.status as 403) : 500));
+    const member = await login(app, 'ada');
+    const routes = routesUnder(app, '/api/admin');
+    expect(routes.map((r) => r.path)).toContain('/api/admin/leak');
+    expect(await answering(app, routes, member.token, 403)).toEqual(['GET /api/admin/leak → 200']);
   });
 
   it('lets a developer use the DEV controls', async () => {
@@ -84,14 +144,7 @@ describe('admin and developer are separate roles', () => {
     const { app, admin, member } = await worlds();
     // An administrator does not get simulation controls merely for being an administrator.
     for (const who of [admin, member])
-      for (const r of DEV_ROUTES) {
-        const res = await app.request(r.path, {
-          method: r.method,
-          headers: auth(who.token),
-          ...(r.method === 'POST' ? { body: JSON.stringify({ ms: 1000 }) } : {}),
-        });
-        expect(res.status, `${r.method} ${r.path}`).toBe(403);
-      }
+      expect(await answering(app, DEV_ROUTES, who.token, 403)).toEqual([]);
   });
 
   it('refuses the DEV controls in production even to a developer', async () => {
@@ -100,14 +153,8 @@ describe('admin and developer are separate roles', () => {
     makeDeveloper(w, 'bo');
     const developer = await login(app, 'bo');
     // The router is not even mounted outside development, so there is nothing to reach.
-    for (const r of DEV_ROUTES) {
-      const res = await app.request(r.path, {
-        method: r.method,
-        headers: auth(developer.token),
-        ...(r.method === 'POST' ? { body: JSON.stringify({ ms: 1000 }) } : {}),
-      });
-      expect(res.status, `${r.method} ${r.path}`).toBe(404);
-    }
+    expect(routesUnder(app, '/api/dev')).toEqual([]);
+    expect(await answering(app, DEV_ROUTES, developer.token, 404)).toEqual([]);
   });
 
   it('never lets a client choose a role', async () => {

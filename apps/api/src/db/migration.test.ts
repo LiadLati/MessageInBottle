@@ -3,7 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import type Database from 'better-sqlite3';
 import { eq } from 'drizzle-orm';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, onTestFinished } from 'vitest';
 import { MIGRATIONS_FOLDER, createDb, runMigrations } from './client.js';
 import * as t from './schema.js';
 import { DEV_SEED_PASSWORD } from './seed-data.js';
@@ -52,6 +52,8 @@ function dump(sqlite: Database.Database): Record<string, Row[]> {
 // would have applied it.
 function legacyMigrationsFolder(): string {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mib-legacy-'));
+  // Removed when the test ends, whether or not its assertions held.
+  onTestFinished(() => fs.rmSync(dir, { recursive: true, force: true }));
   const journal = JSON.parse(
     fs.readFileSync(path.join(MIGRATIONS_FOLDER, 'meta', '_journal.json'), 'utf8'),
   ) as { entries: Array<{ tag: string }> };
@@ -170,7 +172,6 @@ describe('migrating a populated database', () => {
     expect(
       ctx.db.select().from(t.users).where(eq(t.users.username, 'ada')).get()!.email,
     ).toBeNull();
-    fs.rmSync(legacyDir, { recursive: true, force: true });
     void app;
     void DEV_SEED_PASSWORD;
     // Two full migrations plus the seeded sea graph land just either side of vitest's 5 s default

@@ -76,7 +76,7 @@ describe('reports and cases', () => {
     w = world();
   });
 
-  it('opens one case per letter, keeps evidence, and merges every further report into it', () => {
+  it('opens one case per letter, keeps evidence, and folds a repeat report by the same reader into it', () => {
     const id = deliveredLetter(w, 'key-0000000001');
     const first = reportLetter(w.ctx, w.user('bo'), {
       bottleId: id,
@@ -161,7 +161,7 @@ describe('reports and cases', () => {
     expect(b.outcome?.reason).toBe('adrift');
   });
 
-  it('two readers of two letters make two cases; two reports of one letter make one', () => {
+  it("two readers of two letters make two cases, each holding its one reader's report", () => {
     const a = deliveredLetter(w, 'key-0000000006');
     const b = releaseBottle(
       w.ctx,
@@ -174,9 +174,9 @@ describe('reports and cases', () => {
     reportLetter(w.ctx, w.user('bo'), { bottleId: a, reason: 'harassment', hide: false });
     const x = reportLetter(w.ctx, w.user('dee'), { bottleId: b, reason: 'spam', hide: false });
     expect(listCases(w.ctx, 'pending')).toHaveLength(2);
-    // A second finder-style report of `b` cannot exist (only one finder), so use Bo's own
-    // letter `a` reported once more by... nobody else holds it either. The merge rule is
-    // exercised through the duplicate-report path above; here the count stays two.
+    // A letter is held by exactly one reader — its recipient on the shore, or the one finder of
+    // an adrift bottle — so a second, different reporter of `a` or `b` cannot be produced. The
+    // same reader reporting again is covered by the first test in this block.
     expect(getCase(w.ctx, x.caseId).reportCount).toBe(1);
   });
 });
@@ -652,11 +652,9 @@ describe('appeals', () => {
   });
 });
 
-// Each test here releases a full hourly budget of letters, and every release currently rebuilds
-// the sea graph inside its transaction (audit finding QA-006), so they take ~4–5 s against the
-// 5 s default and failed CI at random on a slower runner. The explicit budget changes no
-// assertion; it goes when QA-006 is fixed.
-describe('report budgets', { timeout: 30_000 }, () => {
+// Each test here releases a full hourly budget of letters. Since QA-006 (the sea graph is no
+// longer rebuilt inside every release) they take about a second each, within the default timeout.
+describe('report budgets', () => {
   // Bo works through a pile of letters from Ada. The shore is made roomy so that the budget,
   // not the shore, is what stops them.
   function budgetWorld() {
@@ -668,9 +666,12 @@ describe('report budgets', { timeout: 30_000 }, () => {
       .run();
     return w;
   }
-  let n = 0;
+  // Idempotency keys count per world, so each test starts from 1 whatever runs before it.
+  const letterCount = new WeakMap<TestWorld, number>();
   function letterTo(w: TestWorld): string {
-    const key = `budget-${String(++n).padStart(4, '0')}`;
+    const n = (letterCount.get(w) ?? 0) + 1;
+    letterCount.set(w, n);
+    const key = `budget-${String(n).padStart(4, '0')}`;
     const id = releaseBottle(w.ctx, w.user('ada'), releaseInput(w.user('bo').id, key)).bottleId;
     w.clock.advance(40 * DAY);
     expect(commitArrivalIfDue(w.ctx, id, w.clock.now())).toBe(true);

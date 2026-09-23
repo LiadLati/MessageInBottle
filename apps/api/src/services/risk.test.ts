@@ -1,6 +1,5 @@
-import type Database from 'better-sqlite3';
 import { eq } from 'drizzle-orm';
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   RISK_POLICY,
   RISK_POLICY_VERSION,
@@ -8,12 +7,13 @@ import {
   phaseAt,
   stormForNight,
   type NightWindow,
-  type StormNight,
 } from '@mib/shared';
 import * as t from '../db/schema.js';
+import type * as Ids from '../lib/ids.js';
 import { AppError } from '../lib/errors.js';
 import { getMyShore, getSentBottle, listReceivedLetters, readOwnLetter } from './bottles.js';
 import type { AppContext } from './context.js';
+import { plannedArrivalAt } from '../domain/routing.js';
 import { commitArrivalIfDue, runJourneyTick } from './journey.js';
 import { listNotifications } from './notifications.js';
 import {
@@ -38,6 +38,28 @@ import { T0, createTestWorld, releaseInput, type TestWorld } from '../test/harne
 
 const HOUR = 60 * 60 * 1000;
 const DAY = 24 * HOUR;
+
+// A bottle's storms are a pure function of its id, so random ids would give every run a
+// different schedule (audit QA-011). Bottle ids here are therefore fixed: each test starts a
+// fresh sequence, and a test that needs a particular schedule names the id it releases. The
+// named ids were chosen offline for the schedule each test states and asserts as a premise.
+const bottleIds = vi.hoisted(() => ({ pinned: [] as string[], next: 0 }));
+vi.mock('../lib/ids.js', async (importOriginal) => {
+  const real = await importOriginal<typeof Ids>();
+  return {
+    ...real,
+    newId: (prefix: string) =>
+      prefix === 'btl'
+        ? (bottleIds.pinned.shift() ?? `btl_risk_seq_${bottleIds.next++}`)
+        : real.newId(prefix),
+  };
+});
+beforeEach(() => {
+  bottleIds.pinned = [];
+  bottleIds.next = 0;
+});
+// The next bottle released gets exactly this id.
+const pinNextBottleId = (id: string) => bottleIds.pinned.push(id);
 
 // A long journey (Ada → Bo takes a few hours by the seeded graph); we stretch time with a slow
 // chart unit so a journey spans many nights and the policy has room to act. Ada's device has
@@ -133,125 +155,121 @@ describe(`automatic storm outcomes (policy v${RISK_POLICY_VERSION})`, () => {
   });
 
   it('catches up deterministically after downtime: the same decisions in the same order', () => {
-    const a = releaseBottle(w.ctx, ada(), releaseInput(bo().id, 'key-0000000003')).bottleId;
+    // This id's fourth storm, on day 8, loses the bottle — so the catch-up has to stop exactly
+    // where the nightly walk did, and nothing is decided after the loss.
+    const ID = 'btl_risk_catchup_224';
+    const row = (r: typeof t.riskDecisions.$inferSelect) => `${r.nightKey}:${r.eligible}:${r.lost}`;
+    pinNextBottleId(ID);
+    releaseBottle(w.ctx, ada(), releaseInput(bo().id, 'key-0000000003'));
     // Walk night by night in one world…
-    const nightly: string[] = [];
     for (let d = 0; d < 10; d++) {
       w.clock.set(T0 + d * DAY);
       processRiskDecisions(w.ctx, w.clock.now());
-      nightly.push(
-        decisions(a)
-          .map((r) => `${r.nightKey}:${r.eligible}:${r.lost}`)
-          .join('|'),
-      );
     }
-    // …and in a second world that was offline for the whole ten days.
+    const nightly = decisions(ID).map(row);
+    // …and in a second world, the same bottle, offline for the whole ten days.
     const off = slowWorld();
-    const b = releaseBottle(
-      off.ctx,
-      off.user('ada'),
-      releaseInput(off.user('bo').id, 'key-0000000003'),
-    ).bottleId;
-    expect(b).not.toBe(a); // ids differ, so compare the schedule shape, not the keys
+    pinNextBottleId(ID);
+    releaseBottle(off.ctx, off.user('ada'), releaseInput(off.user('bo').id, 'key-0000000003'));
     off.clock.set(T0 + 9 * DAY);
     processRiskDecisions(off.ctx, off.clock.now());
     const caughtUp = off.db
       .select()
       .from(t.riskDecisions)
-      .where(eq(t.riskDecisions.bottleId, b))
+      .where(eq(t.riskDecisions.bottleId, ID))
       .all();
-    // Every storm night up to now has exactly one row in both worlds, in night order.
-    const expectedNights = (world: TestWorld, id: string, from: number) =>
-      nightsOf(world, id, from, T0 + 9 * DAY)
-        .map((n) => stormForNight(id, n, RISK_POLICY_VERSION))
-        .filter(
-          (s): s is StormNight => s !== null && s.startsAt >= from && s.decisionAt <= T0 + 9 * DAY,
-        )
-        .map((s) => s.key);
-    expect(caughtUp.map((r) => r.nightKey)).toEqual(expectedNights(off, b, T0));
-    expect(decisions(a).map((r) => r.nightKey)).toEqual(expectedNights(w, a, T0));
-    expect(nightly[9]).toBe(
-      decisions(a)
-        .map((r) => `${r.nightKey}:${r.eligible}:${r.lost}`)
-        .join('|'),
-    );
+    expect(caughtUp.map(row)).toEqual(nightly);
+
+    // Every storm night up to now has exactly one row, in night order, up to and including the
+    // one that lost the bottle. All of them are early and within the cap, so all are eligible
+    // and the first losing draw is the one that ends the journey.
+    const expected: string[] = [];
+    for (const night of nightsOf(off, ID, T0, T0 + 9 * DAY)) {
+      const s = stormForNight(ID, night, RISK_POLICY_VERSION);
+      if (!s || s.decisionAt > T0 + 9 * DAY) continue;
+      expected.push(s.key);
+      if (s.lossDraw < RISK_POLICY.lossChance) break;
+    }
+    expect(caughtUp.map((r) => r.nightKey)).toEqual(expected);
+    expect(caughtUp.every((r) => r.eligible)).toBe(true);
+    expect(caughtUp.map((r) => r.lost)).toEqual([false, false, false, true]);
+    expect(getSentBottle(off.ctx, off.user('ada'), ID).state).toBe('lost');
   });
 
   it('only the first five eligible decisions carry risk; storms after that are scenery', () => {
-    const id = releaseBottle(w.ctx, ada(), releaseInput(bo().id, 'key-0000000004')).bottleId;
-    // Force every night to be a storm night with a safe draw, by taking decisions directly
-    // against the persisted table through the worker over many nights.
-    w.clock.set(T0 + 40 * DAY);
+    // Sixteen storms before the 80% cutoff, none of the first seven a losing draw: only the
+    // cap can make the sixth one ineligible.
+    const ID = 'btl_risk_cap_2';
+    pinNextBottleId(ID);
+    releaseBottle(w.ctx, ada(), releaseInput(bo().id, 'key-0000000004'));
+    const plan = w.db.select().from(t.routePlans).where(eq(t.routePlans.bottleId, ID)).get()!;
+    const cutoffAt = plan.startsAt + RISK_POLICY.progressCutoff * plan.plannedDurationMs;
+    w.clock.set(cutoffAt - 1);
     processRiskDecisions(w.ctx, w.clock.now());
-    const rows = decisions(id);
-    const eligible = rows.filter((r) => r.eligible);
-    expect(eligible.length).toBeLessThanOrEqual(RISK_POLICY.maxRiskDecisions);
-    // Past the cap every later storm night is recorded but marked ineligible.
-    const afterCap = rows.slice(rows.findIndex((r) => r === eligible[eligible.length - 1]) + 1);
-    if (eligible.length === RISK_POLICY.maxRiskDecisions) {
-      expect(afterCap.every((r) => !r.eligible && !r.lost)).toBe(true);
-    }
-    // The bottle still shows storms on the map while at sea.
-    if (getSentBottle(w.ctx, ada(), id).state === 'at_sea') {
-      expect(Array.isArray(getSentBottle(w.ctx, ada(), id).storms)).toBe(true);
-    }
+    const rows = decisions(ID);
+    expect(rows.length).toBeGreaterThan(6);
+    expect(rows.every((r) => r.decisionAt < cutoffAt && !r.lost)).toBe(true);
+    // The spec's number, not the constant's: five, and five only.
+    expect(rows.map((r) => r.eligible)).toEqual([
+      true,
+      true,
+      true,
+      true,
+      true,
+      ...rows.slice(5).map(() => false),
+    ]);
+    // Past the cap the storms are still on the map while the bottle is at sea.
+    const sixth = rows[5]!;
+    const bottle = w.db.select().from(t.bottles).where(eq(t.bottles.id, ID)).get()!;
+    expect(bottle.state).toBe('at_sea');
+    expect(stormWindowsFor(w.ctx, bottle, sixth.decisionAt)).toContainEqual({
+      startsAt: new Date(sixth.stormStartsAt!).toISOString(),
+      endsAt: new Date(sixth.stormEndsAt!).toISOString(),
+    });
   });
 
   it('never decides at or after 80% progress, and arrival wins a race with a later storm', () => {
-    const id = releaseBottle(w.ctx, ada(), releaseInput(bo().id, 'key-0000000005')).bottleId;
-    const plan = w.db.select().from(t.routePlans).where(eq(t.routePlans.bottleId, id)).get()!;
+    // Three storms before the cutoff (under the cap of five, so the cap plays no part), then
+    // storms after it but before arrival, and no losing draw among them.
+    const ID = 'btl_risk_cutoff_4642';
+    pinNextBottleId(ID);
+    releaseBottle(w.ctx, ada(), releaseInput(bo().id, 'key-0000000005'));
+    const plan = w.db.select().from(t.routePlans).where(eq(t.routePlans.bottleId, ID)).get()!;
     const cutoffAt = plan.startsAt + RISK_POLICY.progressCutoff * plan.plannedDurationMs;
-    w.clock.set(plan.startsAt + plan.plannedDurationMs + DAY);
+    const arrivalAt = plannedArrivalAt(plan);
+    w.clock.set(arrivalAt + DAY);
     processRiskDecisions(w.ctx, w.clock.now());
-    for (const r of decisions(id)) {
-      if (r.decisionAt >= cutoffAt) expect(r.eligible).toBe(false);
-    }
-    // A decision before the cutoff can be eligible; none after arrival time exists as eligible.
-    expect(decisions(id).every((r) => !r.eligible || r.decisionAt < cutoffAt)).toBe(true);
+    const rows = decisions(ID);
+    const before = rows.filter((r) => r.decisionAt < cutoffAt);
+    const after = rows.filter((r) => r.decisionAt >= cutoffAt && r.decisionAt < arrivalAt);
+    expect(before).toHaveLength(3);
+    expect(before.every((r) => r.eligible)).toBe(true);
+    expect(after.length).toBeGreaterThanOrEqual(2);
+    expect(after.every((r) => !r.eligible && !r.lost)).toBe(true);
+    expect(rows.every((r) => r.decisionAt < cutoffAt || !r.eligible)).toBe(true);
     // Now the arrival is due as well: it commits, and a loss can no longer.
-    expect(
-      runJourneyTick(w.ctx).delivered + (getSentBottle(w.ctx, ada(), id).state === 'lost' ? 1 : 0),
-    ).toBeGreaterThanOrEqual(1);
-    const final = getSentBottle(w.ctx, ada(), id);
-    expect(['delivered', 'lost']).toContain(final.state);
-    if (final.state === 'delivered') {
-      expect(commitLoss(w.ctx, id, 'adrift', w.clock.now()).committed).toBe(false);
-    }
+    expect(getSentBottle(w.ctx, ada(), ID).state).toBe('at_sea');
+    expect(runJourneyTick(w.ctx).delivered).toBe(1);
+    expect(getSentBottle(w.ctx, ada(), ID).state).toBe('delivered');
+    expect(commitLoss(w.ctx, ID, 'adrift', w.clock.now()).committed).toBe(false);
   });
 
   it('a loss goes through the transactional service: position at the storm, slot freed, one notice', () => {
-    // Pick, by pure search, an id whose first storm decision loses; then give a released bottle
-    // that id (rows rewired with foreign keys off — a test device, the schedule is what is
-    // under test). Deterministic, no rolling.
-    const released = releaseBottle(w.ctx, ada(), releaseInput(bo().id, 'key-0000000006')).bottleId;
-    let chosen = '';
-    let storm: StormNight | null = null;
-    for (let i = 0; i < 5000 && !storm; i++) {
-      const candidate = `btl_test_loss_${i}`;
-      const s = firstStorm(w, released, candidate, T0, 30 * DAY);
-      if (s.lossDraw < RISK_POLICY.lossChance) {
-        chosen = candidate;
-        storm = s;
-      }
-    }
-    expect(storm).not.toBeNull();
-    const sqlite = (w.db as unknown as { $client: Database.Database }).$client;
-    sqlite.pragma('foreign_keys = OFF');
-    for (const table of ['bottles', 'route_plans', 'capacity_reservations', 'journey_events']) {
-      const col = table === 'bottles' ? 'id' : 'bottle_id';
-      sqlite.prepare(`UPDATE ${table} SET ${col} = ? WHERE ${col} = ?`).run(chosen, released);
-    }
-    sqlite.pragma('foreign_keys = ON');
-    const id = chosen;
+    // This id's first storm, on day 7, is a losing draw.
+    const id = 'btl_risk_loss_138';
+    pinNextBottleId(id);
+    releaseBottle(w.ctx, ada(), releaseInput(bo().id, 'key-0000000006'));
+    const storm = firstStorm(w, id, id, T0, 30 * DAY);
+    expect(storm.lossDraw).toBeLessThan(RISK_POLICY.lossChance);
 
-    w.clock.set(storm!.decisionAt + HOUR);
+    w.clock.set(storm.decisionAt + HOUR);
     const r = processRiskDecisions(w.ctx, w.clock.now());
     expect(r.lost).toBe(1);
     const b = getSentBottle(w.ctx, ada(), id);
     expect(b.state).toBe('lost');
     expect(['adrift', 'sunk']).toContain(b.outcome!.reason);
-    expect(b.outcome!.reason).toBe(storm!.reasonDraw < RISK_POLICY.adriftShare ? 'adrift' : 'sunk');
-    expect(b.outcome!.at).toBe(new Date(storm!.decisionAt).toISOString());
+    expect(b.outcome!.reason).toBe(storm.reasonDraw < RISK_POLICY.adriftShare ? 'adrift' : 'sunk');
+    expect(b.outcome!.at).toBe(new Date(storm.decisionAt).toISOString());
     expect(b.events.map((e) => e.type)).toEqual(['released', 'lost']);
     expect(heldReservations(w.db, 'shore_driftmoor_strand')).toBe(0);
     expect(listNotifications(w.ctx, ada().id).filter((n) => n.bottleId === id)).toHaveLength(1);
@@ -259,7 +277,32 @@ describe(`automatic storm outcomes (policy v${RISK_POLICY_VERSION})`, () => {
     expect(processRiskDecisions(w.ctx, w.clock.now())).toEqual({ decided: 0, lost: 0 });
     expect(commitArrivalIfDue(w.ctx, id, w.clock.now() + 100 * DAY)).toBe(false);
     expect(getMyShore(w.ctx, bo()).bottles).toEqual([]);
-  }, 30_000);
+  });
+});
+
+describe('a losing decision and its loss are one commit (ARCH-007)', () => {
+  it('records nothing when the loss cannot be written, and decides again next tick', () => {
+    const w = slowWorld();
+    const id = 'btl_risk_loss_138';
+    pinNextBottleId(id);
+    releaseBottle(w.ctx, w.user('ada'), releaseInput(w.user('bo').id, 'key-0000000007'));
+    const storm = firstStorm(w, id, id, T0, 30 * DAY);
+    expect(storm.lossDraw).toBeLessThan(RISK_POLICY.lossChance);
+    // The loss write fails (a stand-in for a crash or a constraint error mid-commit).
+    const client = (w.db as unknown as { $client: { exec: (sql: string) => void } }).$client;
+    client.exec(`CREATE TRIGGER fail_loss BEFORE UPDATE OF state ON bottles
+      WHEN NEW.state = 'lost' BEGIN SELECT RAISE(ABORT, 'loss write failed'); END`);
+    w.clock.set(storm.decisionAt + HOUR);
+    expect(() => processRiskDecisions(w.ctx, w.clock.now())).toThrow(/loss write failed/);
+    // No decision row claims a loss that never happened, so nothing blocks a retry.
+    expect(
+      w.db.select().from(t.riskDecisions).where(eq(t.riskDecisions.bottleId, id)).all(),
+    ).toEqual([]);
+    expect(getSentBottle(w.ctx, w.user('ada'), id).state).toBe('at_sea');
+    client.exec('DROP TRIGGER fail_loss');
+    expect(processRiskDecisions(w.ctx, w.clock.now()).lost).toBe(1);
+    expect(getSentBottle(w.ctx, w.user('ada'), id).state).toBe('lost');
+  });
 });
 
 describe('public listing: 72 hours from the loss', () => {
@@ -449,6 +492,7 @@ describe('immediate arrival at the same harbour', () => {
     w.clock.advance(DAY);
     expect(runJourneyTick(w.ctx)).toEqual({
       delivered: 0,
+      cancelled: 0,
       risk: { decided: 0, lost: 0 },
       expired: 0,
     });

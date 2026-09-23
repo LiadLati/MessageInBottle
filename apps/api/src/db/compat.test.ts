@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import type Database from 'better-sqlite3';
-import { describe, expect, it } from 'vitest';
+import { afterAll, describe, expect, it } from 'vitest';
 import { MIGRATIONS_FOLDER, createDb, runMigrations } from './client.js';
 import {
   LEGACY_POLICY_HASH,
@@ -55,8 +55,15 @@ const applied = (sqlite: Database.Database) =>
 type Eol = 'lf' | 'crlf';
 const render = (sql: string, eol: Eol) => (eol === 'crlf' ? sql.replace(/\r?\n/g, '\r\n') : sql);
 
+// Every folder built here is removed after the file's tests, pass or fail.
+const historicFolders: string[] = [];
+afterAll(() => {
+  for (const dir of historicFolders) fs.rmSync(dir, { recursive: true, force: true });
+});
+
 function historicFolder(upTo: string, withLegacyPolicy: boolean, eol: Eol = 'lf'): string {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mib-historic-'));
+  historicFolders.push(dir);
   fs.mkdirSync(path.join(dir, 'meta'));
   const kept = entries.slice(0, entries.findIndex((e) => e.tag.startsWith(upTo)) + 1);
   const journal: { version: string; dialect: string; entries: unknown[] } = {

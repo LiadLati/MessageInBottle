@@ -174,6 +174,9 @@ export function releaseCapacityOnce(db: DbOrTx, bottleId: string, now: number): 
 // arrival that is also due must be applied first), then arrivals, then public-listing expiry.
 export function runJourneyTick(ctx: AppContext): {
   delivered: number;
+  // Arrivals refused at the shore (a block or an inactive recipient): the journey ended
+  // without a delivery, and is not counted as one.
+  cancelled: number;
   risk: { decided: number; lost: number };
   expired: number;
 } {
@@ -192,7 +195,17 @@ export function runJourneyTick(ctx: AppContext): {
     )
     .all();
   let delivered = 0;
-  for (const { bottleId } of due) if (commitArrivalIfDue(ctx, bottleId, now)) delivered++;
+  let cancelled = 0;
+  for (const { bottleId } of due) {
+    if (!commitArrivalIfDue(ctx, bottleId, now)) continue;
+    const state = ctx.db
+      .select({ state: t.bottles.state })
+      .from(t.bottles)
+      .where(eq(t.bottles.id, bottleId))
+      .get()?.state;
+    if (state === 'delivered') delivered++;
+    else cancelled++;
+  }
   const expired = expirePublicListings(ctx, now);
-  return { delivered, risk, expired };
+  return { delivered, cancelled, risk, expired };
 }

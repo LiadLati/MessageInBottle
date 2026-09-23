@@ -69,8 +69,10 @@ describe('password hashing never blocks the API (SEC-006)', () => {
   });
 
   it('refuses new work once the bounded queue is full', async () => {
+    // One hash, reused: hashing 69 times synchronously first made the test slow under load.
+    const stored = hashPassword('x');
     const attempts = Array.from({ length: 2 + 64 + 3 }, () =>
-      verifyPasswordAsync('x', hashPassword('x')).then(
+      verifyPasswordAsync('x', stored).then(
         () => 'done',
         (err: unknown) => (err instanceof PasswordHashingBusyError ? 'busy' : 'error'),
       ),

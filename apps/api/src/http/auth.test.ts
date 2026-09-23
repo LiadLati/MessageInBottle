@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { eq } from 'drizzle-orm';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, onTestFinished } from 'vitest';
 import { createApp } from './app.js';
 import { LOGIN_PER_ACCOUNT_ADDRESS, REGISTER_PER_ADDRESS } from './routes/auth.js';
 import { MIGRATIONS_FOLDER, createDb, runMigrations } from '../db/client.js';
@@ -363,6 +363,8 @@ describe('migration compatibility', () => {
   it('upgrades a database created before authentication without losing users', async () => {
     // Replay only the migrations that existed before this feature, as an older deployment would.
     const legacyDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mib-legacy-migrations-'));
+    // Removed when the test ends, whether or not its assertions held.
+    onTestFinished(() => fs.rmSync(legacyDir, { recursive: true, force: true }));
     const journal = JSON.parse(
       fs.readFileSync(path.join(MIGRATIONS_FOLDER, 'meta', '_journal.json'), 'utf8'),
     ) as {
@@ -438,6 +440,5 @@ describe('migration compatibility', () => {
     expect(db.select().from(t.users).where(eq(t.users.username, 'ada')).get()!.passwordHash).toBe(
       adaHash,
     );
-    fs.rmSync(legacyDir, { recursive: true, force: true });
   });
 });

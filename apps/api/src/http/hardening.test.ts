@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { z } from 'zod';
 import { createApp, MAX_REQUEST_BYTES } from './app.js';
 import { FORGOT_PER_ADDRESS } from './routes/auth.js';
 import { createTestWorld } from '../test/harness.js';
@@ -113,5 +114,26 @@ describe('request size (ARCH-027 / SEC-014)', () => {
       body: JSON.stringify({ username: 'ada', password: 'wrong-password' }),
     });
     expect(res.status).toBe(401);
+  });
+});
+
+describe('validation errors never echo input (ARCH-022)', () => {
+  it('reduces a ZodError reaching the fallback to path, code and message', async () => {
+    const app = createApp(createTestWorld().ctx);
+    // No route feeds raw input to a bare .parse() today; this probe is what one would do, with
+    // the input reported in the issue so that echoing raw issues would leak it.
+    app.post('/api/__probe', async (c) => {
+      z.object({ password: z.number() }).parse(await c.req.json(), { reportInput: true });
+      return c.body(null, 204);
+    });
+    const res = await app.request('/api/__probe', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ password: 'hunter2-secret' }),
+    });
+    expect(res.status).toBe(400);
+    const text = await res.text();
+    expect(text).not.toContain('hunter2-secret');
+    expect(JSON.parse(text)).toMatchObject({ error: { code: 'validation' } });
   });
 });

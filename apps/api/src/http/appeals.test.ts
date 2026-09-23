@@ -514,7 +514,7 @@ describe('violations never expire', () => {
     expect(standing.pendingDecision).toBeNull();
   });
 
-  it('produces at most one violation from several reports about one letter', async () => {
+  it('produces one case and one violation when the same reader reports a letter twice', async () => {
     const ctx = await setup();
     const { w, app, bo, cy } = ctx;
     const caseId = await reportedCaseFor(ctx, 'dedupe-key-00001');
@@ -524,7 +524,8 @@ describe('violations never expire', () => {
       .where(eq(t.moderationCases.id, caseId))
       .get()!.bottleId;
 
-    // Reporting the same letter again joins the same case rather than opening a second one.
+    // The same reader reporting the letter again joins the same case rather than opening a
+    // second one. (A different second reporter cannot exist: a letter has one reader.)
     const second = await app.request('/api/moderation/reports', {
       method: 'POST',
       headers: auth(bo.token),
@@ -541,7 +542,7 @@ describe('violations never expire', () => {
       headers: auth(cy.token),
       body: JSON.stringify({ reason: 'upheld once', evidenceDigest: evidenceDigest(w, caseId) }),
     });
-    // One case, one violation, whatever the number of reports.
+    // One case, one violation.
     expect(
       w.db.select().from(t.violations).where(eq(t.violations.caseId, caseId)).all(),
     ).toHaveLength(1);

@@ -382,15 +382,92 @@ describe('HTTP surface', () => {
     expect(chart.shores.length).toBeGreaterThan(300);
   });
 
-  it('user-facing responses never contain coordinates', async () => {
+  // Not every response is free of coordinates: /api/chart carries each shore's geo point (above)
+  // and a sender's own route view carries its path. What is promised is narrower — the account,
+  // friends and notification payloads carry exactly these fields and nothing more, so a location
+  // (or anything else) cannot be added to them without this test changing.
+  it('account, friends and notification payloads carry a closed set of fields', async () => {
     const w = createTestWorld();
     // Losing a bottle on demand is a DEV control, so the account driving it needs the role.
     makeDeveloper(w, 'ada');
     const app = createApp(w.ctx);
     const ada = await login(app, 'ada');
-    for (const path of ['/api/auth/me', '/api/friends', '/api/notifications']) {
-      const text = await (await app.request(path, { headers: auth(ada.token) })).text();
-      expect(text, path).not.toMatch(/lat|lng|longitude|latitude|gps|coordinate/i);
+    const bo = await login(app, 'bo');
+    const dee = await login(app, 'dee');
+    // A loss gives ada a notification about a bottle, so the list is not vacuously empty.
+    const release = await app.request('/api/bottles/release', {
+      method: 'POST',
+      headers: auth(ada.token),
+      body: JSON.stringify(releaseInput(bo.id, 'http-key-0000030')),
+    });
+    const { bottle } = (await release.json()) as { bottle: { id: string } };
+    await app.request('/api/dev/lose', {
+      method: 'POST',
+      headers: auth(ada.token),
+      body: JSON.stringify({ bottleId: bottle.id, reason: 'adrift' }),
+    });
+    const get = async (path: string, token: string) => {
+      const res = await app.request(path, { headers: auth(token) });
+      expect(res.status, path).toBe(200);
+      return (await res.json()) as Record<string, unknown>;
+    };
+    const keys = (o: unknown) => Object.keys(o as object).sort();
+    const person = ['displayName', 'id', 'username'];
+    const request = ['createdAt', 'from', 'id', 'to'];
+
+    const me = await get('/api/auth/me', ada.token);
+    expect(keys(me)).toEqual([
+      'displayName',
+      'email',
+      'id',
+      'policies',
+      'role',
+      'shoreId',
+      'timeZone',
+      'username',
+    ]);
+    const policies = me.policies as { documents: unknown[] };
+    expect(keys(policies)).toEqual(['documents', 'required', 'status']);
+    expect(policies.documents).toHaveLength(3);
+    for (const d of policies.documents)
+      expect(keys(d)).toEqual([
+        'acceptedAt',
+        'acceptedVersion',
+        'action',
+        'currentVersion',
+        'id',
+        'title',
+      ]);
+
+    // ada has friends and an incoming request (from dee); dee has the matching outgoing one.
+    for (const [token, list] of [
+      [ada.token, 'incomingRequests'],
+      [dee.token, 'outgoingRequests'],
+    ] as const) {
+      const friends = await get('/api/friends', token);
+      expect(keys(friends)).toEqual([
+        'friends',
+        'incomingRequests',
+        'outgoingRequests',
+        'pendingIncomingCount',
+      ]);
+      const requests = friends[list] as Array<{ from: unknown; to: unknown }>;
+      expect(requests.length, list).toBeGreaterThan(0);
+      for (const r of requests) {
+        expect(keys(r)).toEqual(request);
+        expect(keys(r.from)).toEqual(person);
+        expect(keys(r.to)).toEqual(person);
+      }
+      for (const f of friends.friends as unknown[])
+        expect(keys(f)).toEqual([...person, 'hasShore'].sort());
     }
+    expect((await get('/api/friends', ada.token)).friends).toHaveLength(2);
+
+    const { notifications } = (await get('/api/notifications', ada.token)) as {
+      notifications: unknown[];
+    };
+    expect(notifications.length).toBeGreaterThan(0);
+    for (const n of notifications)
+      expect(keys(n)).toEqual(['bottleId', 'createdAt', 'id', 'kind', 'message', 'readAt', 'type']);
   });
 });
