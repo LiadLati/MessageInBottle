@@ -30,17 +30,17 @@ describe('letter character counting', () => {
 });
 
 describe('bottle state model', () => {
-  it('follows the v0.2 transitions', () => {
+  it('allows only the transitions the server performs', () => {
     expect(canTransition('at_sea', 'delivered')).toBe(true);
+    expect(canTransition('at_sea', 'lost')).toBe(true);
+    expect(canTransition('at_sea', 'cancelled')).toBe(true);
     expect(canTransition('delivered', 'opened')).toBe(true);
     expect(canTransition('opened', 'at_sea')).toBe(false);
-    expect(canTransition('public_expired', 'at_sea')).toBe(false);
-    expect(canTransition('stranded_public', 'at_sea')).toBe(true);
+    expect(canTransition('lost', 'at_sea')).toBe(false);
   });
 
   it('marks terminal states', () => {
-    for (const s of ['opened', 'discarded', 'lost', 'cancelled'] as const)
-      expect(isTerminal(s)).toBe(true);
+    for (const s of ['opened', 'lost', 'cancelled'] as const) expect(isTerminal(s)).toBe(true);
     expect(isTerminal('delivered')).toBe(false);
   });
 });

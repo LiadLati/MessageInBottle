@@ -46,10 +46,7 @@ const STATUS_LABELS: Record<string, { label: string; glyph: string }> = {
   at_sea: { label: 'At sea', glyph: '◦' },
   delivered: { label: 'Arrived', glyph: '✓' },
   opened: { label: 'Opened', glyph: '✓' },
-  stranded_public: { label: 'Stranded', glyph: '◈' },
-  public_expired: { label: 'Expired', glyph: '◈' },
   lost: { label: 'Lost', glyph: '✕' },
-  discarded: { label: 'Discarded', glyph: '✕' },
   cancelled: { label: 'Unavailable', glyph: '✕' },
 };
 
@@ -65,13 +62,12 @@ export function StatusChip({ state }: { state: string }) {
 }
 
 // A journey outcome, stated in words (never colour alone): which way the sea ended it.
-export const OUTCOME_LABELS: Record<'adrift' | 'sunk' | 'destroyed', string> = {
+export const OUTCOME_LABELS: Record<'adrift' | 'sunk', string> = {
   adrift: 'Adrift in the public ocean',
   sunk: 'Sunk at sea',
-  destroyed: 'Destroyed',
 };
 
-export function OutcomeChip({ reason }: { reason: 'adrift' | 'sunk' | 'destroyed' }) {
+export function OutcomeChip({ reason }: { reason: 'adrift' | 'sunk' }) {
   return (
     <span className={`status-chip status-outcome-${reason}`}>
       <span aria-hidden>{reason === 'adrift' ? '⚑' : '✕'}</span>

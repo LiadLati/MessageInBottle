@@ -25,6 +25,10 @@ export const securityHeaders = createMiddleware<AppEnv>(async (c, next) => {
   h.set('Referrer-Policy', 'no-referrer');
   h.set('Cross-Origin-Opener-Policy', 'same-origin');
   h.set('Permissions-Policy', 'camera=(), microphone=(), geolocation=(), payment=()');
+  // API responses carry letters, evidence, reporter details and account data. None of it may be
+  // kept by a browser cache or history on a shared device (audit SEC-016); a route that wants
+  // caching says so itself.
+  if (c.req.path.startsWith('/api/') && !h.has('cache-control')) h.set('Cache-Control', 'no-store');
   if (c.get('ctx').config.appUrl.startsWith('https://'))
     h.set('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
 });

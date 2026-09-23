@@ -1,4 +1,4 @@
-import { and, eq, lte, max } from 'drizzle-orm';
+import { and, eq, lte, max, or } from 'drizzle-orm';
 import { canTransition, type BottleState, type JourneyEventType } from '@mib/shared';
 import type { DbOrTx } from '../db/client.js';
 import * as t from '../db/schema.js';
@@ -84,13 +84,25 @@ export function commitArrival(
   now: number,
 ): boolean {
   const bottleId = bottle.id;
-  // Re-check eligibility transactionally before arrival (spec §11 invariant 4).
+  // Re-check eligibility transactionally before arrival (spec §11 invariant 4): a block placed
+  // by either person during the journey, or a recipient whose account no longer exists, ends it
+  // here with the same non-disclosing "delivery unavailable" (audit ARCH-014 / QA-005).
   const blocked = tx
     .select({ blockerId: t.blocks.blockerId })
     .from(t.blocks)
-    .where(and(eq(t.blocks.blockerId, bottle.recipientId), eq(t.blocks.blockedId, bottle.senderId)))
+    .where(
+      or(
+        and(eq(t.blocks.blockerId, bottle.recipientId), eq(t.blocks.blockedId, bottle.senderId)),
+        and(eq(t.blocks.blockerId, bottle.senderId), eq(t.blocks.blockedId, bottle.recipientId)),
+      ),
+    )
     .get();
-  if (blocked) {
+  const recipient = tx
+    .select({ status: t.users.status })
+    .from(t.users)
+    .where(eq(t.users.id, bottle.recipientId))
+    .get();
+  if (blocked || recipient?.status !== 'active') {
     const moved = transitionBottle(tx, bottle, 'cancelled', { completedAt: now });
     if (!moved) return false;
     releaseCapacityOnce(tx, bottleId, now);

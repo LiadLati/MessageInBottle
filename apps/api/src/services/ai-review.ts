@@ -1,5 +1,6 @@
 import { and, eq, lte, or, isNull } from 'drizzle-orm';
 import { AiReviewOutputSchema, type AiReviewOutput } from '@mib/shared';
+import type { DbOrTx } from '../db/client.js';
 import * as t from '../db/schema.js';
 import type { AppContext } from './context.js';
 import { decideCase } from './admin.js';
@@ -145,6 +146,33 @@ export interface AiTickResult {
   deferred: number;
 }
 
+// A claim left `running` by a process that died mid-review (audit ARCH-003). Nothing would ever
+// move it on, and evidence retention treats a running review as still needing the text, so the
+// case's evidence was kept forever. Returns such claims to the queue: at startup every running
+// claim is stale by definition (one API process), and on each tick any claim older than a
+// generous multiple of the model timeout is.
+export function releaseStaleAiClaims(db: DbOrTx, now: number, olderThanMs: number): number {
+  return db
+    .update(t.moderationCases)
+    .set({
+      aiStatus: 'queued',
+      aiNextAttemptAt: now,
+      aiLastError: 'the previous review was interrupted before it finished',
+    })
+    .where(
+      and(
+        eq(t.moderationCases.aiStatus, 'running'),
+        or(
+          isNull(t.moderationCases.aiStartedAt),
+          lte(t.moderationCases.aiStartedAt, now - olderThanMs),
+        ),
+      ),
+    )
+    .run().changes;
+}
+
+export const staleClaimAfterMs = (timeoutMs: number) => timeoutMs * 3 + 60_000;
+
 // Drains what is due. Safe to run repeatedly; a case is claimed by moving it to `running`
 // under the single writer, so two overlapping ticks never review the same case twice.
 export async function runAiReviewTick(
@@ -154,6 +182,7 @@ export async function runAiReviewTick(
   limit = 5,
 ): Promise<AiTickResult> {
   const result: AiTickResult = { reviewed: 0, decided: 0, deferred: 0 };
+  releaseStaleAiClaims(ctx.db, now, staleClaimAfterMs(ctx.config.ai.timeoutMs));
   if (!ctx.config.ai.enabled) return result;
   const due = ctx.db
     .select({ id: t.moderationCases.id })

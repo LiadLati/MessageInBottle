@@ -19,7 +19,8 @@ async function main(): Promise<void> {
   const { createMailer } = await import('./lib/mail.js');
   const { runJourneyTick } = await import('./services/journey.js');
   const { activatePublicListings } = await import('./services/risk.js');
-  const { createOllamaReviewer, runAiReviewTick } = await import('./services/ai-review.js');
+  const { createOllamaReviewer, releaseStaleAiClaims, runAiReviewTick } =
+    await import('./services/ai-review.js');
   const { applyRetention } = await import('./services/retention.js');
   const { serve } = await import('@hono/node-server');
   const { assertPolicySetServeable } = await import('./services/policies.js');
@@ -29,6 +30,11 @@ async function main(): Promise<void> {
   assertPolicySetServeable();
   const { db, sqlite } = createDb(config.databasePath);
   prepareDatabase(db, config, Date.now());
+  // One API process per database: any review still marked running was interrupted by the last
+  // stop, whether or not AI review is enabled now.
+  const interrupted = releaseStaleAiClaims(db, Date.now(), 0);
+  if (interrupted > 0)
+    console.log(`Returned ${interrupted} interrupted AI review(s) to the queue.`);
 
   const ctx: AppContext = {
     db,

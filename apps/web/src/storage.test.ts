@@ -87,9 +87,8 @@ describe('what SeaYou stores in the browser', () => {
     // Signing out drops the token…
     expect(session).toMatch(/sessionStorage\.removeItem\(STORAGE_KEY\)/);
     // …and every other key this app owns, so nothing of the account survives the sign-out.
-    expect(session).toMatch(/sessionStorage\.removeItem\(key\)/);
-    const weather = bodies.get(path.join(SRC, 'state', 'weather.tsx'))!;
-    expect(weather).toMatch(/localStorage\.removeItem\(ZONE_KEY\)/);
+    expect(session).toMatch(/sessionStorage\.removeItem\(sessionKey\)/);
+    expect(session).toMatch(/localStorage\.removeItem\(localKey\)/);
   });
 
   it('clears the unsent letter once it has been sent', () => {

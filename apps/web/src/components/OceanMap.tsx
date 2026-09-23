@@ -925,5 +925,5 @@ function statusWord(state: string): string {
 }
 
 function terminal(state: string): boolean {
-  return state === 'lost' || state === 'discarded' || state === 'cancelled';
+  return state === 'lost' || state === 'cancelled';
 }

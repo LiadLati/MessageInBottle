@@ -1,31 +1,17 @@
-// Journey state per spec v0.2 §11. Only the directed-delivery transitions are
-// exercised in stage 3; the rest are declared so stage 4/5 add behavior, not states.
-export const BOTTLE_STATES = [
-  'at_sea',
-  'stranded_public',
-  'public_expired',
-  'delivered',
-  'opened',
-  'discarded',
-  'lost',
-  'cancelled',
-] as const;
+// Journey state: only the states the server actually writes (audit ARCH-025). A bottle is at
+// sea, then either delivered (and later opened) or lost; an account deletion cancels one that
+// has not arrived. The v0.2 states `stranded_public`, `public_expired` and `discarded` were
+// never produced by any code path and are gone: an adrift bottle is `lost` with loss reason
+// `adrift`, and its public listing is tracked by `public_deadline_at` / `public_expired_at`.
+export const BOTTLE_STATES = ['at_sea', 'delivered', 'opened', 'lost', 'cancelled'] as const;
 export type BottleState = (typeof BOTTLE_STATES)[number];
 
-export const TERMINAL_STATES: ReadonlySet<BottleState> = new Set([
-  'opened',
-  'discarded',
-  'lost',
-  'cancelled',
-]);
+export const TERMINAL_STATES: ReadonlySet<BottleState> = new Set(['opened', 'lost', 'cancelled']);
 
 export const ALLOWED_TRANSITIONS: Readonly<Record<BottleState, readonly BottleState[]>> = {
-  at_sea: ['stranded_public', 'lost', 'delivered', 'cancelled'],
-  stranded_public: ['at_sea', 'discarded', 'public_expired', 'cancelled'],
-  public_expired: [], // D02 open: no approved onward transition
+  at_sea: ['lost', 'delivered', 'cancelled'],
   delivered: ['opened'],
   opened: [],
-  discarded: [],
   lost: [],
   cancelled: [],
 };
@@ -38,11 +24,10 @@ export function isTerminal(state: BottleState): boolean {
   return TERMINAL_STATES.has(state);
 }
 
-// Why a bottle is Lost. `adrift`: swept off its route in a storm and now drifting in the public
-// ocean at its persisted loss position (its delivery is over; public claiming is not built yet).
-// `sunk`: gone under at its persisted position — private to the sender. `destroyed` is declared
-// by the spec and not produced by any code path yet.
-export const LOSS_REASONS = ['adrift', 'sunk', 'destroyed'] as const;
+// Why a bottle is Lost. `adrift`: swept off its route in a storm and listed in the public ocean
+// at its persisted loss position for 72 hours. `sunk`: gone under at its persisted position —
+// private to the sender.
+export const LOSS_REASONS = ['adrift', 'sunk'] as const;
 export type LossReason = (typeof LOSS_REASONS)[number];
 
 export const MODERATION_STATUSES = ['clear', 'quarantined', 'removed'] as const;
@@ -51,9 +36,6 @@ export type ModerationStatus = (typeof MODERATION_STATUSES)[number];
 export const JOURNEY_EVENT_TYPES = [
   'released',
   'storm_exposure',
-  'stranded',
-  'rescued',
-  'discarded',
   'public_expired',
   'lost',
   'delivered',

@@ -11,8 +11,28 @@ import type { MeResponse, PolicyAcceptanceRequest, SessionResponse } from '@mib/
 import { api, setAuthToken } from '../api/client.js';
 
 const STORAGE_KEY = 'mib.session.token';
-// Client-side keys that belong to the signed-in person and must not survive a sign-out.
-const PER_USER_KEYS = ['mib.draft'];
+// Client-side keys that belong to the signed-in person and must not survive a sign-out: the
+// unsent letter (session storage) and the account's time zone (local storage). The Privacy
+// Policy says both are removed on sign-out (audit FE-010 / SEC-015).
+export const PER_USER_SESSION_KEYS = ['mib.draft'] as const;
+export const PER_USER_LOCAL_KEYS = ['mib.accountTimeZone'] as const;
+
+export function clearPerUserStorage(): void {
+  for (const sessionKey of PER_USER_SESSION_KEYS) {
+    try {
+      sessionStorage.removeItem(sessionKey);
+    } catch {
+      /* storage unavailable */
+    }
+  }
+  for (const localKey of PER_USER_LOCAL_KEYS) {
+    try {
+      localStorage.removeItem(localKey);
+    } catch {
+      /* storage unavailable */
+    }
+  }
+}
 
 interface SessionState {
   user: MeResponse | null;
@@ -98,13 +118,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     } finally {
       setAuthToken(null);
       storeToken(null);
-      for (const key of PER_USER_KEYS) {
-        try {
-          sessionStorage.removeItem(key);
-        } catch {
-          /* ignore */
-        }
-      }
+      clearPerUserStorage();
       setUser(null);
     }
   }, []);
