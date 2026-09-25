@@ -124,7 +124,7 @@ export function OceanScreen({
   onOpenProfile,
 }: Props) {
   const { user } = useSession();
-  const { phase, nowMs, oceanStormOverride } = useWeather();
+  const { phase, oceanStormOverride, storm, stormUntil } = useWeather();
   const [mode, setMode] = useState<OceanMode>(focusPublicId ? 'public' : 'private');
   const bottles = useAsync(() => api.sentBottles(), [], POLL_MS);
   const chart = useAsync(() => api.chart(), []);
@@ -181,16 +181,14 @@ export function OceanScreen({
   const publicRoutes = useMemo(() => publicList.map(publicRoute), [publicList]);
   const routes = isPublic ? publicRoutes : privateRoutes;
 
-  // Per-bottle simulated weather: the server's own storm windows, for this sender's at-sea
-  // bottles — so two bottles on one route can differ, nothing rerolls on refresh, selection or
-  // opening the sea viewer. Every window lies in one of this account's nights, the same nights
-  // the map's palette follows.
+  // The account's one storm (risk policy v4): shown once on the map while it lasts and only at
+  // night, and every bottle still at sea sails through it. Nothing rerolls on refresh, selection
+  // or opening the sea viewer; the storm is the server's, the same on every device.
   // Keep the weather map referentially stable while its values are unchanged, so the periodic
-  // clock tick does not make the map re-run its marker effect for nothing: the map is rebuilt
-  // only when its serialised form changes.
-  const weatherKey = Object.entries(
-    oceanWeatherMap(list, nowMs, { force: overrideToForce(oceanStormOverride) }),
-  )
+  // clock tick does not re-render the cards for nothing.
+  const forced = overrideToForce(oceanStormOverride);
+  const mapStorm = forced === 'on' ? true : forced === 'off' ? false : storm === 'storm';
+  const weatherKey = Object.entries(oceanWeatherMap(list, storm, { force: forced }))
     .map(([id, w]) => `${id}=${w}`)
     .join(',');
   const weather = useMemo<Record<string, BottleWeather>>(
@@ -430,11 +428,22 @@ export function OceanScreen({
           selectedRouteIds={selectedRouteIds}
           onSelectRoute={selectFromMap}
           phase={phase}
-          weather={weather}
           paused={viewing !== null}
           fitKey={fitKey}
         />
       </div>
+      {/* One storm for the whole map: the account's weather, not a storm per bottle. */}
+      {mapStorm && !isPublic ? (
+        <div className="map-storm" role="status" aria-live="polite">
+          <span className="map-storm-sky" aria-hidden />
+          <span className="map-storm-label">
+            <Icon name="storm" size={14} />
+            {stormUntil
+              ? `A storm is passing over your sea until ${formatTime(new Date(stormUntil).toISOString())}`
+              : 'A storm is passing over your sea'}
+          </span>
+        </div>
+      ) : null}
       <div className="scrim scrim-map" />
       <div className="scrim-map-header" />
       <header className="world-header">
@@ -838,7 +847,9 @@ function JourneyCard({
           It went down here, in a storm. The letter stays in your passport.
         </p>
       ) : storm ? (
-        <p className="card-note">This bottle is in weather. Your other bottles are unaffected.</p>
+        <p className="card-note">
+          A storm is over your sea. Each bottle at sea faces it on its own.
+        </p>
       ) : null}
       {/* The action row (handoff v2.0): the sea viewer is reached only from here, never from a
           marker tap, and only while the bottle is still at sea. */}

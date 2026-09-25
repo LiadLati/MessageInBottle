@@ -88,9 +88,8 @@ interface Props {
   // Time of day for the map palette. Changing it tweens paint properties in place: the camera,
   // sources, routes, markers and any open selection are untouched.
   phase?: MapPhase;
-  // Per-bottle weather (handoff v2.0): a storm belongs to a bottle, never to the map. The
-  // glyph shows above a marker for exactly as long as that bottle's storm window lasts; the
-  // window is scheduled in the account's own night, so it always falls on a night-mode map.
+  // Optional per-marker storm glyph. Under risk policy v4 the storm is the account's and is
+  // drawn once over the whole map by the Ocean screen, so the private map passes nothing here.
   weather?: Record<string, BottleWeather>;
   // While the sea viewer covers the map, the position ticker and pin layout stop; the map keeps
   // its instance, camera and selection so returning restores them exactly.

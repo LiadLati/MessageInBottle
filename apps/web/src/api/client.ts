@@ -1,6 +1,7 @@
 import { z, type ZodType } from 'zod';
 import {
   AccountDeletedResponseSchema,
+  AccountWeatherSchema,
   AccountPoliciesSchema,
   AccountStandingSchema,
   AdminAppealSchema,
@@ -246,9 +247,12 @@ export const api = {
       NotificationsPageSchema,
     ),
   markNotificationsRead: () => request<void>('POST', '/notifications/read-all'),
-  // The device's zone, reported on every start and resume; the account keeps the last one.
+  // The device's zone, reported after sign-in, on start, on resume and when it changes. The
+  // server validates it; the latest one it accepts is the account's map clock.
   syncTimeZone: (timeZone: string) =>
     request('PUT', '/auth/time-zone', { timeZone }, MeResponseSchema),
+  // The account's authoritative map clock and storm: the same answer on every device.
+  accountWeather: () => request('GET', '/ocean/weather', undefined, AccountWeatherSchema),
   // Reporting and standing (spec §16). Reporting is one request from the reader; the sender's
   // standing, warning acknowledgement and appeals work even while suspended or banned.
   reportLetter: (input: {

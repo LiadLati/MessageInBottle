@@ -2750,3 +2750,53 @@ button.avatar {
     top: calc(var(--header-pad-top) + 64px);
   }
 }
+
+/* The account's one storm (risk policy v4): a single weather band over the whole map, never a
+   storm per bottle. Presentation only; the label says it in words. */
+.map-storm {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  pointer-events: none;
+}
+.map-storm-sky {
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(120% 60% at 50% 0%, rgba(20, 28, 44, 0.55), transparent 70%),
+    repeating-linear-gradient(105deg, rgba(200, 220, 240, 0.07) 0 2px, transparent 2px 14px);
+  animation: map-storm-rain 1.4s linear infinite;
+}
+.map-storm-label {
+  position: absolute;
+  left: 50%;
+  bottom: calc(var(--nav-height, 72px) + 132px);
+  transform: translateX(-50%);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: calc(100vw - 32px);
+  padding: 6px 12px;
+  border-radius: 999px;
+  background: rgba(16, 24, 36, 0.82);
+  color: #f0ddae;
+  font-size: 13px;
+  text-align: center;
+}
+@keyframes map-storm-rain {
+  from {
+    background-position:
+      0 0,
+      0 0;
+  }
+  to {
+    background-position:
+      0 0,
+      -28px 96px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .map-storm-sky {
+    animation: none;
+  }
+}
