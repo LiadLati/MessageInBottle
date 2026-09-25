@@ -48,6 +48,9 @@ export function testConfig(overrides: Partial<AppConfig> = {}): AppConfig {
     msPerChartUnit: 60 * 60 * 1000,
     minJourneyMs: 6 * 60 * 60 * 1000,
     defaultShoreCapacity: 5,
+    // Small by default so tests reach "full" quickly; a test that sets defaultShoreCapacity to
+    // make room gets the same room per recipient.
+    shoreCapacity: overrides.defaultShoreCapacity ?? 5,
     journeyTickMs: 1000,
     sessionTtlMs: 60 * 60 * 1000,
     corsOrigin: '*',
@@ -69,7 +72,6 @@ export function testConfig(overrides: Partial<AppConfig> = {}): AppConfig {
       model: 'test-model',
       timeoutMs: 1000,
       tickMs: 1000,
-      autoDecide: false,
     },
     retention: RETENTION_DEFAULT,
     retentionTickMs: 60 * 60 * 1000,

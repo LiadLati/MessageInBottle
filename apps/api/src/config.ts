@@ -2,13 +2,13 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   POLICY_DOCUMENTS,
+  SHORE_CAPACITY,
   RISK_POLICY_VERSION,
   SUPPORT_EMAIL,
   policySetStatus,
-  textOf,
 } from '@mib/shared';
 import type { PoliciesConfig } from './services/policies.js';
-import { SEVEN_DAYS_MS, type RetentionPolicy } from './services/retention.js';
+import { THIRTY_DAYS_MS, type RetentionPolicy } from './services/retention.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 // src/config.ts in development, dist/<entry>.js in the built artefact: both sit one directory
@@ -56,14 +56,14 @@ function envDays(env: Env, name: string): number | null {
   return n * 24 * 60 * 60 * 1000;
 }
 
-// The published policy is seven days after a case becomes final, and it runs by default.
-// MIB_RETENTION_ENABLED=false stops it removing anything (the dry-run plan still works), and
-// MIB_RETENTION_FINAL_DAYS shortens or lengthens the window for a staging environment. Neither
-// is needed in an ordinary deployment.
+// The published policy is 30 days after the decision (or until a timely appeal is decided),
+// and it runs by default. MIB_RETENTION_ENABLED=false stops it removing anything (the dry-run
+// plan still works), and MIB_RETENTION_DAYS shortens or lengthens the window for a staging
+// environment. Neither is needed in an ordinary deployment.
 function loadRetentionPolicy(env: Env): RetentionPolicy {
   return {
     enabled: envBool(env, 'MIB_RETENTION_ENABLED', true),
-    finalAfterMs: envDays(env, 'MIB_RETENTION_FINAL_DAYS') ?? SEVEN_DAYS_MS,
+    afterDecisionMs: envDays(env, 'MIB_RETENTION_DAYS') ?? THIRTY_DAYS_MS,
   };
 }
 
@@ -101,6 +101,8 @@ export interface AppConfig {
   minJourneyMs: number;
   // D06 is open: default per-shore slot count for the slice.
   defaultShoreCapacity: number;
+  // Bottles one account's shore holds at once (product decision 8). Enforced per recipient.
+  shoreCapacity: number;
   journeyTickMs: number;
   sessionTtlMs: number;
   corsOrigin: string;
@@ -144,7 +146,6 @@ export interface AiConfig {
   // false (default): the model's verdict is a recommendation shown to admins. true: a clear
   // `accept` or `reject` decides the case itself; `uncertain` always goes to an admin. Enable
   // only after running `pnpm --filter @mib/api ai:eval` against your own model.
-  autoDecide: boolean;
 }
 
 export type MailProvider = 'outbox' | 'smtp' | 'disabled';
@@ -187,17 +188,13 @@ export function loadConfig(
     throw new ConfigError(
       'MIB_APP_URL must be the public https:// address of the web app in production.',
     );
-  const autoDecide = envBool(env, 'MIB_AI_AUTO_DECIDE', false);
-  // The Terms, the Community Rules and the Child Safety Standards say a person decides every
-  // case. Letting the model decide while they say so would make them false (audit SEC-020), so
-  // the switch is refused until the published documents are changed to allow it.
-  if (
-    autoDecide &&
-    POLICY_DOCUMENTS.some((d) => /Every case is decided by a person/.test(textOf(d)))
-  )
+  // Automated review is recommendation-only (product decision 2): there is no automatic
+  // decision path left in the code, so the old switch is refused outright rather than
+  // silently ignored.
+  if (envBool(env, 'MIB_AI_AUTO_DECIDE', false))
     throw new ConfigError(
-      'MIB_AI_AUTO_DECIDE=true is refused: the published documents state that every case is ' +
-        'decided by a person. Change the documents (a new policy version) before enabling it.',
+      'MIB_AI_AUTO_DECIDE=true is not supported: automated review only recommends, and every ' +
+        'case is decided by a person. Remove the setting.',
     );
   return {
     port: envInt(env, 'MIB_PORT', 3001),
@@ -207,6 +204,7 @@ export function loadConfig(
     msPerChartUnit: envInt(env, 'MIB_MS_PER_CHART_UNIT', 60 * 60 * 1000),
     minJourneyMs: envInt(env, 'MIB_MIN_JOURNEY_MS', 6 * 60 * 60 * 1000),
     defaultShoreCapacity: envInt(env, 'MIB_DEFAULT_SHORE_CAPACITY', 5),
+    shoreCapacity: envInt(env, 'MIB_SHORE_CAPACITY', SHORE_CAPACITY),
     journeyTickMs: envInt(env, 'MIB_JOURNEY_TICK_MS', 15_000),
     sessionTtlMs: envInt(env, 'MIB_SESSION_TTL_MS', 30 * 24 * 60 * 60 * 1000),
     corsOrigin: env.MIB_CORS_ORIGIN ?? 'http://localhost:5173',
@@ -229,7 +227,6 @@ export function loadConfig(
       model: env.MIB_AI_MODEL ?? 'qwen2.5:7b',
       timeoutMs: envInt(env, 'MIB_AI_TIMEOUT_MS', 60_000),
       tickMs: envInt(env, 'MIB_AI_TICK_MS', 10_000),
-      autoDecide,
     },
   };
 }

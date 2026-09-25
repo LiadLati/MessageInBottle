@@ -93,8 +93,8 @@ async function main(): Promise<void> {
       const result = applyRetention(db, Date.now(), config.retention);
       if (result.redacted.length > 0)
         console.log(
-          `Evidence retention: redacted ${result.redacted.length} case(s) that became final more ` +
-            `than ${config.retention.finalAfterMs / 86_400_000} days ago.`,
+          `Evidence retention: redacted ${result.redacted.length} case(s) decided more than ` +
+            `${config.retention.afterDecisionMs / 86_400_000} days ago.`,
         );
     } catch (err) {
       console.error('retention tick failed', err);
@@ -109,7 +109,7 @@ async function main(): Promise<void> {
     );
     console.log(
       config.ai.enabled
-        ? `  AI review: ${config.ai.model} at ${config.ai.endpoint} (${config.ai.autoDecide ? 'automatic decisions ON' : 'recommendations only'}); reports queue while it is offline.`
+        ? `  AI review: ${config.ai.model} at ${config.ai.endpoint} (recommendations only); reports queue while it is offline.`
         : '  AI review is OFF: reports wait for an admin.',
     );
     if (!config.devMode && !PRODUCTION_BUILD && process.env.NODE_ENV !== 'production')

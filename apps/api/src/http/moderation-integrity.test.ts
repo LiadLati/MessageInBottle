@@ -85,6 +85,7 @@ describe('separation of duties (SEC-010)', () => {
     const caseId = reportedCase(w, 'ada', 'bo');
     const ada = await loginAs(app, 'ada');
     const res = await decide(app, ada.token, caseId, 'reject', {
+      reason: 'my own letter is fine',
       evidenceDigest: evidenceDigest(w, caseId),
     });
     expect(res.status).toBe(403);
@@ -159,7 +160,7 @@ describe('deciding what was actually seen (SEC-010, FE-009)', () => {
     expect(missing.status).toBe(400);
   });
 
-  it('requires a reason to uphold, not to reject', async () => {
+  it('requires a reason to uphold and to reject (product decision 1)', async () => {
     const w = createTestWorld({ defaultShoreCapacity: 80 });
     const app = createApp(w.ctx);
     admin(w, 'cy');
@@ -174,8 +175,20 @@ describe('deciding what was actually seen (SEC-010, FE-009)', () => {
     expect(((await blank.json()) as { error: { code: string } }).error.code).toBe(
       'reason_required',
     );
+    const noReason = await decide(app, cy.token, b, 'reject', {
+      evidenceDigest: evidenceDigest(w, b),
+    });
+    expect(noReason.status).toBe(400);
+    expect(((await noReason.json()) as { error: { code: string } }).error.code).toBe(
+      'reason_required',
+    );
     expect(
-      (await decide(app, cy.token, b, 'reject', { evidenceDigest: evidenceDigest(w, b) })).status,
+      (
+        await decide(app, cy.token, b, 'reject', {
+          reason: 'not a violation',
+          evidenceDigest: evidenceDigest(w, b),
+        })
+      ).status,
     ).toBe(200);
   });
 
@@ -258,11 +271,11 @@ describe('the audit trail can be read (SEC-011)', () => {
   });
 });
 
-describe('automatic AI decisions stay off while the documents promise a person (SEC-020)', () => {
-  it('refuses MIB_AI_AUTO_DECIDE=true', () => {
+describe('automated review never decides (SEC-020, product decision 2)', () => {
+  it('refuses MIB_AI_AUTO_DECIDE=true outright', () => {
     expect(() => loadConfig({ MIB_AI_AUTO_DECIDE: 'true' })).toThrow(ConfigError);
     expect(() => loadConfig({ MIB_AI_AUTO_DECIDE: 'true' })).toThrow(/decided by a person/);
-    expect(loadConfig({ MIB_AI_AUTO_DECIDE: 'false' }).ai.autoDecide).toBe(false);
+    expect(() => loadConfig({ MIB_AI_AUTO_DECIDE: 'false' })).not.toThrow();
   });
 });
 

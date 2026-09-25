@@ -147,7 +147,8 @@ describe('the single appeal opportunity', () => {
       method: 'POST',
       headers: auth(ctx.ada.token),
     });
-    await comeBackLater(ctx, 30 * DAY);
+    // Within the 30-day window (product decision 5), nothing but an answer resolves it.
+    await comeBackLater(ctx, 29 * DAY);
     const later = await standingOfAda(ctx);
     expect(later.pendingDecision?.id).toBe(v.id);
     expect(later.pendingDecision?.appealAvailable).toBe(true);

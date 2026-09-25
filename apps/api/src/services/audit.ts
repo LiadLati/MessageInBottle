@@ -18,6 +18,8 @@ export type AuditAction =
   | 'appeal_decided'
   | 'case_decided'
   | 'critical_child_safety'
+  | 'appeal_reopened'
+  | 'urgent_child_safety_review'
   | 'hold_placed'
   | 'hold_released'
   | 'evidence_redacted';

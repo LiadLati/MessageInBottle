@@ -206,7 +206,6 @@ describe('the local AI review queue', () => {
     const now = w.realClock.now();
     expect(await runAiReviewTick(w.ctx, offline, now)).toEqual({
       reviewed: 0,
-      decided: 0,
       deferred: 1,
     });
     let c = getCase(w.ctx, caseId);
@@ -217,7 +216,6 @@ describe('the local AI review queue', () => {
     // Not due yet: nothing happens. Due: tried again, delay doubles.
     expect(await runAiReviewTick(w.ctx, offline, now + 1000)).toEqual({
       reviewed: 0,
-      decided: 0,
       deferred: 0,
     });
     expect(await runAiReviewTick(w.ctx, offline, now + retryDelayMs(1))).toMatchObject({
@@ -244,7 +242,6 @@ describe('the local AI review queue', () => {
     );
     expect(await runAiReviewTick(w.ctx, reviewer)).toEqual({
       reviewed: 1,
-      decided: 0,
       deferred: 0,
     });
     const c = getCase(w.ctx, caseId);
@@ -260,7 +257,6 @@ describe('the local AI review queue', () => {
     // Reviewed once: a later tick does not send it again.
     expect(await runAiReviewTick(w.ctx, reviewer)).toEqual({
       reviewed: 0,
-      decided: 0,
       deferred: 0,
     });
   });
@@ -292,49 +288,79 @@ describe('the local AI review queue', () => {
     expect(parseReviewOutput('not json at all')).toBeNull();
   });
 
-  it('only decides cases automatically when configured, and never on uncertainty', async () => {
-    const auto = createTestWorld({ ai: { ...w.ctx.config.ai, autoDecide: true } });
-    auto.db
-      .update(t.users)
-      .set({ shoreId: 'shore_gull_hollow' })
-      .where(eq(t.users.id, auto.user('dee').id))
-      .run();
-    const id = deliveredLetter(auto, 'key-0000000011');
-    const cid = reportLetter(auto.ctx, auto.user('bo'), {
+  it('never decides, whatever the verdict (product decision 2)', async () => {
+    const id = deliveredLetter(w, 'key-0000000011');
+    const cid = reportLetter(w.ctx, w.user('bo'), {
       bottleId: id,
       reason: 'hate',
       hide: false,
     }).caseId;
-    const uncertain = answering(
-      JSON.stringify({
-        verdict: 'uncertain',
-        reason: 'irony?',
-        uncertainty: 'could be a joke between friends',
-      }),
-    );
-    expect(await runAiReviewTick(auto.ctx, uncertain)).toEqual({
-      reviewed: 1,
-      decided: 0,
-      deferred: 0,
-    });
-    expect(getCase(auto.ctx, cid).status).toBe('pending');
-    // A clear verdict on a fresh case decides it through the same path an admin uses.
-    const id2 = deliveredLetter(auto, 'key-0000000012');
-    const cid2 = reportLetter(auto.ctx, auto.user('bo'), {
-      bottleId: id2,
-      reason: 'hate',
+    const clear = answering(JSON.stringify({ verdict: 'accept', reason: 'Clearly hateful.' }));
+    expect((await runAiReviewTick(w.ctx, clear)).deferred).toBe(0);
+    const c = getCase(w.ctx, cid);
+    expect(c.status).toBe('pending');
+    expect(c.decision).toBeNull();
+    expect(c.ai.verdict).toBe('accept');
+    expect(c.urgentAt).toBeNull();
+    expect(w.db.select().from(t.violations).all()).toEqual([]);
+  });
+
+  it('puts a possible child-safety issue at the top of the human queue and sanctions no one', async () => {
+    // An ordinary case reported first, so the urgent one has to overtake it.
+    const first = deliveredLetter(w, 'key-0000000012');
+    const ordinary = reportLetter(w.ctx, w.user('bo'), {
+      bottleId: first,
+      reason: 'spam',
       hide: false,
     }).caseId;
-    const clear = answering(JSON.stringify({ verdict: 'reject', reason: 'A friendly note.' }));
-    expect(await runAiReviewTick(auto.ctx, clear)).toEqual({
-      reviewed: 1,
-      decided: 1,
-      deferred: 0,
-    });
-    const c2 = getCase(auto.ctx, cid2);
-    expect(c2.status).toBe('rejected');
-    expect(c2.decision).toMatchObject({ outcome: 'rejected', by: 'ai', admin: null });
-    expect(c2.violationId).toBeNull();
+    const id = deliveredLetter(w, 'key-0000000013');
+    const cid = reportLetter(w.ctx, w.user('bo'), {
+      bottleId: id,
+      reason: 'sexual',
+      hide: false,
+    }).caseId;
+    // Visible to the administrator before the model has said anything.
+    expect(listCases(w.ctx, 'pending').map((x) => x.id)).toEqual(
+      expect.arrayContaining([ordinary, cid]),
+    );
+    // The model flags only the case reported for sexual content.
+    const flagged = {
+      review: (input: { reasons: string[] }) =>
+        Promise.resolve(
+          JSON.stringify(
+            input.reasons.includes('sexual')
+              ? {
+                  verdict: 'accept',
+                  reason: 'Possible sexualisation of a minor.',
+                  uncertainty: 'the age is implied, not stated',
+                  language: 'English',
+                  childSafety: true,
+                }
+              : { verdict: 'reject', reason: 'Ordinary spam complaint.', childSafety: false },
+          ),
+        ),
+    };
+    await runAiReviewTick(w.ctx, flagged);
+    expect(getCase(w.ctx, ordinary).urgentAt).toBeNull();
+    const queue = listCases(w.ctx, 'pending');
+    expect(queue[0]!.id).toBe(cid);
+    expect(queue[0]!.urgentAt).not.toBeNull();
+    const c = getCase(w.ctx, cid);
+    expect(c.ai.childSafety).toBe(true);
+    expect(c.ai.uncertainty).toBe('the age is implied, not stated');
+    // Recommendation only: no decision, no violation, no ban, no withdrawal.
+    expect(c.status).toBe('pending');
+    expect(w.db.select().from(t.violations).all()).toEqual([]);
+    expect(standingOf(w.db, w.user('ada').id, w.realClock.now()).standing).toBe('good');
+    const bottle = w.db.select().from(t.bottles).where(eq(t.bottles.id, id)).get()!;
+    expect(bottle.moderationStatus).toBe('clear');
+    const audit = w.db
+      .select()
+      .from(t.moderationAudit)
+      .where(eq(t.moderationAudit.caseId, cid))
+      .all()
+      .map((a) => [a.action, a.actorRole]);
+    expect(audit).toContainEqual(['urgent_child_safety_review', 'system']);
   });
 
   it('sends only the reported text and the report reasons, with the letter fenced as data', async () => {

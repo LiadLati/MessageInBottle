@@ -1,4 +1,5 @@
-import { and, desc, eq, isNull } from 'drizzle-orm';
+import { and, desc, eq, isNull, sql } from 'drizzle-orm';
+import { APPEAL_WINDOW_MS } from '@mib/shared';
 import type {
   AdminAppealDto,
   AdminCaseDetailDto,
@@ -19,6 +20,8 @@ import { appealAvailable, notifyStanding, standingOf, violationsInForce } from '
 import { enqueueNotification } from './notifications.js';
 import { writeAudit } from './audit.js';
 import { finalityOf, holdOf } from './retention.js';
+import { releaseCapacityOnce } from './journey.js';
+import { applyStandingEffects } from './restriction.js';
 
 // The admin side of moderation: reading cases with their evidence, deciding them, and deciding
 // appeals. Every state change here is one transaction guarded by the row's current status, so
@@ -36,7 +39,7 @@ function person(db: DbOrTx, userId: string): PersonDto {
     .from(t.users)
     .where(eq(t.users.id, userId))
     .get();
-  return u ?? { id: userId, username: '(deleted)', displayName: 'Deleted account' };
+  return u ?? { id: userId, username: '(deleted)', displayName: 'Deleted user' };
 }
 
 function aiOf(c: CaseRow): AiReviewDto {
@@ -52,6 +55,7 @@ function aiOf(c: CaseRow): AiReviewDto {
     completedAt: isoOrNull(c.aiCompletedAt),
     nextAttemptAt: isoOrNull(c.aiNextAttemptAt),
     lastError: c.aiLastError,
+    childSafety: c.aiChildSafety,
   };
 }
 
@@ -70,6 +74,7 @@ function summaryOf(db: DbOrTx, c: CaseRow): AdminCaseSummaryDto {
   return {
     id: c.id,
     status: c.status,
+    urgentAt: isoOrNull(c.urgentAt),
     bottleId: c.bottleId,
     context: c.context,
     sender: person(db, c.senderId),
@@ -96,8 +101,9 @@ function summaryOf(db: DbOrTx, c: CaseRow): AdminCaseSummaryDto {
 function detailOf(
   db: DbOrTx,
   c: CaseRow,
-  finalAfterMs: number,
+  afterDecisionMs: number,
   viewerId: string | null,
+  now: number,
 ): AdminCaseDetailDto {
   const bottle = db.select().from(t.bottles).where(eq(t.bottles.id, c.bottleId)).get()!;
   const reports = db
@@ -137,11 +143,11 @@ function detailOf(
         }
       : null,
     retention: (() => {
-      const { finalAt, hold } = finalityOf(db, c);
+      const { finalAt, redactableAt, hold } = finalityOf(db, c, afterDecisionMs);
       const held = holdOf(c);
       return {
         finalAt: isoOrNull(finalAt),
-        redactableAt: finalAt === null ? null : iso(finalAt + finalAfterMs),
+        redactableAt: isoOrNull(redactableAt),
         hold:
           c.evidenceRedactedAt !== null ? 'already_redacted' : (held ?? hold ?? 'within_window'),
       };
@@ -160,7 +166,7 @@ function detailOf(
       ? {
           id: violation.id,
           severity: violation.severity,
-          appealAvailable: appealAvailable(db, violation),
+          appealAvailable: appealAvailable(db, violation, now),
           appealWaivedAt: isoOrNull(violation.appealWaivedAt),
           noticePresentedAt: isoOrNull(violation.noticePresentedAt),
         }
@@ -215,7 +221,8 @@ export function listCases(ctx: AppContext, status: CaseStatus | 'all'): AdminCas
     .select()
     .from(t.moderationCases)
     .where(status === 'all' ? undefined : eq(t.moderationCases.status, status))
-    .orderBy(desc(t.moderationCases.updatedAt))
+    // Urgent child-safety reviews first (product decision 2), then the most recent activity.
+    .orderBy(sql`${t.moderationCases.urgentAt} is null`, desc(t.moderationCases.updatedAt))
     .limit(200)
     .all();
   return rows.map((c) => summaryOf(ctx.db, c));
@@ -228,7 +235,13 @@ export function getCase(
 ): AdminCaseDetailDto {
   const c = ctx.db.select().from(t.moderationCases).where(eq(t.moderationCases.id, caseId)).get();
   if (!c) throw notFound('case');
-  return detailOf(ctx.db, c, ctx.config.retention.finalAfterMs, viewer?.id ?? null);
+  return detailOf(
+    ctx.db,
+    c,
+    ctx.config.retention.afterDecisionMs,
+    viewer?.id ?? null,
+    ctx.realClock.now(),
+  );
 }
 
 // Decides a pending case. `admin` is null when the model decides under MIB_AI_AUTO_DECIDE.
@@ -238,7 +251,9 @@ export function getCase(
 // as is the journey: no state, timing or public listing changes) and tells the sender once.
 export function decideCase(
   ctx: AppContext,
-  admin: AuthUser | null,
+  // Always a person (product decision 2): there is no automated caller any more, and the type
+  // leaves no value a worker could pass.
+  admin: AuthUser,
   caseId: string,
   outcome: 'accepted' | 'rejected',
   reason: string | null | undefined,
@@ -334,6 +349,9 @@ export function decideCase(
       },
       now,
     );
+    // The withdrawn letter can no longer be opened, so its shore place goes back now
+    // (product decision 8); a no-op if it was already released on opening.
+    releaseCapacityOnce(tx, c.bottleId, now);
     const standing = standingOf(tx, c.senderId, now);
     notifyStanding(
       tx,
@@ -342,6 +360,7 @@ export function decideCase(
       standing,
       now,
     );
+    applyStandingEffects(tx, c.senderId, now);
     return true;
   });
 }
@@ -351,7 +370,8 @@ export function decideCase(
 function appealOf(
   db: DbOrTx,
   a: typeof t.appeals.$inferSelect,
-  finalAfterMs: number,
+  afterDecisionMs: number,
+  now: number,
 ): AdminAppealDto {
   const v = db.select().from(t.violations).where(eq(t.violations.id, a.violationId)).get()!;
   const c = db.select().from(t.moderationCases).where(eq(t.moderationCases.id, v.caseId)).get()!;
@@ -367,7 +387,7 @@ function appealOf(
       decidedAt: iso(v.decidedAt),
       revokedAt: isoOrNull(v.revokedAt),
     },
-    case: detailOf(db, c, finalAfterMs, null),
+    case: detailOf(db, c, afterDecisionMs, null, now),
     decision:
       a.decidedAt && a.decidedByUserId && a.status !== 'pending'
         ? {
@@ -391,13 +411,13 @@ export function listAppeals(
     .orderBy(desc(t.appeals.createdAt))
     .limit(200)
     .all()
-    .map((a) => appealOf(ctx.db, a, ctx.config.retention.finalAfterMs));
+    .map((a) => appealOf(ctx.db, a, ctx.config.retention.afterDecisionMs, ctx.realClock.now()));
 }
 
 export function getAppeal(ctx: AppContext, appealId: string): AdminAppealDto {
   const a = ctx.db.select().from(t.appeals).where(eq(t.appeals.id, appealId)).get();
   if (!a) throw notFound('appeal');
-  return appealOf(ctx.db, a, ctx.config.retention.finalAfterMs);
+  return appealOf(ctx.db, a, ctx.config.retention.afterDecisionMs, ctx.realClock.now());
 }
 
 // Accepting an appeal revokes the violation (it stops counting at once, which is what lifts an
@@ -583,15 +603,60 @@ export function decideCaseCritical(
         .where(eq(t.bottles.id, c.bottleId))
         .run();
     }
+    // Withdrawn from every further reading, and its shore place released (decision 8).
+    releaseCapacityOnce(tx, c.bottleId, now);
 
     const violation = tx.select().from(t.violations).where(eq(t.violations.caseId, caseId)).get();
     if (!violation) throw conflict('no_violation', 'This case has no violation to classify.');
     if (violation.revokedAt !== null)
       throw conflict('already_revoked', 'This violation was revoked on appeal.');
+    const escalated = c.status === 'accepted';
+    // Escalating an ordinary violation changes its consequence to a permanent ban. When no
+    // appeal was ever filed — it was waived, or its window lapsed, or it is still open — the
+    // person gets one appeal opportunity against the ban, with a fresh 30-day window from
+    // now (product decision 2). An appeal already filed covers it; a rejected one stays final.
+    const filed = tx
+      .select({ id: t.appeals.id })
+      .from(t.appeals)
+      .where(eq(t.appeals.violationId, violation.id))
+      .get();
+    const reopen = escalated && !filed;
+    const wasClosed =
+      violation.appealWaivedAt !== null ||
+      now >= (violation.appealWindowStartsAt ?? violation.decidedAt) + APPEAL_WINDOW_MS;
     tx.update(t.violations)
-      .set({ severity: 'critical', reason: trimmed })
+      .set({
+        severity: 'critical',
+        reason: trimmed,
+        ...(reopen
+          ? {
+              appealWaivedAt: null,
+              appealWindowStartsAt: now,
+              appealReopenedAt: wasClosed ? now : violation.appealReopenedAt,
+              acknowledgedAt: null,
+              noticePresentedAt: null,
+            }
+          : {}),
+      })
       .where(eq(t.violations.id, violation.id))
       .run();
+    if (reopen)
+      writeAudit(
+        tx,
+        {
+          action: 'appeal_reopened',
+          caseId,
+          violationId: violation.id,
+          subjectUserId: c.senderId,
+          actorUserId: admin.id,
+          actorRole: 'admin',
+          reason: trimmed,
+          detail: wasClosed
+            ? `escalated to a permanent ban after the appeal ${violation.appealWaivedAt !== null ? 'was waived' : 'window lapsed'}; one new 30-day appeal window opened`
+            : 'escalated to a permanent ban; the 30-day appeal window restarts from the escalation',
+        },
+        now,
+      );
 
     writeAudit(
       tx,
@@ -603,7 +668,12 @@ export function decideCaseCritical(
         actorUserId: admin.id,
         actorRole: 'admin',
         reason: trimmed,
-        detail: 'classified as a confirmed critical child-safety violation; permanent ban applied',
+        detail: JSON.stringify({
+          classification: 'critical_child_safety',
+          action: 'permanent_ban',
+          letter: 'withdrawn from reading',
+          path: escalated ? 'escalated from an upheld violation' : 'decided from the report',
+        }),
       },
       now,
     );
@@ -611,10 +681,11 @@ export function decideCaseCritical(
     notifyStanding(
       tx,
       c.senderId,
-      { id: violation.id, recipientName: bottle.recipientNameSnapshot },
+      { id: violation.id, recipientName: bottle.recipientNameSnapshot, critical: true },
       standingOf(tx, c.senderId, now),
       now,
     );
+    applyStandingEffects(tx, c.senderId, now);
   });
   return getCase(ctx, caseId);
 }

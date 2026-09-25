@@ -28,6 +28,14 @@ type Status = 'pending' | 'accepted' | 'rejected' | 'all';
 const statusOf = (raw: string | undefined): Status =>
   raw && STATUSES.has(raw) ? (raw as Status) : 'pending';
 
+// Every accept and reject, of a report or of an appeal, records the administrator's reason
+// (product decision 1): decisions are final outside the appeal, so the record must say why.
+function requireReason(reason: string | null | undefined, what: string): string {
+  const trimmed = reason?.trim();
+  if (!trimmed) throw badRequest('reason_required', `${what} requires a reason for the record.`);
+  return trimmed;
+}
+
 // Every route here is behind requireAuth, requireAdmin and requireGoodStanding: the role on the
 // users row opens this door, and a suspended or banned account keeps no moderation authority
 // whatever its role (audit SEC-009) — banning a compromised or abusive administrator contains it.
@@ -43,16 +51,13 @@ export function adminRoutes() {
   r.post('/reports/:id/accept', jsonBody(CaseDecisionRequestSchema), (c) => {
     const ctx = c.get('ctx');
     const body = c.req.valid('json');
-    // An upheld report records a violation that never expires: an administrator must say why
-    // (audit FE-009). Rejecting needs no reason.
-    if (!body.reason?.trim())
-      throw badRequest('reason_required', 'Upholding a report requires a reason for the record.');
+    const reason = requireReason(body.reason, 'Upholding a report');
     const changed = decideCase(
       ctx,
       c.get('user'),
       c.req.param('id'),
       'accepted',
-      body.reason,
+      reason,
       body.evidenceDigest,
     );
     return c.json({ case: getCase(ctx, c.req.param('id'), c.get('user')), changed });
@@ -60,12 +65,13 @@ export function adminRoutes() {
   r.post('/reports/:id/reject', jsonBody(CaseDecisionRequestSchema), (c) => {
     const ctx = c.get('ctx');
     const body = c.req.valid('json');
+    const reason = requireReason(body.reason, 'Rejecting a report');
     const changed = decideCase(
       ctx,
       c.get('user'),
       c.req.param('id'),
       'rejected',
-      body.reason,
+      reason,
       body.evidenceDigest,
     );
     return c.json({ case: getCase(ctx, c.req.param('id'), c.get('user')), changed });
@@ -113,7 +119,7 @@ export function adminRoutes() {
       c.get('user'),
       c.req.param('id'),
       'accepted',
-      c.req.valid('json').reason,
+      requireReason(c.req.valid('json').reason, 'Accepting an appeal'),
     );
     return c.json({ appeal: getAppeal(ctx, c.req.param('id')), changed });
   });
@@ -124,7 +130,7 @@ export function adminRoutes() {
       c.get('user'),
       c.req.param('id'),
       'rejected',
-      c.req.valid('json').reason,
+      requireReason(c.req.valid('json').reason, 'Rejecting an appeal'),
     );
     return c.json({ appeal: getAppeal(ctx, c.req.param('id')), changed });
   });
