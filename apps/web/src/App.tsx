@@ -281,7 +281,13 @@ function Shell() {
           onSuspensionEnded={reloadStanding}
         />
         {pendingDecision ? (
-          <DecisionNotice notice={pendingDecision} onResolved={reloadStanding} />
+          <DecisionNotice
+            // One component per notice: a second notice owed after the first is answered starts
+            // fresh instead of inheriting the first one's busy state.
+            key={pendingDecision.id}
+            notice={pendingDecision}
+            onResolved={reloadStanding}
+          />
         ) : null}
         {deletingAccount ? deleteDialog : null}
       </main>
@@ -424,7 +430,13 @@ function Shell() {
         />
       ) : null}
       {pendingDecision && !immersive ? (
-        <DecisionNotice notice={pendingDecision} onResolved={reloadStanding} />
+        <DecisionNotice
+          // One component per notice: a second notice owed after the first is answered starts
+          // fresh instead of inheriting the first one's busy state.
+          key={pendingDecision.id}
+          notice={pendingDecision}
+          onResolved={reloadStanding}
+        />
       ) : null}
       {deletingAccount ? deleteDialog : null}
       {policyDialog}

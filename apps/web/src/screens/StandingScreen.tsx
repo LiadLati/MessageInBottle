@@ -81,7 +81,8 @@ export function StandingScreen({ standing, onBack, onDeleteAccount, onSuspension
         onBack ? (
           <BackButton onClick={onBack} />
         ) : (
-          <div className="row" style={{ gap: 8 }}>
+          // Wraps at phone width, so Sign out is never pushed off the screen.
+          <div className="row" style={{ gap: 8, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
             <SupportLink className="btn-ghost" />
             {onDeleteAccount ? (
               <button type="button" className="btn-ghost" onClick={onDeleteAccount}>

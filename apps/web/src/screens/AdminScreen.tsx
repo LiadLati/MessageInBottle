@@ -156,8 +156,12 @@ function ReportsSection({
                       {c.reasons.map((r: ReportReason) => REPORT_REASON_LABELS[r]).join(', ')} ·{' '}
                       {formatDate(c.latestReportAt)}
                     </span>
+                    {c.urgentAt ? (
+                      <span style={{ display: 'block', marginTop: 6 }}>
+                        <UrgentChip />
+                      </span>
+                    ) : null}
                   </span>
-                  {c.urgentAt ? <UrgentChip /> : null}
                   <AiChip ai={c.ai} />
                 </button>
               </li>

@@ -288,12 +288,7 @@ export function unblockFoundWriter(ctx: AppContext, blockerId: string, bottleId:
   removeBlock(ctx, blockerId, row.blockedId, eq(t.blocks.foundBottleId, bottleId));
 }
 
-function removeBlock(
-  ctx: AppContext,
-  blockerId: string,
-  blockedId: string,
-  which: SQL,
-): void {
+function removeBlock(ctx: AppContext, blockerId: string, blockedId: string, which: SQL): void {
   ctx.db.transaction((tx) => {
     const removed = tx
       .delete(t.blocks)
