@@ -32,6 +32,9 @@ export const users = sqliteTable('users', {
   // effect. Nights are walked from that instant only, so a change never reaches into the past.
   timeZone: text('time_zone'),
   timeZoneSince: integer('time_zone_since'),
+  // Set when this account's shore became full (100 bottles unread or on their way) and the
+  // owner was told; cleared when it drops below full again. One notice per full episode.
+  shoreFullSince: integer('shore_full_since'),
   // Granted only by the server-side tools (tools/grant-admin.ts, tools/grant-developer.ts), by
   // stable user id. Registration never sets a role and no request body is ever read for one.
   //
@@ -468,6 +471,12 @@ export const moderationCases = sqliteTable(
     aiModel: text('ai_model'),
     aiCompletedAt: integer('ai_completed_at'),
     aiLastError: text('ai_last_error'),
+    // The model flagged a possible child-safety issue. It changes only where the case sits in
+    // the human queue: the model never decides, sanctions or bans (product decision 2).
+    aiChildSafety: integer('ai_child_safety', { mode: 'boolean' }).notNull().default(false),
+    // Set once the case is marked urgent child-safety review (by the model's flag or the
+    // report reason); urgent cases lead the administrator's queue.
+    urgentAt: integer('urgent_at'),
     decidedOutcome: text('decided_outcome', { enum: ['accepted', 'rejected'] }),
     decidedBy: text('decided_by', { enum: ['admin', 'ai'] }),
     decidedByUserId: text('decided_by_user_id').references(() => users.id),
@@ -557,6 +566,11 @@ export const violations = sqliteTable(
     severity: text('severity', { enum: ['standard', 'critical'] })
       .notNull()
       .default('standard'),
+    // The appeal window (30 days) opens here. Null means the original decision time. An
+    // escalation to a critical ban after the appeal was waived or had lapsed opens one new
+    // window from the escalation (product decision 2), recorded in appealReopenedAt.
+    appealWindowStartsAt: integer('appeal_window_starts_at'),
+    appealReopenedAt: integer('appeal_reopened_at'),
   },
   (t) => [index('violations_user_idx').on(t.userId, t.decidedAt)],
 );

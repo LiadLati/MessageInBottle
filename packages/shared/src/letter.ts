@@ -19,7 +19,27 @@ export function utf8ByteLength(text: string): number {
 
 export type LetterValidation =
   | { ok: true; characters: number }
-  | { ok: false; reason: 'empty' | 'too_long' | 'too_many_bytes'; characters: number };
+  | {
+      ok: false;
+      reason: 'empty' | 'too_long' | 'too_many_bytes' | 'direction_controls';
+      characters: number;
+    };
+
+// Product decision 11: letters may not contain the invisible Unicode controls that override or
+// isolate text direction — LRE, RLE, PDF, LRO, RLO (U+202A–U+202E) and LRI, RLI, FSI, PDI
+// (U+2066–U+2069). They can make a letter render differently from what was written (a known
+// spoofing technique), and ordinary writing never needs them: Hebrew, Arabic, mixed-direction
+// text, emoji and punctuation all render correctly without. The marks writers and keyboards do
+// use are allowed: LRM/RLM (U+200E/U+200F), the Arabic letter mark (U+061C) and the zero-width
+// joiner and non-joiner (U+200D/U+200C, needed by emoji sequences and Persian). Refused, never
+// stripped: the writer is asked to remove them, and the words are not changed silently.
+export const DIRECTION_CONTROLS = /[\u202A-\u202E\u2066-\u2069]/u;
+export const DIRECTION_CONTROLS_MESSAGE =
+  'Your letter contains invisible formatting characters that change text direction. Please remove them and try again.';
+
+export function hasDirectionControls(text: string): boolean {
+  return DIRECTION_CONTROLS.test(text);
+}
 
 export function normalizeLetterText(text: string): string {
   return text.replace(/\r\n?/g, '\n');
@@ -29,6 +49,7 @@ export function validateLetterText(raw: string): LetterValidation {
   const text = normalizeLetterText(raw);
   const characters = countLetterCharacters(text);
   if (text.trim().length === 0) return { ok: false, reason: 'empty', characters };
+  if (hasDirectionControls(text)) return { ok: false, reason: 'direction_controls', characters };
   if (characters > LETTER_MAX_CHARACTERS) return { ok: false, reason: 'too_long', characters };
   if (utf8ByteLength(text) > LETTER_MAX_BYTES)
     return { ok: false, reason: 'too_many_bytes', characters };

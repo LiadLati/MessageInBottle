@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 import {
   LETTER_MAX_CHARACTERS,
   countHiddenControls,
+  hasDirectionControls,
+  normalizeLetterText,
   countLetterCharacters,
   revealHiddenControls,
   validateLetterText,
@@ -60,5 +62,40 @@ describe('invisible formatting controls (SEC-018)', () => {
   it('leaves ordinary text, including real right-to-left text, alone', () => {
     expect(countHiddenControls('שלום, dear friend')).toBe(0);
     expect(revealHiddenControls('שלום')).toBe('שלום');
+  });
+});
+
+describe('invisible direction controls (product decision 11)', () => {
+  const controls = ['202A', '202B', '202C', '202D', '202E', '2066', '2067', '2068', '2069'];
+
+  it.each(controls)('refuses U+%s instead of stripping it', (hex) => {
+    const text = `Dear friend, ${String.fromCodePoint(parseInt(hex, 16))}see you soon`;
+    const v = validateLetterText(text);
+    expect(v).toMatchObject({ ok: false, reason: 'direction_controls' });
+  });
+
+  it('catches known spoofing samples', () => {
+    // A right-to-left override that makes "exe.pdf" display as "fdp.exe"-style text.
+    expect(hasDirectionControls('invoice_\u202Efdp.exe')).toBe(true);
+    // An isolate pair hiding reordered words.
+    expect(hasDirectionControls('pay \u206710\u2069 euros')).toBe(true);
+    // Trojan-source style: a comment-like span closed by a pop.
+    expect(hasDirectionControls('ok \u202E } \u202Aif (admin)\u202C')).toBe(true);
+  });
+
+  it.each([
+    ['Hebrew', 'שלום, מה שלומך? נתראה בקרוב.'],
+    ['Arabic', 'مرحبا يا صديقي، أراك قريبا.'],
+    ['mixed Hebrew, English and Arabic', 'Hello שלום مرحبا — see you at 10:30 (עם קפה).'],
+    [
+      'emoji with joiners and a flag',
+      'Family \u{1F468}\u200D\u{1F469}\u200D\u{1F467} and \u{1F1EE}\u{1F1F1} with ❤️ and 👍🏽',
+    ],
+    ['directional marks writers use', 'עברית\u200F 123 and English\u200E text, عربي\u061C'],
+    ['Persian with a zero-width non-joiner', 'می\u200Cخواهم'],
+    ['punctuation and quotes', '«Bonjour» — “quoted” ‘text’ … ¿qué? ¡sí!'],
+  ])('accepts ordinary %s text unchanged', (_label, text) => {
+    expect(validateLetterText(text)).toMatchObject({ ok: true });
+    expect(normalizeLetterText(text)).toBe(text);
   });
 });

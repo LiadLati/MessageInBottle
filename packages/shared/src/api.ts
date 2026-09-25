@@ -131,6 +131,16 @@ export const FriendsResponseSchema = z.object({
 });
 export type FriendsResponse = z.infer<typeof FriendsResponseSchema>;
 
+// Settings → Blocked users (product decision 10): the accounts this person has blocked, and
+// only those — never who has blocked them.
+export const BlockedUserSchema = z.object({
+  username: z.string(),
+  displayName: z.string(),
+  blockedAt: z.string(),
+});
+export const BlockedUsersResponseSchema = z.object({ blocked: z.array(BlockedUserSchema) });
+export type BlockedUsersResponse = z.infer<typeof BlockedUsersResponseSchema>;
+
 export const SendFriendRequestSchema = z.object({ username: UsernameSchema });
 export const BlockUserRequestSchema = z.object({ username: UsernameSchema });
 
@@ -157,6 +167,8 @@ export const RELEASE_REJECTIONS = [
   'shore_full',
   'route_unavailable',
   'invalid_letter',
+  // Product decision 11: invisible direction-control characters; the writer removes them.
+  'letter_direction_controls',
 ] as const;
 export type ReleaseRejection = (typeof RELEASE_REJECTIONS)[number];
 
@@ -388,6 +400,7 @@ export const NOTIFICATION_KINDS = [
   'moderation_banned',
   'moderation_appeal_accepted',
   'moderation_appeal_rejected',
+  'shore_full',
   'other',
 ] as const;
 export const NotificationKindSchema = z.enum(NOTIFICATION_KINDS);
@@ -403,6 +416,17 @@ export const NotificationSchema = z.object({
   readAt: z.string().nullable(),
 });
 export type NotificationDto = z.infer<typeof NotificationSchema>;
+
+// Product decision 6: the whole history is kept for the life of the account and read a page at
+// a time, newest first. `nextCursor` asks for the page after this one; null means the end.
+export const NOTIFICATIONS_PAGE_SIZE = 50;
+export const NotificationsPageSchema = z.object({
+  notifications: z.array(NotificationSchema),
+  nextCursor: z.string().nullable(),
+  // Across the whole history, not only this page — the badge must not depend on paging.
+  unreadCount: z.number().int().nonnegative(),
+});
+export type NotificationsPageDto = z.infer<typeof NotificationsPageSchema>;
 
 // ---------- dev ----------
 export const DevAdvanceRequestSchema = z.object({
@@ -488,6 +512,9 @@ export const AiReviewOutputSchema = z.object({
   // An English rendering of the reported text, shown beside the original, never instead of it.
   translation: z.string().trim().max(4000).nullable().optional(),
   confidence: z.number().min(0).max(1).nullable().optional(),
+  // A possible child-safety issue. It only moves the case to the top of the human queue as an
+  // urgent review; it never decides, sanctions or bans anything (product decision 2).
+  childSafety: z.boolean().nullable().optional(),
 });
 export type AiReviewOutput = z.infer<typeof AiReviewOutputSchema>;
 
@@ -503,6 +530,7 @@ export const AiReviewSchema = z.object({
   completedAt: z.string().nullable(),
   nextAttemptAt: z.string().nullable(),
   lastError: z.string().nullable(),
+  childSafety: z.boolean(),
 });
 export type AiReviewDto = z.infer<typeof AiReviewSchema>;
 
@@ -515,7 +543,8 @@ export type PersonDto = z.infer<typeof PersonSchema>;
 
 export const ModerationDecisionSchema = z.object({
   outcome: z.enum(['accepted', 'rejected']),
-  // Who decided: an admin (named) or the model under automatic decisions.
+  // Who decided. Always an administrator now; 'ai' only appears on cases decided before
+  // automatic decisions were removed (product decision 2).
   by: z.enum(['admin', 'ai']),
   admin: PersonSchema.nullable(),
   at: z.string(),
@@ -538,6 +567,8 @@ export type LetterReportDto = z.infer<typeof LetterReportSchema>;
 export const AdminCaseSummarySchema = z.object({
   id: IdSchema,
   status: CaseStatusSchema,
+  // Urgent child-safety review: listed first in the administrator's queue.
+  urgentAt: z.string().nullable(),
   bottleId: IdSchema,
   context: z.enum(['shore', 'public']),
   sender: PersonSchema,
@@ -697,6 +728,12 @@ export const ViolationNoticeSchema = z.object({
   appealAvailable: z.boolean(),
   appealWaivedAt: z.string().nullable(),
   noticePresentedAt: z.string().nullable(),
+  // The appeal window closes here, on server time: 30 days from the decision (or from an
+  // escalation that reopened it). After it, `appealExpired` is true and the decision is final.
+  appealDeadlineAt: z.string(),
+  appealExpired: z.boolean(),
+  // A later critical escalation reopened one appeal opportunity (product decision 2).
+  appealReopenedAt: z.string().nullable(),
 });
 export type ViolationNoticeDto = z.infer<typeof ViolationNoticeSchema>;
 
@@ -733,6 +770,16 @@ export type WaiveAppealRequest = z.infer<typeof WaiveAppealRequestSchema>;
 export const APPEAL_WAIVER_CONFIRMATION =
   'If you continue, you will permanently lose the option to appeal this decision.';
 export const APPEAL_ACTION_APPEAL = 'Appeal decision';
+// Product decision 5: one appeal within 30 days of the decision, on server time; the letter's
+// copy kept as evidence is redactable 30 days after the decision, or once a timely appeal is
+// decided, whichever is later.
+export const APPEAL_WINDOW_DAYS = 30;
+// Product decision 8: every account's shore holds 100 bottles at once — those on their way to
+// it and those delivered but not yet opened.
+export const SHORE_CAPACITY = 100;
+export const APPEAL_WINDOW_MS = APPEAL_WINDOW_DAYS * 24 * 60 * 60 * 1000;
+export const EVIDENCE_RETENTION_DAYS = 30;
+export const EVIDENCE_RETENTION_MS = EVIDENCE_RETENTION_DAYS * 24 * 60 * 60 * 1000;
 export const APPEAL_ACTION_CONTINUE = 'Continue without appealing';
 export const APPEAL_ACTION_GO_BACK = 'Go back';
 export const APPEAL_ACTION_SKIP = 'Skip appeal';
