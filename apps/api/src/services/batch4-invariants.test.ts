@@ -61,7 +61,11 @@ describe('the risk worker walks forward, not from the start (ARCH-011)', () => {
     // reads its map clock, activation and last roll, and one lists due storms — however many
     // nights or bottles there are.
     expect(idleTick).toBeLessThanOrEqual(1 + 5 + 1);
-    expect(idleTick * 3).toBeLessThan(firstTick);
+    // The first tick wrote every roll it persisted (twelve nights here) on top of that fixed
+    // cost, whatever the rolls decided; the idle tick wrote none.
+    const rolls = w.db.select().from(t.weatherRolls).all().length;
+    expect(rolls).toBeGreaterThanOrEqual(11);
+    expect(firstTick).toBeGreaterThanOrEqual(idleTick + rolls);
   });
 });
 
