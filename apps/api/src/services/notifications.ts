@@ -1,5 +1,10 @@
-import { and, desc, eq, isNull, sql } from 'drizzle-orm';
-import type { NotificationDto, NotificationKind } from '@mib/shared';
+import { and, desc, eq, isNull, lt, or, sql } from 'drizzle-orm';
+import {
+  NOTIFICATIONS_PAGE_SIZE,
+  type NotificationDto,
+  type NotificationKind,
+  type NotificationsPageDto,
+} from '@mib/shared';
 import type { DbOrTx } from '../db/client.js';
 import * as t from '../db/schema.js';
 import { newId } from '../lib/ids.js';
@@ -59,33 +64,77 @@ function classify(
   }
 }
 
-export function listNotifications(ctx: AppContext, userId: string): NotificationDto[] {
-  return (
-    ctx.db
-      .select({ n: t.notifications, lossReason: t.bottles.lossReason })
-      .from(t.notifications)
-      .leftJoin(t.bottles, eq(t.bottles.id, t.notifications.bottleId))
-      .where(eq(t.notifications.userId, userId))
-      // Newest first. Ids are random, so two notices written in the same millisecond (a
-      // suspension and the appeal that lifted it, say) would otherwise come back in a different
-      // order on every read; SQLite's rowid is insertion order, which is the one we mean.
-      .orderBy(desc(t.notifications.createdAt), desc(sql`"notifications"."rowid"`))
-      .limit(100)
-      .all()
-      .map(({ n, lossReason }) => ({
-        id: n.id,
-        type: n.type as NotificationDto['type'],
-        kind: classify(n, lossReason),
-        bottleId: n.bottleId,
-        message: n.message,
-        createdAt: new Date(n.createdAt).toISOString(),
-        readAt: n.readAt === null ? null : new Date(n.readAt).toISOString(),
-      }))
-  );
+// The user-visible notification history (product decision 6). It is kept for the life of the
+// account — nothing prunes it — and read a page at a time, newest first, so an old account
+// never loads everything at once. The cursor is "<createdAt>.<rowid>" of the last row served.
+// This is the only notification data SeaYou keeps: delivery is a database write, so there are
+// no separate delivery attempts or provider logs behind it (services/housekeeping.ts prunes
+// only operational records).
+export function notificationPage(
+  ctx: AppContext,
+  userId: string,
+  page: { before?: string | null; limit?: number | undefined } = {},
+): NotificationsPageDto {
+  const limit = Math.min(Math.max(page.limit ?? NOTIFICATIONS_PAGE_SIZE, 1), 100);
+  const cursor = parseCursor(page.before ?? null);
+  const rowid = sql<number>`"notifications"."rowid"`;
+  const rows = ctx.db
+    .select({ n: t.notifications, lossReason: t.bottles.lossReason, rowid })
+    .from(t.notifications)
+    .leftJoin(t.bottles, eq(t.bottles.id, t.notifications.bottleId))
+    .where(
+      and(
+        eq(t.notifications.userId, userId),
+        cursor
+          ? or(
+              lt(t.notifications.createdAt, cursor.createdAt),
+              and(eq(t.notifications.createdAt, cursor.createdAt), lt(rowid, cursor.rowid)),
+            )
+          : undefined,
+      ),
+    )
+    // Newest first. Ids are random, so two notices written in the same millisecond (a
+    // suspension and the appeal that lifted it, say) would otherwise come back in a different
+    // order on every read; SQLite's rowid is insertion order, which is the one we mean.
+    .orderBy(desc(t.notifications.createdAt), desc(rowid))
+    .limit(limit + 1)
+    .all();
+  const more = rows.length > limit;
+  const served = rows.slice(0, limit);
+  const last = served.at(-1);
+  const unread = ctx.db
+    .select({ n: sql<number>`count(*)` })
+    .from(t.notifications)
+    .where(and(eq(t.notifications.userId, userId), isNull(t.notifications.readAt)))
+    .get();
+  return {
+    notifications: served.map(({ n, lossReason }) => ({
+      id: n.id,
+      type: n.type as NotificationDto['type'],
+      kind: classify(n, lossReason),
+      bottleId: n.bottleId,
+      message: n.message,
+      createdAt: new Date(n.createdAt).toISOString(),
+      readAt: n.readAt === null ? null : new Date(n.readAt).toISOString(),
+    })),
+    nextCursor: more && last ? `${last.n.createdAt}.${last.rowid}` : null,
+    unreadCount: unread?.n ?? 0,
+  };
 }
 
-// Reading the inbox marks everything as read. This touches notifications only: no bottle, marker
-// visibility, opening or outcome is involved.
+// The newest entries, for internal callers that need no paging.
+export function listNotifications(ctx: AppContext, userId: string): NotificationDto[] {
+  return notificationPage(ctx, userId, { limit: 100 }).notifications;
+}
+
+function parseCursor(raw: string | null): { createdAt: number; rowid: number } | null {
+  const m = raw ? /^(\d{1,15})\.(\d{1,15})$/.exec(raw) : null;
+  return m ? { createdAt: Number(m[1]), rowid: Number(m[2]) } : null;
+}
+
+// Reading the inbox marks everything as read. It only clears the unread badge: every entry stays
+// in the history. This touches notifications only: no bottle, marker visibility, opening or
+// outcome is involved.
 export function markAllRead(ctx: AppContext, userId: string): void {
   ctx.db
     .update(t.notifications)

@@ -11,7 +11,7 @@ import { reportLetter } from './moderation.js';
 import { openBottle } from './bottles.js';
 import { commitLoss, listPublicOcean, openPublicBottle, activeReading } from './outcomes.js';
 import { releaseBottle } from './release.js';
-import { SEVEN_DAYS_MS, finalityOf, planRetention, RETENTION_DEFAULT } from './retention.js';
+import { THIRTY_DAYS_MS, finalityOf, planRetention, RETENTION_DEFAULT } from './retention.js';
 import { backfillDeletedAccounts } from '../tools/deletion-backfill.js';
 import { createTestWorld, loginAs, releaseInput, type TestWorld } from '../test/harness.js';
 
@@ -158,12 +158,16 @@ describe("a deleted sender's moderation evidence becomes final (SEC-012)", () =>
     decideCase(w.ctx, { ...w.user('cy'), role: 'admin' }, caseId, 'accepted', 'upheld');
     const kase = () =>
       w.db.select().from(t.moderationCases).where(eq(t.moderationCases.id, caseId)).get()!;
-    expect(finalityOf(w.db, kase()).hold).toBe('notice_unresolved');
+    // The 30 days run from the decision whatever the sender does (product decision 5).
+    const redactableAt = finalityOf(w.db, kase()).redactableAt;
+    expect(redactableAt).toBe(w.realClock.now() + THIRTY_DAYS_MS);
 
     const ada = w.user('ada').id;
     deleteAccount(w.ctx, ada);
 
-    expect(finalityOf(w.db, kase()).finalAt).not.toBeNull();
+    // Deleting the account closes its unused appeal on the record; it neither shortens nor
+    // extends the window.
+    expect(finalityOf(w.db, kase()).redactableAt).toBe(redactableAt);
     const audit = w.db
       .select()
       .from(t.moderationAudit)
@@ -178,7 +182,7 @@ describe("a deleted sender's moderation evidence becomes final (SEC-012)", () =>
     expect(audit[0]!.actorRole).toBe('system');
     expect(audit[0]!.reason).toBe('account deleted');
 
-    const later = w.realClock.now() + SEVEN_DAYS_MS + 1;
+    const later = redactableAt! + 1;
     expect(planRetention(w.db, later, RETENTION_DEFAULT).redactable).toContain(caseId);
   });
 });

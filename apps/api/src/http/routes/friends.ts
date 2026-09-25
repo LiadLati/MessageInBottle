@@ -4,7 +4,9 @@ import {
   acceptFriendRequest,
   blockUser,
   denyFriendRequest,
+  listBlocked,
   listFriends,
+  unblockUser,
   sendFriendRequest,
 } from '../../services/friends.js';
 import type { AppEnv } from '../app.js';
@@ -31,6 +33,12 @@ export function friendRoutes() {
   });
   r.post('/blocks', jsonBody(BlockUserRequestSchema), (c) => {
     blockUser(c.get('ctx'), c.get('user').id, c.req.valid('json').username);
+    return c.body(null, 204);
+  });
+  // Settings → Blocked users (product decision 10).
+  r.get('/blocks', (c) => c.json(listBlocked(c.get('ctx'), c.get('user').id)));
+  r.delete('/blocks/:username', (c) => {
+    unblockUser(c.get('ctx'), c.get('user').id, c.req.param('username'));
     return c.body(null, 204);
   });
   return r;

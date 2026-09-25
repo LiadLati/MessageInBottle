@@ -1,4 +1,4 @@
-import { and, eq, inArray, isNull, ne, or } from 'drizzle-orm';
+import { and, eq, inArray, isNotNull, isNull, ne, or } from 'drizzle-orm';
 import type { BottleState } from '@mib/shared';
 import type { DbOrTx } from '../db/client.js';
 import * as t from '../db/schema.js';
@@ -7,8 +7,8 @@ import { newSecretToken } from '../lib/ids.js';
 import { appendEvent, releaseCapacityOnce } from './journey.js';
 import { dummyPasswordHash, verifyPasswordAsync } from '../lib/password.js';
 import type { AppContext } from './context.js';
-import { enqueueNotification } from './notifications.js';
 import { writeAudit } from './audit.js';
+import { endInboundJourneys } from './restriction.js';
 
 // Deleting an account, at its owner's request, as one transactional and idempotent operation.
 //
@@ -181,15 +181,39 @@ export function deleteAccount(ctx: AppContext, userId: string): AccountDeletionS
     }
     const swept = sweepDeletedAccount(tx, userId, now);
 
-    // The text of the deleted account's own unreceived and lost letters is of no use to anyone
-    // now. A letter that reached its recipient is left alone: it is their correspondence, not
-    // only the sender's.
-    const clearable = inFlight.map((b) => b.letterId);
+    // Everything this account wrote goes with it (product decision 7): the text of every
+    // letter it authored is cleared — on its way, lost, delivered or opened — and a delivered
+    // letter still waiting on someone's shore leaves it, freeing that place. The one exception
+    // is a letter whose moderation case is under an active legal or child-safety hold: the hold
+    // exists to preserve it, so it stays until the hold is released and retention takes over.
+    // Other people's letters TO this account are not touched: they stay in their authors' Sent
+    // history, addressed to "Deleted user".
+    const authored = tx
+      .select({ id: t.bottles.id, letterId: t.bottles.letterId, state: t.bottles.state })
+      .from(t.bottles)
+      .where(eq(t.bottles.senderId, userId))
+      .all();
+    const held = new Set(
+      tx
+        .select({ bottleId: t.moderationCases.bottleId })
+        .from(t.moderationCases)
+        .where(
+          and(
+            eq(t.moderationCases.senderId, userId),
+            isNotNull(t.moderationCases.holdReason),
+            isNull(t.moderationCases.holdReleasedAt),
+          ),
+        )
+        .all()
+        .map((r) => r.bottleId),
+    );
+    const clearable = authored.filter((b) => !held.has(b.id)).map((b) => b.letterId);
     if (clearable.length)
       tx.update(t.letters)
         .set({ text: '', characters: 0 })
         .where(inArray(t.letters.id, clearable))
         .run();
+    for (const b of authored) if (b.state === 'delivered') releaseCapacityOnce(tx, b.id, now);
 
     // 3. The account disappears from other people's lists and from discovery.
     const friendshipsRemoved = tx
@@ -208,6 +232,9 @@ export function deleteAccount(ctx: AppContext, userId: string): AccountDeletionS
       .run().changes;
     tx.delete(t.bottleOutcomeViews).where(eq(t.bottleOutcomeViews.userId, userId)).run();
     tx.delete(t.idempotencyKeys).where(eq(t.idempotencyKeys.userId, userId)).run();
+    // Records of which document versions it accepted: nothing needs them once the account and
+    // its agreement are gone.
+    tx.delete(t.policyAcceptances).where(eq(t.policyAcceptances.userId, userId)).run();
 
     // 5. The name other people would still see on a letter they hold.
     tx.update(t.bottles)
@@ -230,6 +257,7 @@ export function deleteAccount(ctx: AppContext, userId: string): AccountDeletionS
         shoreId: null,
         timeZone: null,
         timeZoneSince: null,
+        shoreFullSince: null,
         role: 'member',
         roleGrantedAt: null,
         roleGrantedBy: null,
@@ -247,7 +275,7 @@ export function deleteAccount(ctx: AppContext, userId: string): AccountDeletionS
       journeysCancelled: inFlight.length,
       inboundJourneysEnded: swept.inboundJourneysEnded,
       harbourPlacesReleased: inFlight.length + swept.harbourPlacesReleased,
-      lettersClearedForSender: clearable.length + swept.lostLettersCleared,
+      lettersClearedForSender: clearable.length,
       friendshipsRemoved,
       blocksRemoved,
       notificationsRemoved,
@@ -256,7 +284,7 @@ export function deleteAccount(ctx: AppContext, userId: string): AccountDeletionS
   });
 }
 
-export const DELETED_DISPLAY_NAME = 'Deleted account';
+export const DELETED_DISPLAY_NAME = 'Deleted user';
 
 export interface DeletionSweep {
   adriftWithdrawn: number;
@@ -328,31 +356,8 @@ export function sweepDeletedAccount(tx: DbOrTx, userId: string, now: number): De
   // Letters travelling TO the account can no longer be received (audit ARCH-014): the journey
   // ends for the sender exactly as a block would end it, and the harbour place goes back. A
   // letter that already arrived but was never opened frees its place too.
-  const inbound = tx
-    .select({ id: t.bottles.id, version: t.bottles.version, senderId: t.bottles.senderId })
-    .from(t.bottles)
-    .where(and(eq(t.bottles.recipientId, userId), eq(t.bottles.state, 'at_sea')))
-    .all();
-  let harbourPlacesReleased = 0;
-  for (const b of inbound) {
-    const ended = tx
-      .update(t.bottles)
-      .set({ state: 'cancelled', version: b.version + 1, completedAt: now })
-      .where(and(eq(t.bottles.id, b.id), eq(t.bottles.state, 'at_sea')))
-      .run().changes;
-    if (ended === 0) continue;
-    if (releaseCapacityOnce(tx, b.id, now)) harbourPlacesReleased++;
-    appendEvent(tx, b.id, 'cancelled', now, { reason: 'delivery_unavailable' });
-    enqueueNotification(tx, {
-      userId: b.senderId,
-      type: 'journey_event',
-      kind: 'sent_cancelled',
-      bottleId: b.id,
-      dedupeKey: `cancelled:${b.id}`,
-      message: 'Delivery unavailable. The journey has ended.',
-      now,
-    });
-  }
+  const inboundEnded = endInboundJourneys(tx, userId, now);
+  let harbourPlacesReleased = inboundEnded;
   const unopened = tx
     .select({ id: t.bottles.id })
     .from(t.bottles)
@@ -401,7 +406,7 @@ export function sweepDeletedAccount(tx: DbOrTx, userId: string, now: number): De
   return {
     adriftWithdrawn,
     lostLettersCleared,
-    inboundJourneysEnded: inbound.length,
+    inboundJourneysEnded: inboundEnded,
     harbourPlacesReleased,
     appealsClosed,
   };

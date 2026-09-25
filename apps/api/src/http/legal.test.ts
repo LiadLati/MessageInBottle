@@ -133,7 +133,7 @@ describe('the public account-deletion page', () => {
     expect(row.email).toBeNull();
     expect(row.passwordHash).toBeNull();
     expect(row.username).toMatch(/^deleted_/);
-    expect(row.displayName).toBe('Deleted account');
+    expect(row.displayName).toBe('Deleted user');
     // The session is gone and cannot be used again.
     expect(w.db.select().from(t.sessions).where(eq(t.sessions.userId, ada.id)).all()).toHaveLength(
       0,
@@ -258,7 +258,7 @@ describe('the in-app deletion path', () => {
 
     const after = w.db.select().from(t.bottles).where(eq(t.bottles.id, atSea)).get()!;
     expect(after.state).toBe('cancelled');
-    expect(after.senderNameSnapshot).toBe('Deleted account');
+    expect(after.senderNameSnapshot).toBe('Deleted user');
     expect(w.db.select().from(t.letters).where(eq(t.letters.id, letterId)).get()!.text).toBe('');
     // The reserved place at the destination harbour is given back.
     const reservation = w.db

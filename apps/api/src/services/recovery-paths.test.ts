@@ -8,7 +8,7 @@ import { createOllamaReviewer, retryDelayMs, runAiReviewTick } from './ai-review
 import { setAccountTimeZone } from './auth.js';
 import { openBottle } from './bottles.js';
 import type { AuthUser } from './context.js';
-import { commitArrivalIfDue, runJourneyTick } from './journey.js';
+import { commitArrivalIfDue } from './journey.js';
 import { reportLetter, standingOf } from './moderation.js';
 import { ReleaseRejectedError, releaseBottle } from './release.js';
 import { journeyNights, processRiskDecisions } from './risk.js';
@@ -83,11 +83,9 @@ describe('release to a deleted or suspended recipient', () => {
     expect(body.error.details.rejection).toBe('recipient_not_found');
   });
 
-  // Current behaviour, pinned: moderation standing restricts what the suspended person can DO,
-  // not what can be sent to them. The release is accepted and the bottle arrives; the recipient
-  // simply cannot reach their shore until the suspension ends. The spec (§16.3-16.4) does not
-  // say otherwise; if that changes, this test is the one to update.
-  it('accepts a release to a suspended recipient, delivers it, and holds it until the suspension ends', async () => {
+  // A suspended account is unavailable as a recipient; the sender is refused generically
+  // (product decision 14).
+  it('refuses a release to a suspended recipient, generically, and allows it after (decision 14)', async () => {
     const w = createTestWorld({ defaultShoreCapacity: 20 });
     w.db
       .update(t.users)
@@ -102,35 +100,21 @@ describe('release to a deleted or suspended recipient', () => {
 
     const app = createApp(w.ctx);
     const ada = await loginAs(app, 'ada');
-    const bo = await loginAs(app, 'bo');
-    const res = await app.request('/api/bottles/release', {
-      method: 'POST',
-      headers: { authorization: `Bearer ${ada.token}`, 'content-type': 'application/json' },
-      body: JSON.stringify(releaseInput(bo.id, key())),
-    });
-    expect(res.status).toBe(201);
-    const { bottle } = (await res.json()) as { bottle: { id: string } };
-    w.clock.advance(60 * DAY);
-    runJourneyTick(w.ctx);
-    expect(w.db.select().from(t.bottles).where(eq(t.bottles.id, bottle.id)).get()!.state).toBe(
-      'delivered',
-    );
-    // Bo cannot reach the shore while suspended…
-    expect(
-      (await app.request('/api/shore', { headers: { authorization: `Bearer ${bo.token}` } }))
-        .status,
-    ).toBe(403);
-    // …and can once the seven days (real time) are served.
-    // (Sessions last an hour in the harness, so Bo signs in again.)
+    const send = (token: string) =>
+      app.request('/api/bottles/release', {
+        method: 'POST',
+        headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+        body: JSON.stringify(releaseInput(w.user('bo').id, key())),
+      });
+    const refused = await send(ada.token);
+    expect(refused.status).toBe(422);
+    const body = JSON.stringify(await refused.json());
+    expect(body).toMatch(/recipient_unavailable/);
+    expect(body).not.toMatch(/suspend/i);
+    // Restored automatically when the server-controlled suspension ends.
     w.realClock.advance(8 * DAY);
-    const again = await loginAs(app, 'bo');
-    const shore = await app.request('/api/shore', {
-      headers: { authorization: `Bearer ${again.token}` },
-    });
-    expect(shore.status).toBe(200);
-    expect(
-      ((await shore.json()) as { bottles: Array<{ id: string }> }).bottles.map((b) => b.id),
-    ).toContain(bottle.id);
+    const again = await loginAs(app, 'ada');
+    expect((await send(again.token)).status).toBe(201);
   });
 });
 
@@ -153,7 +137,6 @@ describe('AI review timeout, distinct from connection refused', () => {
     const started = Date.now();
     expect(await runAiReviewTick(w.ctx, reviewer, now)).toEqual({
       reviewed: 0,
-      decided: 0,
       deferred: 1,
     });
     const elapsed = Date.now() - started;

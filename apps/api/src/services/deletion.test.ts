@@ -9,7 +9,7 @@ import { commitArrivalIfDue } from './journey.js';
 import { decideCase } from './admin.js';
 import { reportLetter } from './moderation.js';
 import { releaseBottle } from './release.js';
-import { SEVEN_DAYS_MS, applyRetention, RETENTION_DEFAULT } from './retention.js';
+import { THIRTY_DAYS_MS, applyRetention, RETENTION_DEFAULT } from './retention.js';
 import { DEV_SEED_PASSWORD } from '../db/seed-data.js';
 import { createTestWorld, loginAs, releaseInput } from '../test/harness.js';
 
@@ -89,10 +89,18 @@ describe('deleting an account does what the Privacy Policy says', () => {
     expect(inFlight.state).not.toBe('at_sea');
     expect(summary.journeysCancelled).toBeGreaterThan(0);
 
-    // "Letters other people wrote to you are not deleted" — and the reverse: a letter Bo has
-    // already received stays readable, with the sender now showing as a deleted account.
-    const kept = openBottle(w.ctx, w.user('bo'), arrived);
-    expect(kept.letter.text).toBe(read.letter.text);
+    // Product decision 7: what Ada wrote goes with the account. The letter Bo had received is
+    // no longer readable and has left Bo's Received list; its text is cleared in storage.
+    void read;
+    expect(() => openBottle(w.ctx, w.user('bo'), arrived)).toThrow(/not found/);
+    const arrivedRow = w.db.select().from(t.bottles).where(eq(t.bottles.id, arrived)).get()!;
+    const arrivedLetter = w.db
+      .select()
+      .from(t.letters)
+      .where(eq(t.letters.id, arrivedRow.letterId))
+      .get()!;
+    expect(arrivedLetter.text).toBe('');
+    expect(arrivedRow.senderNameSnapshot).toBe('Deleted user');
 
     // "Your notifications are removed."
     expect(
@@ -158,7 +166,7 @@ describe('deleting an account does what the Privacy Policy says', () => {
     // The case is still decidable after the account is gone, and the ordinary retention rules
     // then apply to it exactly as they would to anyone else's.
     decideCase(w.ctx, { ...w.user('cy'), role: 'admin' }, caseId, 'rejected', 'not a violation');
-    w.realClock.advance(SEVEN_DAYS_MS);
+    w.realClock.advance(THIRTY_DAYS_MS);
     expect(applyRetention(w.db, w.realClock.now(), RETENTION_DEFAULT).redacted).toEqual([caseId]);
     expect(
       w.db.select().from(t.moderationCases).where(eq(t.moderationCases.id, caseId)).get()!

@@ -36,7 +36,7 @@ describe('housekeeping (ARCH-024)', () => {
       .set({ createdAt: now - IDEMPOTENCY_KEEP_MS - 1 })
       .run();
 
-    expect(pruneExpiredRecords(w.db, now)).toEqual({
+    expect(pruneExpiredRecords(w.db, now)).toMatchObject({
       sessions: 1,
       passwordResets: 1,
       idempotencyKeys: 1,

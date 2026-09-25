@@ -154,11 +154,8 @@ describe('journey: visibility, deterministic arrival, opening', () => {
   });
 
   it('a freed slot lets a new release through', () => {
-    w.db
-      .update(t.shores)
-      .set({ capacity: 1 })
-      .where(eq(t.shores.id, 'shore_driftmoor_strand'))
-      .run();
+    // Capacity is per recipient's shore (product decision 8).
+    w.ctx.config.shoreCapacity = 1;
     expect(() => releaseBottle(w.ctx, ada(), releaseInput(bo().id, 'blocked-key-0001'))).toThrow();
     const plan = w.db.select().from(t.routePlans).where(eq(t.routePlans.bottleId, bottleId)).get()!;
     w.clock.advance(plan.plannedDurationMs);

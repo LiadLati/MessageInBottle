@@ -6,6 +6,7 @@ import { deriveAgingProfile } from '../domain/aging.js';
 import { plannedArrivalAt } from '../domain/routing.js';
 import { newId } from '../lib/ids.js';
 import type { AppContext } from './context.js';
+import { isRestricted } from './moderation.js';
 import { enqueueNotification } from './notifications.js';
 import { expirePublicListings, processRiskDecisions } from './risk.js';
 
@@ -69,7 +70,7 @@ export function commitArrivalIfDue(ctx: AppContext, bottleId: string, now: numbe
     if (!plan) return false;
     const arrivalAt = plannedArrivalAt(plan);
     if (arrivalAt > now) return false;
-    return commitArrival(tx, bottle, plan, arrivalAt, now);
+    return commitArrival(tx, bottle, plan, arrivalAt, now, ctx.realClock.now());
   });
 }
 
@@ -82,6 +83,8 @@ export function commitArrival(
   plan: { plannedDurationMs: number },
   arrivalAt: number,
   now: number,
+  // Server time, for account standing; `now` is the journey clock.
+  realNow: number,
 ): boolean {
   const bottleId = bottle.id;
   // Re-check eligibility transactionally before arrival (spec §11 invariant 4): a block placed
@@ -102,7 +105,9 @@ export function commitArrival(
     .from(t.users)
     .where(eq(t.users.id, bottle.recipientId))
     .get();
-  if (blocked || recipient?.status !== 'active') {
+  // A suspended or banned recipient cannot receive either (product decision 14); the sender is
+  // told the same generic "Delivery unavailable", and the recipient nothing.
+  if (blocked || recipient?.status !== 'active' || isRestricted(tx, bottle.recipientId, realNow)) {
     const moved = transitionBottle(tx, bottle, 'cancelled', { completedAt: now });
     if (!moved) return false;
     releaseCapacityOnce(tx, bottleId, now);
@@ -166,7 +171,17 @@ export function releaseCapacityOnce(db: DbOrTx, bottleId: string, now: number): 
       and(eq(t.capacityReservations.bottleId, bottleId), eq(t.capacityReservations.status, 'held')),
     )
     .run();
-  return res.changes === 1;
+  if (res.changes !== 1) return false;
+  // A place came free, so the recipient's shore is below full: the next time it fills is a
+  // new full episode with its own notice (product decision 8).
+  const owner = db
+    .select({ recipientId: t.bottles.recipientId })
+    .from(t.bottles)
+    .where(eq(t.bottles.id, bottleId))
+    .get();
+  if (owner)
+    db.update(t.users).set({ shoreFullSince: null }).where(eq(t.users.id, owner.recipientId)).run();
+  return true;
 }
 
 // Worker tick: deterministic catch-up from persisted plans; safe to run repeatedly or after

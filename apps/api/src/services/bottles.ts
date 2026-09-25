@@ -13,6 +13,7 @@ import {
   type ShoreBottleDto,
   type ShoreResponse,
 } from '@mib/shared';
+import type { DbOrTx } from '../db/client.js';
 import * as t from '../db/schema.js';
 import {
   geoPointAlongPath,
@@ -276,11 +277,13 @@ export function getMyShore(ctx: AppContext, user: AuthUser): ShoreResponse {
     )
     .orderBy(desc(t.bottles.deliveredAt))
     .all();
-  // A letter its recipient reported and chose to hide leaves their shore at once.
+  // A letter its recipient reported and chose to hide leaves their shore at once, and so does
+  // one whose writer deleted their account (its text is gone: product decision 7).
   const hidden = hiddenBottleIds(ctx.db, user.id);
+  const gone = deletedSenders(ctx.db);
   return {
     shore: shore ? toShoreDto(shore) : null,
-    bottles: rows.filter((b) => !hidden.has(b.id)).map(shoreBottle),
+    bottles: rows.filter((b) => !hidden.has(b.id) && !gone.has(b.senderId)).map(shoreBottle),
   };
 }
 
@@ -303,7 +306,30 @@ export function listReceivedLetters(ctx: AppContext, user: AuthUser): ReceivedLe
     .orderBy(desc(t.bottles.openedAt))
     .all();
   const hidden = hiddenBottleIds(ctx.db, user.id);
-  return rows.filter((b) => !hidden.has(b.id)).map((b) => receivedLetter(b, 'shore'));
+  const gone = deletedSenders(ctx.db);
+  return rows
+    .filter((b) => !hidden.has(b.id) && !gone.has(b.senderId))
+    .map((b) => receivedLetter(b, 'shore'));
+}
+
+// Accounts that deleted themselves. Their letters' text was removed with the account, so a
+// letter they wrote leaves the Received list and the shore of whoever holds it (product
+// decision 7); the recipient's own records of other letters are untouched.
+function deletedSenders(db: DbOrTx): Set<string> {
+  return new Set(
+    db
+      .select({ id: t.users.id })
+      .from(t.users)
+      .where(eq(t.users.status, 'deleted'))
+      .all()
+      .map((r) => r.id),
+  );
+}
+function senderDeleted(db: DbOrTx, senderId: string): boolean {
+  return (
+    db.select({ status: t.users.status }).from(t.users).where(eq(t.users.id, senderId)).get()
+      ?.status === 'deleted'
+  );
 }
 
 export function openedLetter(
@@ -347,6 +373,7 @@ export function openBottle(ctx: AppContext, user: AuthUser, bottleId: string): O
     if (!bottle || bottle.recipientId !== user.id || bottle.moderationStatus !== 'clear')
       throw notFound('bottle');
     if (hiddenByReporter(tx, user.id, bottle.id)) throw notFound('bottle');
+    if (senderDeleted(tx, bottle.senderId)) throw notFound('bottle');
     if (bottle.state === 'opened') return bottle;
     if (bottle.state !== 'delivered') throw notFound('bottle');
     const moved = transitionBottle(tx, bottle, 'opened', { openedAt: now, completedAt: now });
@@ -370,6 +397,7 @@ export function readOpenedLetter(
   // A finder's one-time reading is served by activeReading only, never from here.
   if (bottle.recipientId !== user.id || bottle.state !== 'opened') throw notFound('letter');
   if (hiddenByReporter(ctx.db, user.id, bottle.id)) throw notFound('letter');
+  if (senderDeleted(ctx.db, bottle.senderId)) throw notFound('letter');
   return openedLetter(ctx, bottle);
 }
 
