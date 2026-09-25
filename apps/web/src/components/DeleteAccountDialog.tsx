@@ -72,13 +72,15 @@ export function DeleteAccountDialog({
           Delete your account
         </h2>
         <p className="secondary">
-          This is permanent and cannot be undone. Every session ends at once, your profile,
-          friendships and blocks are removed, and letters of yours still at sea are cancelled.
+          This is permanent and cannot be undone. Every session ends at once. Your profile, email,
+          password, preferences, notifications, friendships, blocks and drafts are removed, the
+          letters you received are removed, and the text of every letter you wrote is erased —
+          letters still at sea are cancelled.
         </p>
         <p className="t-meta">
-          Letters that already reached the person you sent them to stay with them, showing “Deleted
-          account” as the sender. Evidence for an open report or an active restriction is kept for
-          as long as that matter needs it.
+          Letters other people wrote to you stay in their own Sent history, addressed to “Deleted
+          user”. Only a minimal record that the account existed is kept, plus report evidence for
+          the rest of its 30-day retention period or while a legal or child-safety hold requires it.
         </p>
         <div className="field">
           <label className="t-label" htmlFor={ids.p}>

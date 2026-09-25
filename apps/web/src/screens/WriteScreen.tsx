@@ -3,6 +3,7 @@ import {
   FONT_DEFINITIONS,
   LETTER_FONTS,
   LETTER_MAX_CHARACTERS,
+  DIRECTION_CONTROLS_MESSAGE,
   countLetterCharacters,
   validateLetterText,
   type FriendDto,
@@ -225,7 +226,9 @@ export function WriteScreen({ onReleased, onChooseShore, onImmersive }: Props) {
               ? 'Too long: trim a little.'
               : validation.reason === 'too_many_bytes'
                 ? 'Too large to store; shorten it.'
-                : 'Write something first.'}
+                : validation.reason === 'direction_controls'
+                  ? DIRECTION_CONTROLS_MESSAGE
+                  : 'Write something first.'}
         </p>
         <button
           type="button"
@@ -386,7 +389,10 @@ function rejectionCopy(rejection: ReleasePreviewResponse['rejection']): string {
     case 'recipient_has_no_shore':
       return 'Your friend has not chosen a shore yet.';
     case 'shore_full':
-      return 'Shore full — your draft will be kept. Try again later.';
+      // Privacy-safe: says nothing about who sent the bottles or how many are yours.
+      return 'This friend’s shore is full right now. Your letter is kept as a draft; try again later.';
+    case 'letter_direction_controls':
+      return DIRECTION_CONTROLS_MESSAGE;
     case 'route_unavailable':
       return 'No connected sea route reaches that shore.';
     case 'not_friends':

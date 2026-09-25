@@ -20,6 +20,7 @@ const api = vi.hoisted(() => ({
   presentDecision: vi.fn(),
   waiveAppeal: vi.fn(),
   submitAppeal: vi.fn(),
+  acknowledgeWarning: vi.fn(),
   deleteAccount: vi.fn(),
 }));
 vi.mock('../api/client.js', async (actual) => ({
@@ -46,12 +47,16 @@ const NOTICE: ViolationNoticeDto = {
   appealAvailable: true,
   appealWaivedAt: null,
   noticePresentedAt: null,
+  appealDeadlineAt: '2026-10-20T10:00:00.000Z',
+  appealExpired: false,
+  appealReopenedAt: null,
 };
 
 beforeEach(() => {
   api.presentDecision.mockResolvedValue({});
   api.waiveAppeal.mockResolvedValue({});
   api.submitAppeal.mockResolvedValue({});
+  api.acknowledgeWarning.mockResolvedValue(undefined);
 });
 afterEach(() => {
   cleanup();
@@ -112,6 +117,50 @@ describe('the decision notice', () => {
     fireEvent.click(screen.getByRole('button', { name: APPEAL_ACTION_SKIP }));
     expect(await screen.findByRole('alert')).toBeTruthy();
     expect(onResolved).not.toHaveBeenCalled();
+  });
+
+  it('states the appeal deadline while the appeal is open', () => {
+    render(<DecisionNotice notice={NOTICE} onResolved={vi.fn()} />);
+    const dialog = screen.getByRole('alertdialog');
+    const body = document.getElementById(dialog.getAttribute('aria-describedby')!);
+    expect(body?.textContent).toMatch(/appeal this decision once, until .*2026/);
+  });
+
+  it('after the deadline shows the decision as final, with no appeal and no waiver', async () => {
+    const onResolved = vi.fn();
+    render(
+      <DecisionNotice
+        notice={{ ...NOTICE, appealAvailable: false, appealExpired: true }}
+        onResolved={onResolved}
+      />,
+    );
+    const dialog = screen.getByRole('alertdialog');
+    const body = document.getElementById(dialog.getAttribute('aria-describedby')!);
+    expect(body?.textContent).toMatch(/appeal period for this decision expired on/);
+    expect(body?.textContent).toMatch(/The decision is final/);
+    expect(screen.queryByRole('button', { name: APPEAL_ACTION_APPEAL })).toBeNull();
+    expect(screen.queryByRole('button', { name: APPEAL_ACTION_CONTINUE })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'I understand' }));
+    await waitFor(() => expect(onResolved).toHaveBeenCalled());
+    expect(api.acknowledgeWarning).toHaveBeenCalledWith('vio_1');
+  });
+
+  it('says a reclassified decision carries a new appeal opportunity', () => {
+    render(
+      <DecisionNotice
+        notice={{
+          ...NOTICE,
+          severity: 'critical',
+          appealReopenedAt: '2026-09-22T10:00:00.000Z',
+        }}
+        onResolved={vi.fn()}
+      />,
+    );
+    const dialog = screen.getByRole('alertdialog');
+    const body = document.getElementById(dialog.getAttribute('aria-describedby')!);
+    expect(body?.textContent).toMatch(/permanently banned/);
+    expect(body?.textContent).toMatch(/new opportunity to appeal/);
+    expect(screen.getByRole('button', { name: APPEAL_ACTION_APPEAL })).toBeTruthy();
   });
 });
 

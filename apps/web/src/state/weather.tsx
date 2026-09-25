@@ -1,5 +1,11 @@
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
-import { DAYLIGHT_DEFAULTS, phaseAt, type DayPhase } from '@mib/shared';
+import {
+  DAYLIGHT_DEFAULTS,
+  harbourTimeZone,
+  isIanaTimeZone,
+  phaseAt,
+  type DayPhase,
+} from '@mib/shared';
 import { api } from '../api/client.js';
 import { useSession } from './session.js';
 
@@ -42,11 +48,14 @@ const WeatherContext = createContext<WeatherState | null>(null);
 // comparisons and a formatter.
 const TICK_MS = 30_000;
 
-function browserTimeZone(): string {
+// The device's IANA zone (product decision 9), or null when the runtime gives nothing usable.
+// Read again on every start and resume, so a phone that crossed a border follows it.
+function browserTimeZone(): string | null {
   try {
-    return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+    const zone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    return isIanaTimeZone(zone) ? zone : null;
   } catch {
-    return 'UTC';
+    return null;
   }
 }
 
@@ -70,7 +79,7 @@ function storeZone(zone: string | null) {
 }
 
 export function WeatherProvider({ children }: { children: ReactNode }) {
-  const deviceZone = useMemo(() => browserTimeZone(), []);
+  const [deviceZone, setDeviceZone] = useState<string | null>(() => browserTimeZone());
   // Development clock offset, learned once and refreshed with the dev panel's own polling.
   const [offsetMs, setOffsetMs] = useState(0);
   const [nowMs, setNowMs] = useState(() => Date.now());
@@ -87,20 +96,45 @@ export function WeatherProvider({ children }: { children: ReactNode }) {
   // device, or while it cannot be reached, the last known zone stands in; before any account
   // at all, the device's own.
   const accountZone = user?.timeZone ?? null;
-  const timeZone = accountZone ?? readStoredZone() ?? deviceZone;
+  // Without a usable device zone, the chosen harbour's nautical zone, then UTC. Only then is
+  // the chart fetched for the harbour's longitude.
+  const [harbourZone, setHarbourZone] = useState<string | null>(null);
+  const shoreId = user?.shoreId ?? null;
+  useEffect(() => {
+    if (deviceZone || !shoreId) return;
+    let alive = true;
+    void api
+      .chart()
+      .then((c) => {
+        const lng = c.shores.find((x) => x.id === shoreId)?.geo?.lng;
+        if (alive) setHarbourZone(harbourTimeZone(lng));
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, [deviceZone, shoreId]);
+  const timeZone = accountZone ?? readStoredZone() ?? deviceZone ?? harbourZone ?? 'UTC';
   useEffect(() => {
     if (accountZone) storeZone(accountZone);
   }, [accountZone]);
 
   // Tell the server the device's zone on every start and resume. A changed zone moves the
   // account's nights from now on — never the ones already sailed — and is a no-op otherwise.
+  // Only a valid IANA name is ever sent; a device without one sends nothing.
   useEffect(() => {
     if (!userId) return;
     let alive = true;
     const sync = () => {
-      if (document.hidden || deviceZone === accountZone) return;
+      if (document.hidden) return;
+      const now = browserTimeZone();
+      if (now !== deviceZone) {
+        setDeviceZone(now);
+        return; // the effect re-runs with the new zone and sends it
+      }
+      if (!now || now === accountZone) return;
       void api
-        .syncTimeZone(deviceZone)
+        .syncTimeZone(now)
         .then((me) => {
           if (alive) setUser(me);
         })

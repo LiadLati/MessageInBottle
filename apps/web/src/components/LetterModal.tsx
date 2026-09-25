@@ -1,6 +1,7 @@
 import { useEffect, useId, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import type { OpenedLetterDto } from '@mib/shared';
+import { api } from '../api/client.js';
 import { Icon } from '../design/Icon.js';
 import { focusableIn } from '../lib/focusTrap.js';
 import { restoreFocus, useModalKeys } from '../lib/modal.js';
@@ -45,6 +46,10 @@ export function LetterModal({
   const [closing, setClosing] = useState(false);
   const [reporting, setReporting] = useState(false);
   const [reported, setReported] = useState<'kept' | null>(null);
+  // A finder may block the anonymous writer during the reading (product decision 12).
+  const [blockStage, setBlockStage] = useState<'idle' | 'confirm' | 'busy' | 'done' | 'failed'>(
+    'idle',
+  );
   const dialogRef = useRef<HTMLDivElement>(null);
   const titleId = useId();
   const b = letter.bottle;
@@ -120,6 +125,16 @@ export function LetterModal({
               Report
             </button>
           ) : null}
+          {oneTime && (blockStage === 'idle' || blockStage === 'failed') ? (
+            <button
+              type="button"
+              className="btn-ghost"
+              aria-label="Block the writer"
+              onClick={() => setBlockStage('confirm')}
+            >
+              Block
+            </button>
+          ) : null}
           <button
             type="button"
             className="btn-ghost"
@@ -135,6 +150,46 @@ export function LetterModal({
           <div className="letter-chrome letter-modal-report">
             <ReportSheet bottleId={b.id} onDone={reportDone} onCancel={() => setReporting(false)} />
           </div>
+        ) : null}
+        {blockStage === 'confirm' || blockStage === 'busy' ? (
+          <div className="letter-chrome letter-modal-report stack" role="group" aria-label="Block">
+            <p className="secondary">
+              Block the writer of this bottle? You will not see their bottles in the public ocean,
+              and neither of you can send the other bottles. You will not be told who they are, and
+              they will not be told you blocked them.
+            </p>
+            <div className="row" style={{ justifyContent: 'flex-end', gap: 8 }}>
+              <button
+                type="button"
+                className="btn-ghost"
+                disabled={blockStage === 'busy'}
+                onClick={() => setBlockStage('idle')}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="btn-destructive"
+                disabled={blockStage === 'busy'}
+                onClick={() => {
+                  setBlockStage('busy');
+                  api
+                    .blockFoundWriter(b.id)
+                    .then(() => setBlockStage('done'))
+                    .catch(() => setBlockStage('failed'));
+                }}
+              >
+                Block writer
+              </button>
+            </div>
+          </div>
+        ) : null}
+        {blockStage === 'done' || blockStage === 'failed' ? (
+          <p className="letter-chrome letter-modal-report t-meta" role="status">
+            {blockStage === 'done'
+              ? 'Writer blocked. You can undo this in Settings → Blocked users.'
+              : 'Could not block right now. Try again.'}
+          </p>
         ) : null}
         {reported ? (
           <p className="letter-chrome letter-modal-report t-meta" role="status">
@@ -153,7 +208,7 @@ export function LetterModal({
         </div>
         <p className="letter-modal-foot letter-chrome">
           {oneTime
-            ? 'This bottle has left the public map. This is your one reading: closing the letter ends it. '
+            ? 'This bottle has left the public map. This is your one reading: it is not saved to your letters and gives no contact with the writer. If the page reloads you can return to it for 15 minutes; closing the letter ends it. You can still report or block from here. '
             : justOpened
               ? 'Opening ended its journey. '
               : ''}

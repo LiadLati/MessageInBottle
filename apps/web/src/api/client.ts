@@ -10,7 +10,8 @@ import {
   DevStatusSchema,
   FriendsResponseSchema,
   MeResponseSchema,
-  NotificationSchema,
+  BlockedUsersResponseSchema,
+  NotificationsPageSchema,
   OpenedLetterSchema,
   OutcomeVisibilitySchema,
   PublicOceanResponseSchema,
@@ -132,7 +133,6 @@ const BottlesList = z.object({ bottles: z.array(SentBottleSummarySchema) });
 const OneBottle = z.object({ bottle: SentBottleSchema });
 const Visibility = z.object({ visibility: OutcomeVisibilitySchema });
 const Reading = z.object({ reading: OpenedLetterSchema.nullable() });
-const Notifications = z.object({ notifications: z.array(NotificationSchema) });
 const Cases = z.object({ cases: z.array(AdminCaseSummarySchema) });
 const OneCase = z.object({ case: AdminCaseDetailSchema });
 const DecidedCase = z.object({ case: AdminCaseDetailSchema, changed: z.boolean() });
@@ -187,6 +187,13 @@ export const api = {
   acceptFriendRequest: (id: string) => request<void>('POST', `/friends/requests/${id}/accept`),
   denyFriendRequest: (id: string) => request<void>('POST', `/friends/requests/${id}/deny`),
   blockUser: (username: string) => request<void>('POST', '/friends/blocks', { username }),
+  blockedUsers: () => request('GET', '/friends/blocks', undefined, BlockedUsersResponseSchema),
+  // Undoes a block only: nothing removed, cancelled or hidden comes back, and no friendship.
+  unblockUser: (username: string) =>
+    request<void>('DELETE', `/friends/blocks/${encodeURIComponent(username)}`),
+  // A finder's block of an anonymous writer is named, and undone, by the bottle they found.
+  unblockFoundWriter: (bottleId: string) =>
+    request<void>('DELETE', `/friends/blocks/found/${encodeURIComponent(bottleId)}`),
   sentBottles: () => request('GET', '/bottles/sent', undefined, BottlesList),
   sentBottle: (id: string) => request('GET', `/bottles/sent/${id}`, undefined, OneBottle),
   // Private-map visibility of a terminal marker (the sender's own record, per account).
@@ -203,6 +210,8 @@ export const api = {
   // The finder's still-open one-time reading (recovers a refresh); ending it is immediate.
   activeReading: () => request('GET', '/ocean/reading', undefined, Reading),
   closeReading: (id: string) => request<void>('POST', `/ocean/public/${id}/close`),
+  // Blocks the writer from inside the finder's reading; the writer's identity never comes back.
+  blockFoundWriter: (id: string) => request<void>('POST', `/ocean/public/${id}/block`),
   // The sender reading their own letter: a pure read that never claims the bottle.
   ownLetter: (id: string) =>
     request('GET', `/bottles/sent/${id}/letter`, undefined, OpenedLetterSchema),
@@ -227,7 +236,15 @@ export const api = {
     request('POST', `/shore/bottles/${id}/open`, undefined, OpenedLetterSchema),
   readLetter: (id: string) =>
     request('GET', `/shore/bottles/${id}/letter`, undefined, OpenedLetterSchema),
-  notifications: () => request('GET', '/notifications', undefined, Notifications),
+  // Notification history, newest first, one page at a time. `before` is the previous page's
+  // cursor; nothing is ever pruned from this history.
+  notifications: (before?: string) =>
+    request(
+      'GET',
+      before ? `/notifications?before=${encodeURIComponent(before)}` : '/notifications',
+      undefined,
+      NotificationsPageSchema,
+    ),
   markNotificationsRead: () => request<void>('POST', '/notifications/read-all'),
   // The device's zone, reported on every start and resume; the account keeps the last one.
   syncTimeZone: (timeZone: string) =>

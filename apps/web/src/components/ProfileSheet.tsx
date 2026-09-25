@@ -13,6 +13,7 @@ interface Props {
   onOpenPolicy: (doc: DocumentId) => void;
   onDeleteAccount: () => void;
   onStanding: () => void;
+  onBlockedUsers: () => void;
   onClose: () => void;
 }
 
@@ -46,6 +47,7 @@ export function ProfileSheet({
   onChangeShore,
   onOpenPolicy,
   onStanding,
+  onBlockedUsers,
   onDeleteAccount,
   onClose,
 }: Props) {
@@ -119,6 +121,9 @@ export function ProfileSheet({
           </button>
           <button type="button" className="btn-text" onClick={onStanding}>
             Account standing
+          </button>
+          <button type="button" className="btn-text" onClick={onBlockedUsers}>
+            Blocked users
           </button>
           <SupportLink className="btn-secondary" />
           <button type="button" className="btn-text" onClick={() => void logout()}>

@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { DIRECTION_CONTROLS_MESSAGE } from '@mib/shared';
 import type * as ClientModule from '../api/client.js';
 import { DRAFT_KEY } from '../lib/draft.js';
 
@@ -122,5 +123,38 @@ describe('the unsent letter', () => {
     expect(api.release).toHaveBeenCalledWith(
       expect.objectContaining({ recipientId: 'usr_b', text: 'Goodbye, draft.' }),
     );
+  });
+});
+
+describe('checks the server repeats', () => {
+  it('refuses a letter with a direction override before it is sealed, and says why', async () => {
+    mount();
+    await composeTo('Pay to \u202Etxt.exe');
+    expect(screen.getByRole('button', { name: 'Seal the letter' })).toHaveProperty(
+      'disabled',
+      true,
+    );
+    expect(document.getElementById('seal-reason')?.textContent).toBe(DIRECTION_CONTROLS_MESSAGE);
+  });
+
+  it('accepts Hebrew, Arabic, English and emoji together', async () => {
+    mount();
+    await composeTo('שלום Bea, مرحبا! 👩\u200D👩\u200D👧 (ok?)');
+    expect(screen.getByRole('button', { name: 'Seal the letter' })).toHaveProperty(
+      'disabled',
+      false,
+    );
+  });
+
+  it('keeps the draft and says so, without detail, when the friend’s shore is full', async () => {
+    api.previewRelease.mockResolvedValue({ ...PREVIEW, eligible: false, rejection: 'shore_full' });
+    mount();
+    await composeTo('Wait for me.');
+    const before = sessionStorage.getItem(DRAFT_KEY);
+    fireEvent.click(screen.getByRole('button', { name: 'Seal the letter' }));
+    expect(await screen.findByText(/shore is full right now/)).toBeTruthy();
+    expect(document.body.textContent).toMatch(/kept as a draft/);
+    expect(api.release).not.toHaveBeenCalled();
+    expect(sessionStorage.getItem(DRAFT_KEY)).toBe(before);
   });
 });

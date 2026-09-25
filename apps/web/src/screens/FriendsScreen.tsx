@@ -190,7 +190,7 @@ export function FriendsScreen({ onChanged }: Props) {
       {blocking ? (
         <ConfirmDialog
           title={`Block ${blocking.displayName}?`}
-          body={`${blocking.displayName} will no longer be your friend and will not be able to send you bottles, and you will not be able to send them any. A block cannot be undone in SeaYou at the moment.`}
+          body={`${blocking.displayName} will no longer be your friend and will not be able to send you bottles, and you will not be able to send them any. You can unblock them later from Settings → Blocked users, but that will not restore the friendship or any letter.`}
           confirmLabel="Block"
           destructive
           busy={blockBusy}

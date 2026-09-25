@@ -4,6 +4,7 @@ import { api } from './api/client.js';
 import { Nav, type Tab } from './components/Nav.js';
 import { DeleteAccountDialog } from './components/DeleteAccountDialog.js';
 import { PolicyDialog } from './components/PolicyDialog.js';
+import { BlockedUsersDialog } from './components/BlockedUsersDialog.js';
 import { ProfileSheet } from './components/ProfileSheet.js';
 import { useAsync } from './lib/useAsync.js';
 import { useTopSlot } from './lib/useTopSlot.js';
@@ -92,16 +93,19 @@ function Shell() {
   const [epoch, setEpoch] = useState(0);
   const [profileOpen, setProfileOpen] = useState(false);
   const [deletingAccount, setDeletingAccount] = useState(false);
+  const [blockedOpen, setBlockedOpen] = useState(false);
   const [choosingShore, setChoosingShore] = useState(false);
   // Immersive screens (preview & release, the release sequence) take the whole viewport: no
   // navigation, no system strips. An opened letter is a modal over the shore instead.
   const [immersive, setImmersive] = useState(false);
   const chart = useAsync(() => (user ? api.chart() : Promise.resolve(null)), [user?.id]);
   const notifications = useAsync(
-    () => (user ? api.notifications() : Promise.resolve({ notifications: [] })),
+    () => (user ? api.notifications() : Promise.resolve(null)),
     [user?.id, epoch],
     20_000,
   );
+  // The badge is the server's unread count across the whole history, not just the first page.
+  const unreadCount = notifications.data?.unreadCount ?? 0;
   const unread = (notifications.data?.notifications ?? []).filter((n) => n.readAt === null);
   const reloadNotifications = notifications.reload;
   // The My Shore badge means one thing: a bottle is waiting there for this user to open. It is
@@ -198,11 +202,11 @@ function Shell() {
     if (tab === 'shore') void reloadShore();
   }, [tab, reloadShore]);
   // Opening the inbox is what marks its notifications read; the count follows.
-  const openInbox = useCallback(() => {
+  const openInbox = () => {
     setInboxOpen(true);
-    if (unread.length > 0) void api.markNotificationsRead().then(() => reloadNotifications());
-  }, [unread.length, reloadNotifications]);
-  const closeInbox = useCallback(() => setInboxOpen(false), []);
+    if (unreadCount > 0) void api.markNotificationsRead().then(() => reloadNotifications());
+  };
+  const closeInbox = () => setInboxOpen(false);
 
   const openProfile = useCallback(() => setProfileOpen(true), []);
   const closeProfile = useCallback(() => setProfileOpen(false), []);
@@ -271,7 +275,11 @@ function Shell() {
   if (restricted && standing.data) {
     return (
       <main className="app-viewport" data-daylight="night">
-        <StandingScreen standing={standing.data} onDeleteAccount={() => setDeletingAccount(true)} />
+        <StandingScreen
+          standing={standing.data}
+          onDeleteAccount={() => setDeletingAccount(true)}
+          onSuspensionEnded={reloadStanding}
+        />
         {pendingDecision ? (
           <DecisionNotice notice={pendingDecision} onResolved={reloadStanding} />
         ) : null}
@@ -338,6 +346,7 @@ function Shell() {
         {inboxOpen && !admin && !standingOpen ? (
           <NotificationsScreen
             notifications={notifications.data?.notifications ?? null}
+            nextCursor={notifications.data?.nextCursor ?? null}
             loading={notifications.loading && !notifications.data}
             error={notifications.error}
             onBack={closeInbox}
@@ -348,7 +357,7 @@ function Shell() {
             focusId={focusId}
             focusPublicId={focusPublicId}
             leaveRef={oceanLeave}
-            unread={unread.length}
+            unread={unreadCount}
             onOpenInbox={openInbox}
             onOpenAdmin={user.role === 'admin' ? (section) => setAdmin(section) : undefined}
             onWrite={() => leaveOceanTo('write')}
@@ -399,7 +408,19 @@ function Shell() {
             setProfileOpen(false);
             setStandingOpen(true);
           }}
+          onBlockedUsers={() => {
+            setProfileOpen(false);
+            setBlockedOpen(true);
+          }}
           onClose={closeProfile}
+        />
+      ) : null}
+      {blockedOpen ? (
+        <BlockedUsersDialog
+          onClose={() => {
+            setBlockedOpen(false);
+            void reloadFriends();
+          }}
         />
       ) : null}
       {pendingDecision && !immersive ? (
