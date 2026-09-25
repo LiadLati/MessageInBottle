@@ -132,6 +132,18 @@ const tokenIn = (m: Captured) => {
   return match[1]!;
 };
 
+// Waits until `count` links of Ada's have been superseded by a completed send.
+async function settled(w: Awaited<ReturnType<typeof world>>['w'], count: number) {
+  const superseded = () =>
+    w.db
+      .select()
+      .from(t.passwordResets)
+      .all()
+      .filter((r) => r.invalidatedAt !== null).length;
+  for (let i = 0; i < 500 && superseded() < count; i++) await new Promise((r) => setTimeout(r, 10));
+  expect(superseded()).toBe(count);
+}
+
 describe('password reset through SMTP (product decision 4)', () => {
   it('renders and sends a one-time link from the project mailbox', async () => {
     const { app } = await world();
@@ -149,13 +161,16 @@ describe('password reset through SMTP (product decision 4)', () => {
   });
 
   it('resets once, invalidates the older link, and ends every session', async () => {
-    const { app } = await world();
+    const { w, app } = await world();
     const session = await loginAs(app, 'ada');
     await forgot(app, 'ada@example.test');
     const older = tokenIn(await nextMessage(1));
     await forgot(app, 'ada@example.test');
     const newer = tokenIn(await nextMessage(2));
     expect(newer).not.toBe(older);
+    // The fake server has the message before the sender has finished its own bookkeeping:
+    // wait for the condition itself (the older link superseded), not for a length of time.
+    await settled(w, 1);
     // The newer link superseded the older one once it was delivered.
     expect((await reset(app, older, 'a-new-password-1')).status).toBe(400);
     expect((await reset(app, newer, 'a-new-password-1')).status).toBe(204);
@@ -166,6 +181,34 @@ describe('password reset through SMTP (product decision 4)', () => {
       headers: { authorization: `Bearer ${session.token}` },
     });
     expect(me.status).toBe(401);
+  });
+
+  it('a slow older send never withdraws a newer link', async () => {
+    // Two requests in flight, the first delivered last: completion order must not matter.
+    const w = createTestWorld();
+    w.db
+      .update(t.users)
+      .set({ email: 'ada@example.test' })
+      .where(eq(t.users.username, 'ada'))
+      .run();
+    const releases: Array<() => void> = [];
+    w.ctx.mailer = {
+      kind: 'smtp',
+      send: () => new Promise<void>((resolve) => releases.push(resolve)),
+    };
+    const { requestPasswordReset } = await import('../services/auth.js');
+    const first = requestPasswordReset(w.ctx, 'ada@example.test');
+    const second = requestPasswordReset(w.ctx, 'ada@example.test');
+    releases[1]!(); // the newer message is handed over first…
+    await second;
+    releases[0]!(); // …then the older one
+    await first;
+    const rows = w.db.select().from(t.passwordResets).all();
+    expect(rows).toHaveLength(2);
+    // The older link was superseded by the newer send; the newer link is still valid.
+    const [olderRow, newerRow] = rows;
+    expect(olderRow!.invalidatedAt).not.toBeNull();
+    expect(newerRow!.invalidatedAt).toBeNull();
   });
 
   it('expires the link after 30 minutes of real time', async () => {

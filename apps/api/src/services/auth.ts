@@ -1,4 +1,4 @@
-import { and, eq, gt, isNull, ne } from 'drizzle-orm';
+import { and, eq, gt, isNull, ne, sql } from 'drizzle-orm';
 import type { PolicyAcceptanceRequest } from '@mib/shared';
 import {
   EMAIL_TAKEN_MESSAGE,
@@ -243,6 +243,7 @@ export function requestPasswordReset(ctx: AppContext, email: string): Promise<vo
           and(
             eq(t.passwordResets.userId, user.id),
             ne(t.passwordResets.id, id),
+            sql`rowid < (select rowid from password_resets where id = ${id})`,
             isNull(t.passwordResets.usedAt),
             isNull(t.passwordResets.invalidatedAt),
           ),
