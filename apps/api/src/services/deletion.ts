@@ -224,6 +224,9 @@ export function deleteAccount(ctx: AppContext, userId: string): AccountDeletionS
       .delete(t.blocks)
       .where(or(eq(t.blocks.blockerId, userId), eq(t.blocks.blockedId, userId)))
       .run().changes;
+    // The account's map clock (time-zone history) and its weather rolls go with it.
+    tx.delete(t.accountZoneChanges).where(eq(t.accountZoneChanges.userId, userId)).run();
+    tx.delete(t.weatherRolls).where(eq(t.weatherRolls.userId, userId)).run();
 
     // 4. Everything the account alone held.
     const notificationsRemoved = tx

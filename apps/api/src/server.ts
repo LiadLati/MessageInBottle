@@ -19,6 +19,7 @@ async function main(): Promise<void> {
   const { createMailer } = await import('./lib/mail.js');
   const { runJourneyTick } = await import('./services/journey.js');
   const { activatePublicListings } = await import('./services/risk.js');
+  const { policyActivatedAt } = await import('./services/weather.js');
   const { createOllamaReviewer, releaseStaleAiClaims, runAiReviewTick } =
     await import('./services/ai-review.js');
   const { applyRetention } = await import('./services/retention.js');
@@ -49,6 +50,8 @@ async function main(): Promise<void> {
   };
   // Adrift bottles listed before the 72-hour rule existed get a full 72 hours from now.
   const activated = activatePublicListings(ctx);
+  // Risk policy v4 takes over from this boot on (recorded once; later boots keep the first).
+  policyActivatedAt(ctx);
   if (activated > 0) console.log(`Public listing deadline set for ${activated} legacy bottle(s).`);
   const app = createApp(ctx);
 

@@ -244,13 +244,45 @@ export const OutcomeVisibilitySchema = z.object({
 });
 export type OutcomeVisibilityDto = z.infer<typeof OutcomeVisibilitySchema>;
 
-// A storm window of the server's risk schedule, sent so the map draws exactly the storms that
-// can matter (and the ones that cannot: after the risk cap, they are scenery).
+// A window of the account's storm (policy v4) while this bottle is at sea: the one storm on the
+// account's map, the same for all of its bottles, clipped to the time the map shows it.
 export const StormWindowSchema = z.object({
   startsAt: z.string(),
   endsAt: z.string(),
 });
 export type StormWindowDto = z.infer<typeof StormWindowSchema>;
+
+// The account's map clock and weather (policy v4). One answer per account, from the server, so
+// every signed-in device draws the same day, night and storm.
+export const TIME_ZONE_SOURCES = ['device', 'harbour', 'utc'] as const;
+export const AccountWeatherSchema = z.object({
+  // The authoritative IANA zone: the latest valid device zone the server accepted; before any,
+  // the harbour's zone; else UTC.
+  timeZone: z.string(),
+  timeZoneSource: z.enum(TIME_ZONE_SOURCES),
+  phase: z.enum(['day', 'night']),
+  // Tonight's storm while it can still be seen: upcoming or active, never cancelled, never in
+  // daytime. `endsAt` is when it stops being shown (its end, or an earlier morning).
+  storm: z
+    .object({
+      id: IdSchema,
+      startsAt: z.string(),
+      endsAt: z.string(),
+    })
+    .nullable(),
+  // The latest eligibility roll, as proof it happened and cannot happen again soon.
+  lastRoll: z
+    .object({
+      rolledAt: z.string(),
+      outcome: z.enum(['calm', 'storm']),
+      cancelledAt: z.string().nullable(),
+    })
+    .nullable(),
+  // No new roll before this instant (24 hours after the last one).
+  nextRollNotBefore: z.string().nullable(),
+  serverTime: z.string(),
+});
+export type AccountWeatherDto = z.infer<typeof AccountWeatherSchema>;
 
 // Where an adrift bottle stands on the public map: listed until its deadline, opened by a
 // finder, or removed unopened after 72 hours.
@@ -278,8 +310,8 @@ export const SentBottleSchema = z.object({
   // Null until the sea ends the journey; then the persisted loss/sinking record.
   outcome: OutcomeSchema.nullable(),
   visibility: OutcomeVisibilitySchema.nullable(),
-  // Storm windows around now, in the sender's account nights, only while at sea; empty
-  // otherwise. Absolute instants, always inside a night of the account's own zone.
+  // The account storm's visible windows around now, only while this bottle is at sea; empty
+  // otherwise. Absolute instants, always inside a night of the account's map clock.
   storms: z.array(StormWindowSchema),
   publicListing: PublicListingSchema.nullable(),
   letter: z.object({ text: z.string(), font: LetterFontSchema, characters: z.number().int() }),

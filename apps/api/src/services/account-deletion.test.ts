@@ -3,7 +3,9 @@ import { describe, expect, it } from 'vitest';
 import * as t from '../db/schema.js';
 import { placeHold } from './admin.js';
 import { getSentBottle, listReceivedLetters, openBottle } from './bottles.js';
+import { setAccountTimeZone } from './auth.js';
 import { deleteAccount } from './deletion.js';
+import { ensureRolls } from './weather.js';
 import { commitArrivalIfDue } from './journey.js';
 import { reportLetter } from './moderation.js';
 import { heldForRecipient, releaseBottle } from './release.js';
@@ -96,6 +98,10 @@ describe('account deletion and minimisation (product decision 7)', () => {
       .set({ email: 'ada@example.test', timeZone: 'Europe/Berlin', shoreFullSince: 1 })
       .where(eq(t.users.id, ada.id))
       .run();
+    // The map clock history and its weather rolls are the account's too.
+    setAccountTimeZone(w.ctx, ada, 'Asia/Tokyo');
+    ensureRolls(w.ctx, ada.id, w.clock.now() + 3 * 24 * 60 * 60 * 1000);
+    expect(w.db.select().from(t.weatherRolls).all().length).toBeGreaterThan(0);
     w.db
       .insert(t.policyAcceptances)
       .values({
@@ -127,6 +133,8 @@ describe('account deletion and minimisation (product decision 7)', () => {
       t.passwordResets,
       t.notifications,
       t.policyAcceptances,
+      t.accountZoneChanges,
+      t.weatherRolls,
     ] as const)
       expect(
         w.db

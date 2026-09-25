@@ -12,6 +12,8 @@ import { newId, newSecretToken, sha256 } from '../lib/ids.js';
 import { AppError, badRequest, conflict } from '../lib/errors.js';
 import { dummyPasswordHash, hashPasswordAsync, verifyPasswordAsync } from '../lib/password.js';
 import type { AppContext, AuthUser } from './context.js';
+import { decideDueStorms } from './risk.js';
+import { acceptDeviceZone } from './weather.js';
 import { assertAcceptancesAllowed, recordAcceptances } from './policies.js';
 
 export function toAuthUser(row: typeof t.users.$inferSelect): AuthUser {
@@ -32,18 +34,15 @@ export function isKnownTimeZone(zone: string): boolean {
   return isIanaTimeZone(zone);
 }
 
-// The account's night zone (spec §9.3): first learned from the device, re-synced on every app
-// start or resume. Recording *when* it took effect is what keeps a change from reaching into
-// the past — nights are only ever walked from that instant on. Unchanged zones are a no-op, so
-// a resume never moves the instant and never shortens the night in progress.
+// The account's map clock (spec §9.3, risk policy v4): the device reports its IANA zone after
+// sign-in, on start, on return to the foreground and when it changes; the server validates it
+// and the latest accepted one becomes authoritative for the map's day and night and for storm
+// eligibility on every device of the account. It takes effect from now: storms already due are
+// settled first under the old clock, a still-pending storm that the new zone turns to day is
+// cancelled, and no decision already taken is touched. Unchanged zones are a no-op.
 export function setAccountTimeZone(ctx: AppContext, user: AuthUser, zone: string): AuthUser {
   if (!isKnownTimeZone(zone)) throw badRequest('unknown_time_zone', 'unknown time zone');
-  if (user.timeZone === zone) return user;
-  ctx.db
-    .update(t.users)
-    .set({ timeZone: zone, timeZoneSince: ctx.clock.now() })
-    .where(eq(t.users.id, user.id))
-    .run();
+  acceptDeviceZone(ctx, user.id, zone, (tx, now) => decideDueStorms(ctx, tx, user.id, now));
   return { ...user, timeZone: zone };
 }
 
@@ -236,6 +235,8 @@ export function requestPasswordReset(ctx: AppContext, email: string): Promise<vo
   }
   return sending.then(
     () => {
+      // Only links requested *before* this one are superseded: when two requests are in flight
+      // and the older send finishes last, it must not withdraw the newer link.
       ctx.db
         .update(t.passwordResets)
         .set({ invalidatedAt: ctx.realClock.now() })

@@ -7,8 +7,12 @@ import {
   localParts,
   nightWindow,
   nightsOverlapping,
-  stormForNight,
-  type StormNight,
+  bottleRiskDraws,
+  firstDaytime,
+  nextRollSlot,
+  phaseAt,
+  rollAccountStorm,
+  type ZoneChange,
 } from './weather.js';
 
 const ZONE = 'Asia/Jerusalem';
@@ -46,89 +50,166 @@ describe('nights in a zone', () => {
   });
 });
 
-describe('storm nights are stable, independent and correctly distributed', () => {
-  const nights = Array.from({ length: 40 }, (_, i) =>
-    nightWindow(`2026-11-${String((i % 28) + 1).padStart(2, '0')}`, ZONE),
-  );
+const HOUR = 60 * 60 * 1000;
+const DAY = 24 * HOUR;
+const jerusalem: ZoneChange[] = [{ zone: ZONE, effectiveAt: 0 }];
 
-  it('always yields the identical storm for the same bottle and night', () => {
-    const n = nightWindow(day(10), ZONE);
-    const a = stormForNight('btl_stable', n);
-    for (let i = 0; i < 20; i++) expect(stormForNight('btl_stable', n)).toEqual(a);
-    // A new policy version reshuffles: over a month the two versions cannot agree everywhere.
-    const v1 = nights.map((w) => stormForNight('btl_stable', w, 1));
-    const v2 = nights.map((w) => stormForNight('btl_stable', w, 2));
-    expect(v1).not.toEqual(v2);
+// Walks the account's rolls from `from` (the clock's start) to `to` exactly as the server does:
+// each roll at a night entry no sooner than 24 hours after the previous one.
+function rollsBetween(userId: string, changes: ZoneChange[], from: number, to: number) {
+  const out = [];
+  let notBefore = from;
+  for (;;) {
+    const slot = nextRollSlot(changes, notBefore, to, from);
+    if (!slot) return out;
+    out.push(rollAccountStorm(userId, slot));
+    notBefore = slot.rolledAt + RISK_POLICY.rollSpacingMs;
+  }
+}
+
+describe('account storms on the map clock (policy v4)', () => {
+  const from = instantOfLocal(2026, 11, 1, 12, ZONE);
+  const to = from + 60 * DAY;
+
+  it('rolls once per night at nightfall, never in daytime, and never twice in 24 hours', () => {
+    const rolls = rollsBetween('usr_a', jerusalem, from, to);
+    expect(rolls).toHaveLength(60);
+    for (const [i, r] of rolls.entries()) {
+      expect(phaseAt(r.rolledAt, ZONE)).toBe('night');
+      expect(localParts(r.rolledAt, ZONE)).toMatchObject({ hour: 19, minute: 0 });
+      if (i > 0) expect(r.rolledAt - rolls[i - 1]!.rolledAt).toBeGreaterThanOrEqual(DAY);
+    }
+    // Daytime alone offers no slot at all.
+    const noon = instantOfLocal(2026, 11, 3, 8, ZONE);
+    expect(nextRollSlot(jerusalem, noon, noon + 10 * HOUR, noon)).toBeNull();
   });
 
-  it('storms ~25% of nights, each 40–100 minutes inside the night, decision at the midpoint', () => {
+  it('is deterministic: the same account and inputs always give the same calm or storm', () => {
+    const a = rollsBetween('usr_stable', jerusalem, from, to);
+    for (let i = 0; i < 5; i++) expect(rollsBetween('usr_stable', jerusalem, from, to)).toEqual(a);
+    // Another account rolls independently.
+    const b = rollsBetween('usr_other', jerusalem, from, to);
+    expect(a.map((r) => r.storm !== null)).not.toEqual(b.map((r) => r.storm !== null));
+  });
+
+  it('storms ~25% of nights, 40–100 minutes, wholly inside the displayed night, decision at the midpoint', () => {
     let storms = 0;
     let total = 0;
-    for (let b = 0; b < 500; b++) {
-      for (const n of nights) {
+    for (let u = 0; u < 300; u++) {
+      for (const r of rollsBetween(`usr_${u}`, jerusalem, from, to)) {
         total++;
-        const s = stormForNight(`btl_${b}`, n);
-        if (!s) continue;
+        if (!r.storm) continue;
         storms++;
-        expect(s.startsAt).toBeGreaterThanOrEqual(n.startsAt);
-        expect(s.endsAt).toBeLessThanOrEqual(n.endsAt);
-        expect(s.endsAt - s.startsAt).toBeGreaterThanOrEqual(RISK_POLICY.stormMinMs);
-        expect(s.endsAt - s.startsAt).toBeLessThanOrEqual(RISK_POLICY.stormMaxMs);
+        const s = r.storm;
+        expect(s.startsAt).toBeGreaterThanOrEqual(r.rolledAt);
+        expect(s.startsAt).toBeGreaterThanOrEqual(r.night.startsAt);
+        expect(s.endsAt).toBeLessThanOrEqual(r.night.endsAt);
+        expect(s.endsAt - s.startsAt).toBeGreaterThanOrEqual(RISK_POLICY.stormMinMs - 1);
+        expect(s.endsAt - s.startsAt).toBeLessThanOrEqual(RISK_POLICY.stormMaxMs + 1);
         expect(Math.abs(s.decisionAt - (s.startsAt + s.endsAt) / 2)).toBeLessThanOrEqual(1);
+        // Night on the map for the whole storm.
+        expect(firstDaytime(jerusalem, s.startsAt, s.endsAt - 1)).toBeNull();
       }
     }
     const rate = storms / total;
+    expect(total).toBe(300 * 60);
     expect(rate).toBeGreaterThan(0.23);
     expect(rate).toBeLessThan(0.27);
   });
 
-  it('gives two bottles independent nights', () => {
-    const a = nights.map((n) => Boolean(stormForNight('btl_a', n)));
-    const b = nights.map((n) => Boolean(stormForNight('btl_b', n)));
-    expect(a).not.toEqual(b);
+  it('a local date boundary or a zone change inside 24 hours never adds a roll', () => {
+    // Jerusalem at 19:00, then the device reports New York at 03:00 Jerusalem time (20:00 in
+    // New York, a fresh evening there): same 24 hours, so no second roll that night.
+    const evening = instantOfLocal(2026, 11, 5, 19, ZONE);
+    const moved: ZoneChange[] = [
+      ...jerusalem,
+      { zone: 'America/New_York', effectiveAt: evening + 8 * HOUR },
+    ];
+    const rolls = rollsBetween('usr_x', moved, evening - HOUR, evening + 3 * DAY);
+    for (let i = 1; i < rolls.length; i++)
+      expect(rolls[i]!.rolledAt - rolls[i - 1]!.rolledAt).toBeGreaterThanOrEqual(DAY);
+    expect(rolls[0]!.rolledAt).toBe(evening);
+    expect(rolls[1]!.rolledAt).toBeGreaterThanOrEqual(evening + DAY);
+    // Crossing midnight into a new local date within the same night adds nothing either.
+    const oneNight = rollsBetween('usr_x', jerusalem, evening, evening + 11 * HOUR);
+    expect(oneNight).toHaveLength(1);
   });
 
-  it('loses about 1% of eligible decisions, adrift 75% / sunk 25% of those', () => {
-    let eligible = 0;
+  it('one late entry never drags later rolls away from dusk', () => {
+    // The clock starts at 03:00 Jerusalem on 5 Nov, mid-night: that counts as entering it.
+    const midNight = instantOfLocal(2026, 11, 5, 3, ZONE);
+    const rolls = rollsBetween('usr_drift', jerusalem, midNight, midNight + 6 * DAY);
+    expect(rolls[0]!.rolledAt).toBe(midNight);
+    // Dusk that evening is only 16 hours later: no roll. From the next dusk on, every roll is
+    // at 19:00 again.
+    expect(localParts(rolls[1]!.rolledAt, ZONE)).toMatchObject({ day: 6, hour: 19 });
+    for (const r of rolls.slice(1))
+      expect(localParts(r.rolledAt, ZONE)).toMatchObject({ hour: 19 });
+  });
+
+  it('a zone change that turns a daytime map to night is an entry, 24 hours after the last roll', () => {
+    // Rolled at dusk in Jerusalem (17:00Z on 5 Nov). The next afternoon (15:00Z, 17:00 there,
+    // before dusk) the device reports Los Angeles, 07:00 — still day. At 18:00Z, 25 hours after
+    // the roll, it reports Tokyo, where it is 03:00: the map enters a night right then.
+    const dusk = Date.parse('2026-11-05T17:00:00.000Z');
+    const toLa = Date.parse('2026-11-06T15:00:00.000Z');
+    const toTokyo = Date.parse('2026-11-06T18:00:00.000Z');
+    const changes: ZoneChange[] = [
+      { zone: ZONE, effectiveAt: 0 },
+      { zone: 'America/Los_Angeles', effectiveAt: toLa },
+      { zone: 'Asia/Tokyo', effectiveAt: toTokyo },
+    ];
+    const rolls = rollsBetween('usr_entry', changes, dusk - HOUR, toTokyo + HOUR);
+    expect(rolls.map((r) => r.rolledAt)).toEqual([dusk, toTokyo]);
+    expect(rolls[1]!.zone).toBe('Asia/Tokyo');
+    // Reporting Tokyo only 20 hours after the roll would have given that night no roll at all.
+    const early = changes.map((c) =>
+      c.zone === 'Asia/Tokyo' ? { ...c, effectiveAt: dusk + 20 * HOUR } : c,
+    );
+    early[1] = { zone: 'America/Los_Angeles', effectiveAt: dusk + 19 * HOUR };
+    expect(rollsBetween('usr_entry', early, dusk - HOUR, dusk + 21 * HOUR)).toHaveLength(1);
+  });
+
+  it('finds the first daytime moment across zone changes', () => {
+    const night = instantOfLocal(2026, 11, 5, 22, ZONE);
+    expect(firstDaytime(jerusalem, night, night + HOUR)).toBeNull();
+    // At 23:00 Jerusalem the device reports Tokyo, where it is 06:00 and day comes at 07:00.
+    const toTokyo: ZoneChange[] = [...jerusalem, { zone: 'Asia/Tokyo', effectiveAt: night + HOUR }];
+    expect(firstDaytime(toTokyo, night, night + 3 * HOUR)).toBe(night + 2 * HOUR);
+    // To Los Angeles, where 23:00 Jerusalem is 13:00: day at once.
+    const toLa: ZoneChange[] = [
+      ...jerusalem,
+      { zone: 'America/Los_Angeles', effectiveAt: night + HOUR },
+    ];
+    expect(firstDaytime(toLa, night, night + 3 * HOUR)).toBe(night + HOUR);
+  });
+
+  it('gives every bottle its own draws for a storm; about 1% of eligible decisions lose, 75/25', () => {
+    expect(bottleRiskDraws('btl_a', 1000)).toEqual(bottleRiskDraws('btl_a', 1000));
+    expect(bottleRiskDraws('btl_a', 1000)).not.toEqual(bottleRiskDraws('btl_b', 1000));
     let lost = 0;
     let adrift = 0;
-    for (let b = 0; b < 20000; b++) {
-      for (const n of nights) {
-        const storm = stormForNight(`btl_${b}`, n);
-        if (!storm) continue;
-        const d = decideRisk({
-          storm,
-          progressAtDecision: 0.3,
-          arrivalAt: Number.MAX_SAFE_INTEGER,
-          priorEligibleDecisions: 0,
-        });
-        eligible++;
-        if (d.lost) {
-          lost++;
-          if (d.reason === 'adrift') adrift++;
-        }
+    const n = 400000;
+    for (let i = 0; i < n; i++) {
+      const d = decideRisk({
+        storm: { decisionAt: 10, ...bottleRiskDraws(`btl_${i}`, 12345) },
+        progressAtDecision: 0.3,
+        arrivalAt: Number.MAX_SAFE_INTEGER,
+        priorEligibleDecisions: 0,
+      });
+      if (d.lost) {
+        lost++;
+        if (d.reason === 'adrift') adrift++;
       }
     }
-    // A big enough sample that the bands below are many standard deviations wide.
-    expect(eligible).toBeGreaterThan(150000);
-    expect(lost).toBeGreaterThan(1000);
-    const lossRate = lost / eligible;
-    expect(lossRate).toBeGreaterThan(0.007);
-    expect(lossRate).toBeLessThan(0.013);
-    const adriftShare = adrift / lost;
-    expect(adriftShare).toBeGreaterThan(0.68);
-    expect(adriftShare).toBeLessThan(0.82);
+    expect(lost / n).toBeGreaterThan(0.008);
+    expect(lost / n).toBeLessThan(0.012);
+    expect(adrift / lost).toBeGreaterThan(0.7);
+    expect(adrift / lost).toBeLessThan(0.8);
   });
 
   it('enforces the hard limits: 80% cutoff, arrival first, and only five risky decisions', () => {
-    const storm: StormNight = {
-      key: day(1),
-      startsAt: 0,
-      endsAt: 60,
-      decisionAt: 30,
-      lossDraw: 0, // would always lose
-      reasonDraw: 0,
-    };
+    const storm = { decisionAt: 30, lossDraw: 0, reasonDraw: 0 }; // would always lose
     const base = { storm, progressAtDecision: 0.5, arrivalAt: 1000, priorEligibleDecisions: 0 };
     expect(decideRisk(base)).toEqual({ eligible: true, lost: true, reason: 'adrift' });
     expect(decideRisk({ ...base, progressAtDecision: 0.8 }).eligible).toBe(false);
@@ -141,7 +222,7 @@ describe('storm nights are stable, independent and correctly distributed', () =>
   });
 
   it('caps the journey loss at 1 − 0.99⁵', () => {
-    expect(RISK_POLICY_VERSION).toBe(3);
+    expect(RISK_POLICY_VERSION).toBe(4);
     expect(1 - Math.pow(1 - RISK_POLICY.lossChance, RISK_POLICY.maxRiskDecisions)).toBeCloseTo(
       0.049,
       3,

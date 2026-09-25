@@ -23,6 +23,7 @@ import { newId, sha256 } from '../lib/ids.js';
 import { AppError, conflict } from '../lib/errors.js';
 import { geoOf, getShore, loadActiveGraph, toShoreDto } from './chart.js';
 import type { AppContext, AuthUser } from './context.js';
+import { ensureMapClock } from './weather.js';
 import { areAcceptedFriends, isBlockedEitherWay } from './friends.js';
 import { commitArrival } from './journey.js';
 import { isRestricted } from './moderation.js';
@@ -215,6 +216,9 @@ export function releaseBottle(
 ): ReleaseOutcome {
   const fingerprint = requestFingerprint(user.id, req);
   return ctx.db.transaction((tx) => {
+    // A journey sails under its sender's map clock: an account no device has reported for yet
+    // gets its harbour (or UTC) clock from now, so its storms are fixed from the moment it sails.
+    ensureMapClock(ctx, user.id, tx);
     const prior = tx
       .select()
       .from(t.idempotencyKeys)

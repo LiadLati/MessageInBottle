@@ -26,6 +26,8 @@ const NEWEST = new Set([
   '0013_account_deletion',
   '0014_appeal_waiver_and_holds',
   '0015_product_decisions',
+  '0016_account_storms',
+  '0017_account_zone_backfill',
 ]);
 
 function tableNames(sqlite: Database.Database): string[] {

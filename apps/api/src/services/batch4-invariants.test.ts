@@ -55,11 +55,13 @@ describe('the risk worker walks forward, not from the start (ARCH-011)', () => {
     const idleTick = prepared;
     client.prepare = real;
     expect(firstTick).toBeGreaterThan(0);
-    // The first tick walks twelve nights for five bottles; the second resumes at each bottle's
-    // cursor and has nothing to decide.
-    // Without the cursor every night is re-read (18 statements here); with it, one query lists
-    // the journeys and at most one more per bottle.
-    expect(idleTick).toBeLessThanOrEqual(1 + 5);
+    // The first tick rolls twelve nights for the account and decides its storms for five
+    // bottles. The second resumes from the account's last persisted roll and has nothing to
+    // do: one query lists the accounts with journeys at risk, a fixed handful per account
+    // reads its map clock, activation and last roll, and one lists due storms — however many
+    // nights or bottles there are.
+    expect(idleTick).toBeLessThanOrEqual(1 + 5 + 1);
+    expect(idleTick * 3).toBeLessThan(firstTick);
   });
 });
 

@@ -1,12 +1,10 @@
-// Day/night phase and simulated-weather scheduling.
+// Day/night phase, the account storm policy, and legacy cosmetic weather schedules.
 //
 // Everything here is pure and deterministic: the same inputs always produce the same weather, so
-// a refresh, a different selection, a second client or a server restart all agree without any
-// stored state. The schedule is versioned; bumping SCHEDULE_VERSION reshuffles every future
-// window deliberately. It lives in the shared package so it can move behind an API endpoint
-// later without changing a single value.
-//
-// Weather is cosmetic. Nothing in this module influences a route, a duration or an arrival.
+// a refresh, a second client or a server restart all agree. The account storm policy (v4, below)
+// is the only weather with consequences; the server persists each roll it makes, so a result is
+// never recomputed differently. Nothing in this module influences a route, a duration or an
+// arrival.
 
 export type DayPhase = 'day' | 'night';
 
@@ -162,36 +160,46 @@ export function activeStormAt(
   return null;
 }
 
-// ---------- journey risk policy (approved 2026-09-19) ----------
+// ---------- journey risk policy: account storms on the map clock (policy v4) ----------
 //
 // The first *consequential* weather. Everything is a pure function of the policy version, the
-// bottle id and the night, so the server can decide the same thing after a restart, a retry or
-// a long outage, and no client can influence it. Values are the approved ones; changing any of
-// them means a new POLICY version, never an edit in place.
+// account, the account's recorded time-zone history and the bottle ids, so the server takes the
+// same decisions after a restart, a retry or a long outage, and no client can influence them.
+// Values are the approved ones; changing any of them means a new version, never an edit in place.
 //
-//   • Nights are the nights on the sender's own Ocean map: 19:00–07:00 (DAYLIGHT_DEFAULTS) in
-//     the account's persisted IANA time zone, whatever water a bottle is on. One phase per
-//     account drives the map's palette, every storm on it, every risk decision and the sea
-//     view's lighting — so a daytime map can never hold a bottle in a risk-bearing storm. A
-//     night is keyed by the local date it starts on.
-//   • Each at-sea bottle has a 25% chance of a storm on each night, independently of every
-//     other bottle. A storm is one window of 40–100 minutes inside the night.
-//   • A storm night carries at most one risk decision, at the storm's midpoint — after the
-//     storm has become visible, while the bottle is still at sea.
-//   • An eligible decision loses the bottle with 1% probability; only the first five eligible
-//     decisions of a journey carry risk (max journey loss 1 − 0.99⁵ ≈ 4.9%); nothing is
-//     decided at or after 80% progress. Lost bottles go adrift 75% / sink 25% of the time.
+//   • One clock. The account's authoritative IANA zone (the latest valid device zone the server
+//     accepted; before any, the harbour's zone; else UTC) sets the map's day and night:
+//     19:00–07:00 local (DAYLIGHT_DEFAULTS). Storms follow that map: a daytime map has none.
+//   • At most one roll per night, and never more than one per rolling 24 hours. When the map
+//     enters a night — at dusk, or when an accepted zone change turns a daytime map to night —
+//     the account rolls once: a deterministic 25% chance that the night holds a storm. The roll
+//     is persisted and consumed whatever the result. An entry less than 24 hours after the
+//     previous roll gets no roll (that night is calm), so a time-zone change, a date boundary,
+//     reopening SeaYou or restarting a worker never adds one. An entry with less than the
+//     longest storm left before morning gets no roll either.
+//   • One storm, on the account's map. It lasts 40–100 minutes and starts and ends inside the
+//     night it was rolled in. Its midpoint is the one moment of risk.
+//   • At the midpoint every eligible travelling bottle of the account gets its own independent
+//     decision: an eligible decision loses the bottle with 1% probability; only the first five
+//     eligible decisions of a journey carry risk (max journey loss 1 − 0.99⁵ ≈ 4.9%); nothing is
+//     decided at or after 80% progress or after arrival. Lost bottles go adrift 75% / sink 25%.
+//   • If a time-zone change turns the map to day before the midpoint, the storm stops, its
+//     pending decision is cancelled and the roll stays consumed. A decision already taken is
+//     never revisited.
+//
+// v1 counted nights in a server zone, v2 at a bottle's meridian, v3 gave every bottle its own
+// storm on each of its sender's nights. Decisions recorded under those versions are kept as
+// they are; from v4's activation every versioned journey still at sea follows v4.
 
-// v1 counted nights in a zone configured on the server; v2 at the bottle's own meridian. Both
-// are superseded: from v3 every versioned journey walks the nights of its sender's account
-// zone, and a journey's stamp only records the version it was released under.
-export const RISK_POLICY_VERSION = 3;
+export const RISK_POLICY_VERSION = 4;
 
 export const RISK_POLICY = {
   version: RISK_POLICY_VERSION,
   stormNightChance: 0.25,
   stormMinMs: 40 * 60 * 1000,
   stormMaxMs: 100 * 60 * 1000,
+  // No second eligibility roll for an account within this span of the previous one.
+  rollSpacingMs: 24 * 60 * 60 * 1000,
   lossChance: 0.01,
   maxRiskDecisions: 5,
   // Internal protection: never shown in user-facing copy.
@@ -303,45 +311,173 @@ export function nightsOverlapping(
   return out;
 }
 
-export interface StormNight {
-  key: NightKey;
-  startsAt: number;
-  endsAt: number;
-  // The one stable moment of the night at which a risk decision may be taken.
-  decisionAt: number;
-  lossDraw: number;
-  reasonDraw: number;
+// ---------- the account's zone over time ----------
+
+// One accepted change of the account's authoritative zone, effective from `effectiveAt`.
+export interface ZoneChange {
+  zone: string;
+  effectiveAt: number;
 }
 
-// The storm of one night for one bottle, or null on a calm night. Same inputs, same storm —
-// forever. The draws for the decision come from the same seed so nothing is rolled later.
-export function stormForNight(
-  bottleId: string,
-  night: NightWindow,
+export interface ZoneSegment {
+  zone: string;
+  from: number;
+  to: number; // exclusive
+}
+
+// The zones in force over [from, to), in order. `changes` must be sorted by effectiveAt; the
+// first change's zone also covers anything before it.
+export function zoneSegments(
+  changes: readonly ZoneChange[],
+  from: number,
+  to: number,
+): ZoneSegment[] {
+  if (changes.length === 0 || to <= from) return [];
+  const out: ZoneSegment[] = [];
+  for (let i = 0; i < changes.length; i++) {
+    const segFrom = i === 0 ? -Infinity : changes[i]!.effectiveAt;
+    const segTo = i + 1 < changes.length ? changes[i + 1]!.effectiveAt : Infinity;
+    const a = Math.max(segFrom, from);
+    const b = Math.min(segTo, to);
+    if (a < b) out.push({ zone: changes[i]!.zone, from: a, to: b });
+  }
+  return out;
+}
+
+export function zoneAt(changes: readonly ZoneChange[], at: number): string | null {
+  let zone: string | null = changes[0]?.zone ?? null;
+  for (const c of changes) if (c.effectiveAt <= at) zone = c.zone;
+  return zone;
+}
+
+// The night of `zone` containing `at`, or null when `at` is daytime there.
+export function nightContaining(
+  at: number,
+  zone: string,
+  config: DaylightConfig = DAYLIGHT_DEFAULTS,
+): NightWindow | null {
+  return (
+    nightsOverlapping(at, at, zone, config).find((n) => n.startsAt <= at && at < n.endsAt) ?? null
+  );
+}
+
+// The first instant in [from, to] at which the account's map shows day, or null if it is night
+// throughout. Only zone changes and the natural morning can end a night.
+export function firstDaytime(
+  changes: readonly ZoneChange[],
+  from: number,
+  to: number,
+  config: DaylightConfig = DAYLIGHT_DEFAULTS,
+): number | null {
+  for (const seg of zoneSegments(changes, from, to + 1)) {
+    const night = nightContaining(seg.from, seg.zone, config);
+    if (!night) return seg.from;
+    if (night.endsAt < seg.to) return night.endsAt;
+  }
+  return null;
+}
+
+// ---------- account rolls and storms ----------
+
+export interface RollSlot {
+  rolledAt: number;
+  zone: string;
+  night: NightWindow;
+}
+
+// The next moment in [notBefore, notAfter] at which the account rolls. A roll happens only when
+// the map *enters* a night: at dusk, when an accepted zone change turns a daytime map to night,
+// or when the account's map clock starts at night. An entry sooner than `notBefore` (24 hours
+// after the previous roll) gets no roll at all — that night stays calm — and so does an entry
+// with less than the longest storm left before morning. Nothing ever rolls part-way through a
+// night it did not just enter, so one late event never drags later rolls away from dusk.
+export function nextRollSlot(
+  changes: readonly ZoneChange[],
+  notBefore: number,
+  notAfter: number,
+  clockStart: number,
+  config: DaylightConfig = DAYLIGHT_DEFAULTS,
+): RollSlot | null {
+  const changeAt = new Set(changes.map((c) => c.effectiveAt));
+  const segments = zoneSegments(changes, Math.max(notBefore, clockStart), notAfter + 1);
+  for (const [k, seg] of segments.entries()) {
+    const entries: number[] = [];
+    // The segment's own start is an entry when the clock starts there at night, or when a zone
+    // change there turned the map from day to night.
+    const opensAtNight = phaseAt(seg.from, seg.zone, config) === 'night';
+    if (opensAtNight) {
+      if (seg.from === clockStart) entries.push(seg.from);
+      else if (k > 0 || changeAt.has(seg.from)) {
+        const before = zoneAt(changes, seg.from - 1);
+        if (before && phaseAt(seg.from - 1, before, config) === 'day') entries.push(seg.from);
+      }
+    }
+    for (const at of entries) {
+      const night = nightContaining(at, seg.zone, config);
+      if (night && night.endsAt - at >= RISK_POLICY.stormMaxMs)
+        return { rolledAt: at, zone: seg.zone, night };
+    }
+    // Dusks inside the segment, night by night: a long catch-up costs one pass.
+    const first = localParts(seg.from, seg.zone);
+    let cursor = shiftDay(first.year, first.month, first.day, -1);
+    for (let guard = 0; guard < 4000; guard++) {
+      const key = nightKeyFor(cursor.year, cursor.month, cursor.day);
+      const night = nightWindow(key, seg.zone, config);
+      if (night.startsAt >= seg.to) break;
+      cursor = shiftDay(cursor.year, cursor.month, cursor.day, 1);
+      if (night.startsAt < seg.from) continue;
+      if (night.endsAt - night.startsAt >= RISK_POLICY.stormMaxMs)
+        return { rolledAt: night.startsAt, zone: seg.zone, night };
+    }
+  }
+  return null;
+}
+
+export interface AccountStorm {
+  startsAt: number;
+  endsAt: number;
+  // The one moment of risk: the storm's midpoint.
+  decisionAt: number;
+}
+
+export interface AccountRoll extends RollSlot {
+  storm: AccountStorm | null;
+}
+
+// The roll itself. Same account, same moment, same night: same result, forever.
+export function rollAccountStorm(
+  userId: string,
+  slot: RollSlot,
   policyVersion = RISK_POLICY_VERSION,
-): StormNight | null {
-  const seed = hashSeed(policyVersion, 'risk', bottleId, night.key);
-  if (draw(seed, 0) >= RISK_POLICY.stormNightChance) return null;
+): AccountRoll {
+  const seed = hashSeed(policyVersion, 'account-storm', userId, slot.rolledAt);
+  if (draw(seed, 0) >= RISK_POLICY.stormNightChance) return { ...slot, storm: null };
   const duration =
     RISK_POLICY.stormMinMs + draw(seed, 1) * (RISK_POLICY.stormMaxMs - RISK_POLICY.stormMinMs);
-  const startsAt =
-    night.startsAt + draw(seed, 2) * Math.max(0, night.endsAt - night.startsAt - duration);
-  const endsAt = startsAt + duration;
+  const room = Math.max(0, slot.night.endsAt - slot.rolledAt - duration);
+  const startsAt = Math.round(slot.rolledAt + draw(seed, 2) * room);
+  const endsAt = Math.min(slot.night.endsAt, Math.round(startsAt + duration));
   return {
-    key: night.key,
-    startsAt: Math.round(startsAt),
-    endsAt: Math.round(endsAt),
-    decisionAt: Math.round(startsAt + duration / 2),
-    lossDraw: draw(seed, 3),
-    reasonDraw: draw(seed, 4),
+    ...slot,
+    storm: { startsAt, endsAt, decisionAt: Math.round((startsAt + endsAt) / 2) },
   };
+}
+
+// A bottle's own draws for one storm: independent of every other bottle in the same storm.
+export function bottleRiskDraws(
+  bottleId: string,
+  rolledAt: number,
+  policyVersion = RISK_POLICY_VERSION,
+): { lossDraw: number; reasonDraw: number } {
+  const seed = hashSeed(policyVersion, 'risk', bottleId, rolledAt);
+  return { lossDraw: draw(seed, 0), reasonDraw: draw(seed, 1) };
 }
 
 // The pure decision rule, so it can be tested apart from the database. A decision is eligible
 // only while the bottle is still at sea before its arrival, under the progress cutoff, and
 // within the first five eligible decisions of the journey.
 export function decideRisk(input: {
-  storm: StormNight;
+  storm: { decisionAt: number; lossDraw: number; reasonDraw: number };
   progressAtDecision: number;
   arrivalAt: number;
   priorEligibleDecisions: number;

@@ -27,9 +27,9 @@ export const users = sqliteTable('users', {
   passwordUpdatedAt: integer('password_updated_at'),
   // Normalized (trimmed, lower-case) and unique; null for accounts that predate e-mail.
   email: text('email').unique(),
-  // The IANA zone this account's nights are counted in (spec §9.3), first learned from the
-  // device and re-synced on every app start or resume, and the journey-clock instant it took
-  // effect. Nights are walked from that instant only, so a change never reaches into the past.
+  // The latest valid IANA zone a device reported for this account, and the journey-clock
+  // instant the server accepted it. The full history the map clock and storms follow is
+  // `account_zone_changes`; these two columns mirror its latest device entry.
   timeZone: text('time_zone'),
   timeZoneSince: integer('time_zone_since'),
   // Set when this account's shore became full (100 bottles unread or on their way) and the
@@ -416,6 +416,68 @@ export const riskDecisions = sqliteTable(
   },
   (t) => [uniqueIndex('risk_decisions_bottle_night_idx').on(t.bottleId, t.nightKey)],
 );
+
+// The account's authoritative map clock over time (policy v4): every accepted change, never
+// edited or deleted. Storms, rolls and risk read the zone in force at each instant from here, so
+// a worker catching up after downtime walks exactly the nights the map showed.
+//   device  — a valid IANA zone reported by a signed-in device;
+//   harbour — before any device report: the chosen harbour's nautical zone;
+//   utc     — before any device report, with no harbour to derive a zone from.
+export const accountZoneChanges = sqliteTable(
+  'account_zone_changes',
+  {
+    id: text('id').primaryKey(),
+    userId: text('user_id')
+      .notNull()
+      .references(() => users.id),
+    zone: text('zone').notNull(),
+    source: text('source', { enum: ['device', 'harbour', 'utc'] }).notNull(),
+    effectiveAt: integer('effective_at').notNull(),
+    createdAt: integer('created_at').notNull(),
+  },
+  (t) => [index('account_zone_changes_user_idx').on(t.userId, t.effectiveAt)],
+);
+
+// One row per storm-eligibility roll (policy v4): the proof that the roll happened, what it
+// decided and what became of its storm. Rows are never deleted or rerolled; the unique index on
+// (user, rolled_at) and the 24-hour spacing checked in the same transaction stop a retry, a
+// restart or a second worker from rolling twice.
+export const weatherRolls = sqliteTable(
+  'weather_rolls',
+  {
+    id: text('id').primaryKey(),
+    userId: text('user_id')
+      .notNull()
+      .references(() => users.id),
+    policyVersion: integer('policy_version').notNull(),
+    rolledAt: integer('rolled_at').notNull(),
+    zone: text('zone').notNull(),
+    nightStartsAt: integer('night_starts_at').notNull(),
+    nightEndsAt: integer('night_ends_at').notNull(),
+    outcome: text('outcome', { enum: ['calm', 'storm'] }).notNull(),
+    stormStartsAt: integer('storm_starts_at'),
+    stormEndsAt: integer('storm_ends_at'),
+    decisionAt: integer('decision_at'),
+    // Set once the midpoint decisions for every eligible bottle were taken (in one commit).
+    decidedAt: integer('decided_at'),
+    // Set when the map turned to day before the midpoint: the pending decision is cancelled
+    // and the roll stays consumed.
+    cancelledAt: integer('cancelled_at'),
+    cancelReason: text('cancel_reason'),
+    createdAt: integer('created_at').notNull(),
+  },
+  (t) => [
+    uniqueIndex('weather_rolls_user_rolled_idx').on(t.userId, t.rolledAt),
+    index('weather_rolls_pending_idx').on(t.outcome, t.decidedAt, t.cancelledAt, t.decisionAt),
+  ],
+);
+
+// When each risk policy version took over, recorded once at first boot. Accounts roll only from
+// v4's activation, so no past night is ever given a v4 storm after the fact.
+export const riskPolicyActivations = sqliteTable('risk_policy_activations', {
+  version: integer('version').primaryKey(),
+  activatedAt: integer('activated_at').notNull(),
+});
 
 export const devClock = sqliteTable('dev_clock', {
   id: integer('id').primaryKey(),

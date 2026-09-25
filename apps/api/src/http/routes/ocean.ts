@@ -6,6 +6,7 @@ import {
   openPublicBottle,
 } from '../../services/outcomes.js';
 import { blockFoundWriter } from '../../services/friends.js';
+import { accountWeather } from '../../services/weather.js';
 import type { AppEnv } from '../app.js';
 import { requireAuth } from '../middleware/auth.js';
 import { requireGoodStanding } from '../middleware/admin.js';
@@ -16,6 +17,11 @@ import { requirePolicies } from '../middleware/policies.js';
 export function oceanRoutes() {
   const r = new Hono<AppEnv>();
   r.use('*', requireAuth, requirePolicies, requireGoodStanding);
+  // The account's map clock and storm, the same for every device of the account (policy v4).
+  r.get('/weather', (c) => {
+    c.header('Cache-Control', 'no-store');
+    return c.json(accountWeather(c.get('ctx'), c.get('user').id));
+  });
   r.get('/public', (c) => {
     const ctx = c.get('ctx');
     return c.json({

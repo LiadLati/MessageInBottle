@@ -1,6 +1,6 @@
 import { eq } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
-import { RISK_POLICY_VERSION, nightWindow, phaseAt, stormForNight } from '@mib/shared';
+import { RISK_POLICY_VERSION, nightWindow, phaseAt } from '@mib/shared';
 import * as t from '../db/schema.js';
 import { createApp } from '../http/app.js';
 import { decideCase, getCase } from './admin.js';
@@ -11,7 +11,8 @@ import type { AuthUser } from './context.js';
 import { commitArrivalIfDue } from './journey.js';
 import { reportLetter, standingOf } from './moderation.js';
 import { ReleaseRejectedError, releaseBottle } from './release.js';
-import { journeyNights, processRiskDecisions } from './risk.js';
+import { processRiskDecisions } from './risk.js';
+import { canonicalPair } from './friends.js';
 import { T0, createTestWorld, loginAs, releaseInput, type TestWorld } from '../test/harness.js';
 
 // Audit QA-024: recovery paths that had no coverage at any level and can be exercised in one
@@ -177,38 +178,66 @@ describe('extreme account zones (date line): nights and storm decisions', () => 
         endsAt: Date.parse(night.endsAt),
       });
       const w = createTestWorld({ msPerChartUnit: 24 * HOUR, minJourneyMs: 20 * DAY });
-      setAccountTimeZone(w.ctx, w.user('ada'), zone);
+      // A fixed account id, so its storms are the same on every run (they hash the id).
+      const sender = `usr_dateline_${zone.split('/')[1]!.toLowerCase()}`;
+      const bo = w.user('bo').id;
+      w.db
+        .insert(t.users)
+        .values({
+          id: sender,
+          username: sender,
+          displayName: 'D',
+          shoreId: 'shore_lantern_cove',
+          createdAt: T0,
+        })
+        .run();
+      const [low, high] = canonicalPair(sender, bo);
+      w.db
+        .insert(t.friendships)
+        .values({
+          id: `frd_${sender}`,
+          userLowId: low,
+          userHighId: high,
+          requestedById: sender,
+          status: 'accepted',
+          createdAt: T0,
+          acceptedAt: T0,
+        })
+        .run();
+      setAccountTimeZone(w.ctx, w.user(sender), zone);
       const ids = ['a', 'b', 'c'].map(
-        (k) =>
-          releaseBottle(w.ctx, w.user('ada'), releaseInput(w.user('bo').id, key() + k)).bottleId,
+        (k) => releaseBottle(w.ctx, w.user(sender), releaseInput(bo, key() + k)).bottleId,
       );
-      const bottle = w.db.select().from(t.bottles).where(eq(t.bottles.id, ids[0]!)).get()!;
-      const nights = journeyNights(w.ctx, bottle, T0, T0 + 12 * DAY);
-      expect(nights.length).toBeGreaterThanOrEqual(11);
-      for (let i = 0; i < nights.length; i++) {
-        const nw = nights[i]!;
-        expect(nw.endsAt - nw.startsAt).toBe(12 * HOUR);
-        expect(phaseAt(nw.startsAt, zone)).toBe('night');
-        expect(phaseAt(nw.startsAt - 1, zone)).toBe('day');
-        expect(phaseAt(nw.endsAt, zone)).toBe('day');
-        // No night skipped or doubled across the date line.
-        if (i > 0) expect(nw.startsAt - nights[i - 1]!.startsAt).toBe(DAY);
-      }
-      expect(new Set(nights.map((x) => x.key)).size).toBe(nights.length);
-
       w.clock.set(T0 + 12 * DAY);
       processRiskDecisions(w.ctx, w.clock.now());
-      const decisions = w.db.select().from(t.riskDecisions).all();
-      expect(decisions.length).toBeGreaterThan(0);
-      for (const d of decisions) {
-        expect(phaseAt(d.decisionAt, zone)).toBe('night');
-        const storm = stormForNight(
-          d.bottleId,
-          nightWindow(d.nightKey, zone),
-          RISK_POLICY_VERSION,
-        )!;
-        expect(storm.decisionAt).toBe(d.decisionAt);
+      // One roll per local night, at 19:00, across the date line, never two within 24 hours.
+      // (Kiritimati is already in its night at T0, when the clock starts: that counts as
+      // entering it, so the dusk 17 hours later gets no roll, and 19:00 rolls resume after.)
+      const rolls = w.db.select().from(t.weatherRolls).orderBy(t.weatherRolls.rolledAt).all();
+      expect(rolls.length).toBeGreaterThanOrEqual(10);
+      for (let i = 0; i < rolls.length; i++) {
+        const r = rolls[i]!;
+        expect(r.zone).toBe(zone);
+        expect(r.rolledAt).toBe(i === 0 && phaseAt(T0, zone) === 'night' ? T0 : r.nightStartsAt);
+        expect(r.nightEndsAt - r.nightStartsAt).toBe(12 * HOUR);
+        expect(phaseAt(r.nightStartsAt, zone)).toBe('night');
+        expect(phaseAt(r.nightStartsAt - 1, zone)).toBe('day');
+        expect(phaseAt(r.nightEndsAt, zone)).toBe('day');
+        if (i > 1) expect(r.rolledAt - rolls[i - 1]!.rolledAt).toBe(DAY);
+        if (i > 0) expect(r.rolledAt - rolls[i - 1]!.rolledAt).toBeGreaterThanOrEqual(DAY);
       }
+      // Every storm decision sits inside its account storm, in the local night, one per bottle.
+      const storms = rolls.filter((r) => r.outcome === 'storm' && r.decisionAt! <= w.clock.now());
+      expect(storms.length).toBeGreaterThan(0);
+      const decisions = w.db.select().from(t.riskDecisions).all();
+      for (const d of decisions) {
+        const roll = storms.find((r) => r.id === d.nightKey)!;
+        expect(d.decisionAt).toBe(roll.decisionAt);
+        expect(d.policyVersion).toBe(RISK_POLICY_VERSION);
+        expect(phaseAt(d.decisionAt, zone)).toBe('night');
+      }
+      for (const r of storms)
+        expect(decisions.filter((d) => d.nightKey === r.id).length).toBeLessThanOrEqual(ids.length);
     });
   }
 });

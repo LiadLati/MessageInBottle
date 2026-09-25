@@ -6,6 +6,7 @@ import { CHART_BOUNDS } from '../db/seed-data.js';
 import { buildGraph, shoreNodeId, type RouteGraph } from '../domain/routing.js';
 import { badRequest, notFound } from '../lib/errors.js';
 import type { AppContext } from './context.js';
+import { harbourChanged } from './weather.js';
 
 // Graphs are immutable once written, so each (database, version) pair is built once. The active
 // version is still read per call: it is one row and it changes when a new graph is seeded.
@@ -106,4 +107,6 @@ export function setUserShore(ctx: AppContext, userId: string, shoreId: string): 
   if (shoreNodeId(graph, shoreId) === null)
     throw badRequest('shore_unsupported', 'this shore is not connected to the sea routes');
   ctx.db.update(t.users).set({ shoreId }).where(eq(t.users.id, userId)).run();
+  // Before any device report, the harbour sets the account's map clock.
+  harbourChanged(ctx, userId);
 }
