@@ -2770,7 +2770,7 @@ button.avatar {
 .map-storm-label {
   position: absolute;
   left: 50%;
-  bottom: calc(var(--nav-height, 72px) + 132px);
+  top: calc(var(--header-pad-top, 0px) + 196px);
   transform: translateX(-50%);
   display: inline-flex;
   align-items: center;

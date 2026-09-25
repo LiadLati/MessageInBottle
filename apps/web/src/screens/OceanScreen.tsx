@@ -431,19 +431,19 @@ export function OceanScreen({
           paused={viewing !== null}
           fitKey={fitKey}
         />
+        {/* One storm for the whole map: the account's weather, not a storm per bottle. */}
+        {mapStorm && !isPublic ? (
+          <div className="map-storm" role="status" aria-live="polite">
+            <span className="map-storm-sky" aria-hidden />
+            <span className="map-storm-label">
+              <Icon name="storm" size={14} />
+              {stormUntil
+                ? `A storm is passing over your sea until ${formatTime(new Date(stormUntil).toISOString())}`
+                : 'A storm is passing over your sea'}
+            </span>
+          </div>
+        ) : null}
       </div>
-      {/* One storm for the whole map: the account's weather, not a storm per bottle. */}
-      {mapStorm && !isPublic ? (
-        <div className="map-storm" role="status" aria-live="polite">
-          <span className="map-storm-sky" aria-hidden />
-          <span className="map-storm-label">
-            <Icon name="storm" size={14} />
-            {stormUntil
-              ? `A storm is passing over your sea until ${formatTime(new Date(stormUntil).toISOString())}`
-              : 'A storm is passing over your sea'}
-          </span>
-        </div>
-      ) : null}
       <div className="scrim scrim-map" />
       <div className="scrim-map-header" />
       <header className="world-header">
