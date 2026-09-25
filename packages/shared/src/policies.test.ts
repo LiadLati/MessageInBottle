@@ -24,14 +24,14 @@ const everything = PUBLISHED_DOCUMENTS.map((d) => `${d.title}\n${d.summary}\n${t
 );
 
 describe('the published documents', () => {
-  it('are released English v1.0 documents with an effective statement', () => {
+  it('are released English v1.1 documents with an effective statement', () => {
     expect(POLICY_DOCUMENTS.map((d) => d.id)).toEqual([...POLICY_IDS]);
     expect(validatePolicySet(PUBLISHED_DOCUMENTS)).toEqual([]);
     expect(policySetStatus()).toBe('released');
     for (const d of PUBLISHED_DOCUMENTS) {
       expect(d.status).toBe('released');
       expect(d.version).toBe(POLICY_VERSION);
-      expect(POLICY_VERSION).toBe('1.0');
+      expect(POLICY_VERSION).toBe('1.1');
       expect(d.effective).toBe(POLICY_EFFECTIVE);
       expect(d.effective).toBe('Effective when published in SeaYou');
       expect(d.lang).toBe('en');
@@ -40,9 +40,9 @@ describe('the published documents', () => {
       expect(d.slug).toMatch(/^[a-z-]+$/);
     }
     expect(currentPolicyVersions()).toEqual({
-      terms: '1.0',
-      guidelines: '1.0',
-      privacy: '1.0',
+      terms: '1.1',
+      guidelines: '1.1',
+      privacy: '1.1',
     });
     expect(publishedDocumentBySlug('child-safety')).toBe(CHILD_SAFETY_STANDARDS);
     expect(publishedDocumentBySlug('nope')).toBeUndefined();
@@ -155,7 +155,18 @@ describe('the published documents', () => {
     expect(terms).toMatch(/appeal the decision, or continue without appealing/i);
     expect(terms).toMatch(/permanently giving up the appeal/i);
     expect(terms).toMatch(/without choosing does not give up anything/i);
-    expect(terms).toMatch(/can be appealed once/i);
+    expect(terms).toMatch(/can be appealed once, in the 30 days after the decision/i);
+    expect(terms).toMatch(/appeal period has expired, and it is final/i);
+    expect(terms).toMatch(/cannot reopen or reverse it; only your appeal can change it/i);
+    expect(terms).toMatch(/never a decision, sanction or ban/i);
+    expect(terms).toMatch(/A suspension ends automatically/i);
+    expect(terms).toMatch(/told only that delivery is unavailable/i);
+    expect(terms).toMatch(/Its friendships are kept/i);
+    expect(terms).toMatch(
+      /This email is already registered|already has an account, you are told so/i,
+    );
+    expect(terms).toMatch(/never says whether an account exists/i);
+    expect(terms).toMatch(/expires after 30 minutes, works once/i);
     expect(terms).toMatch(/rejected is final/i);
     expect(terms).toMatch(/accepted withdraws the violation/i);
     expect(terms).toMatch(/recalculated immediately/i);
@@ -207,7 +218,15 @@ describe('the published documents', () => {
     expect(terms).toMatch(/72 hours/);
     expect(terms).toMatch(/one reading session/i);
     expect(terms).toMatch(/15 minutes/);
-    expect(terms).toMatch(/do not keep a copy/i);
+    // Product decision 12: one resumable reading, nothing permanent, report and block available.
+    expect(terms).toMatch(/never added to their received letters, archive or history/i);
+    expect(terms).toMatch(/creates no friendship and no way to contact the writer/i);
+    expect(terms).toMatch(/report the letter, or block its writer/i);
+    // Product decision 8: the shore holds 100, a full shore refuses without a hidden queue.
+    expect(terms).toMatch(/at most 100 bottles at a time/i);
+    expect(terms).toMatch(/not released and nothing sets sail/i);
+    expect(terms).toMatch(/told once that it is full/i);
+    expect(terms).toMatch(/never re-runs its outcome/i);
     expect(terms).toMatch(/sinks is not shown in the public ocean/i);
     expect(terms).toMatch(/can be delayed/i);
   });
@@ -218,18 +237,45 @@ describe('the published documents', () => {
       expect(body).toMatch(/public-ocean/i);
     }
     expect(textOf(TERMS_OF_USE)).toMatch(/cannot reach anything already read, copied/i);
+    // Product decision 10: unblocking restores nothing and reveals nothing.
+    for (const body of [textOf(TERMS_OF_USE), textOf(COMMUNITY_RULES)]) {
+      expect(body).toMatch(/Settings → Blocked users/);
+      expect(body).toMatch(/no friendship|does not restore a friendship/i);
+      expect(body).toMatch(/reveals nothing/i);
+    }
   });
 
   it('describe evidence retention exactly as it is implemented', () => {
     const privacy = textOf(PRIVACY_POLICY);
-    expect(privacy).toMatch(/redacted seven days after the case becomes final/i);
-    expect(privacy).toMatch(/report is rejected/i);
-    expect(privacy).toMatch(/explicitly gives up the appeal/i);
-    expect(privacy).toMatch(/appeal they submitted has been decided/i);
-    expect(privacy).toMatch(/while an appeal is pending, the case is not final/i);
+    // Product decision 5: 30 days from the decision, or until a timely appeal is decided.
+    expect(privacy).toMatch(/kept for 30 days from the reviewer’s decision/i);
+    expect(privacy).toMatch(/appeals in time, it is kept until the appeal is decided/i);
+    expect(privacy).toMatch(/redacted at whichever is later/i);
+    expect(privacy).toMatch(/not kept longer just because the sender never opened the decision/i);
+    expect(privacy).toMatch(/translation and content notes/i);
+    expect(privacy).not.toMatch(/seven days/i);
     expect(privacy).toMatch(/upheld violations do not expire/i);
-    expect(privacy).toMatch(/documented legal or immediate child-safety hold/i);
+    expect(privacy).toMatch(
+      /documented legal or child-safety hold, which records who placed it, when and why/i,
+    );
     expect(privacy).toMatch(/Releasing the hold returns the case to the ordinary calculation/i);
+  });
+
+  it('describe notifications, time zone and deletion as implemented (decisions 6, 7, 9)', () => {
+    const privacy = textOf(PRIVACY_POLICY);
+    expect(privacy).toMatch(
+      /never deleted automatically; marking them read only clears the badge/i,
+    );
+    expect(privacy).toMatch(/kept for up to 90 days/i);
+    expect(privacy).toMatch(/no location permission and no GPS/i);
+    expect(privacy).toMatch(/zone of your chosen harbour is used, and otherwise UTC/i);
+    expect(privacy).toMatch(/never changes a journey’s duration or arrival/i);
+    expect(privacy).toMatch(/can move storm nights/i);
+    expect(privacy).toMatch(/“Deleted user”/);
+    expect(privacy).toMatch(/text of every letter you wrote is erased/i);
+    expect(privacy).toMatch(/letters you received are removed/i);
+    expect(privacy).toMatch(/password-reset link is revoked/i);
+    expect(privacy).toMatch(/single-use link that expires after 30 minutes/i);
   });
 
   it('describe browser storage exactly, and claim no more', () => {
@@ -292,14 +338,18 @@ describe('the published documents', () => {
     // The enforcement it describes is the one the admin console can actually apply.
     expect(cs).toMatch(/critical child-safety violation/i);
     expect(cs).toMatch(/permanent ban applied immediately/i);
-    expect(cs).toMatch(
-      /requires an administrator, a recorded reason and an explicit confirmation/i,
-    );
+    expect(cs).toMatch(/requires an administrator, a written reason and an explicit confirmation/i);
+    expect(cs).toMatch(/bans the account permanently and immediately/i);
+    expect(cs).toMatch(/three decisions/i);
+    expect(cs).toMatch(/marked urgent and placed at the top/i);
+    expect(cs).toMatch(/never held back waiting for automated review/i);
+    expect(cs).toMatch(/cannot reopen or reverse it/i);
+    expect(cs).toMatch(/escalated to critical, and had not been appealed, gets one new appeal/i);
     expect(cs).toMatch(/Automated review can never apply it/i);
     expect(cs).toMatch(/single appeal opportunity still applies/i);
     // Retention and the hold.
-    expect(cs).toMatch(/seven days after the case becomes final/i);
-    expect(cs).toMatch(/documented legal or immediate child-safety hold/i);
+    expect(cs).toMatch(/kept for 30 days from the decision, or until a timely appeal is decided/i);
+    expect(cs).toMatch(/documented legal or child-safety hold/i);
     // It is published but never part of what a person accepts.
     expect(POLICY_IDS).not.toContain('child-safety' as never);
   });

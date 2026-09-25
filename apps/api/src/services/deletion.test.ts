@@ -193,7 +193,7 @@ describe('deleting an account does what the Privacy Policy says', () => {
     // moderation records both survive by design.
     expect(privacy).not.toMatch(/all (of )?your data (is|will be) (permanently )?deleted/i);
     expect(privacy).not.toMatch(/every associated record/i);
-    expect(privacy).toMatch(/Letters other people wrote to you are not deleted/i);
-    expect(privacy).toMatch(/Minimal anonymised journey and audit metadata remains/i);
+    expect(privacy).toMatch(/Letters other people wrote to you stay in their own Sent history/i);
+    expect(privacy).toMatch(/minimal anonymous audit records/i);
   });
 });

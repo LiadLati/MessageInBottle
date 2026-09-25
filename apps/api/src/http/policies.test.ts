@@ -40,7 +40,7 @@ describe('the documents', () => {
     // Everything with a public page, the reference documents included.
     expect(body.documents.map((d) => d.id)).toEqual(PUBLISHED_DOCUMENTS.map((d) => d.id));
     for (const d of body.documents) {
-      expect(d.version).toBe('1.0');
+      expect(d.version).toBe('1.1');
       expect(d.effective).toBe('Effective when published in SeaYou');
     }
 
@@ -223,7 +223,7 @@ describe('existing accounts', () => {
     // as an account that accepted 1.0 would look after 1.1 shipped.
     w.db
       .update(t.policyAcceptances)
-      .set({ version: 'older' })
+      .set({ version: '1.0' })
       .where(
         and(eq(t.policyAcceptances.document, 'privacy'), eq(t.policyAcceptances.userId, ada.id)),
       )
@@ -232,7 +232,7 @@ describe('existing accounts', () => {
       policies: { required: boolean; documents: Array<{ id: string; acceptedVersion: string }> };
     };
     expect(me.policies.required).toBe(true);
-    expect(me.policies.documents.find((d) => d.id === 'privacy')!.acceptedVersion).toBe('older');
+    expect(me.policies.documents.find((d) => d.id === 'privacy')!.acceptedVersion).toBe('1.0');
     expect((await app.request('/api/chart', bearer(ada.token))).status).toBe(403);
 
     w.realClock.advance(5000);
