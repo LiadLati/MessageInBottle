@@ -191,6 +191,10 @@ Proposed: mutual friend-request approval, exact username or invitation-link disc
 
 Check eligibility at release, rescue, and arrival. A blocked sender must never bypass the block through a stranded bottle or public lookup.
 
+**Unblock — decided (product decision 10):** Settings → Blocked users lists only the blocks a person placed; Unblock asks for confirmation. It permits future interaction and public-ocean encounters, restores no removed, cancelled or hidden letter, restores no friendship (a new request is needed) and reveals nothing about the blocked period. A finder may block the anonymous writer during the one reading; that entry names the bottle, never the writer, and is undone by the bottle.
+
+**Suspended and banned accounts — decided (product decision 14):** hidden from friend lists and recipient choice (friendships kept); no incoming or outgoing bottles; bottles travelling to them are cancelled once with capacity released and the sender told only “Delivery unavailable”; no arrival notice reaches them. A locked standing screen (reason, end time, countdown, ban warning) permits only standing, a timely appeal, Support, deletion and sign-out, and the account restores itself when the suspension ends. A ban shows the same shell with no countdown and no inbox.
+
 Proposed: if blocking or account restrictions invalidate an in-flight delivery, cancel it with a generic “Delivery unavailable” status. Do not notify the sender that they were blocked and do not publish the bottle as a fallback. Remove any active public listing. Exact behavior for unfriending alone, account deletion, and already-delivered unread letters requires confirmation. Safety restrictions take precedence over the journey fiction.
 
 ### 8.3 Capacity
@@ -206,7 +210,7 @@ Proposed reservation model:
 - Reducing capacity does not evict accepted bottles; new releases wait until capacity is available.
 - On full capacity, reject the new release and preserve the draft. Do not create an undisclosed delivery queue.
 
-Capacity value, sender-specific limits, and reservation behavior need approval. Technical anti-spam rate limits remain necessary and must not be confused with a new daily product quota.
+**Decided (product decision 8):** each account's shore holds **100** concurrent bottles — travelling to it plus delivered and unread (`MIB_SHORE_CAPACITY`). The reservation is atomic with release and transactional under concurrency. A full shore refuses the release without creating a journey; the draft is kept and the sender sees only “This friend's shore is full right now. Your letter is kept as a draft; try again later.” The owner is notified once per full episode, and again only after the shore drops below 100 and fills again. A slot is released exactly once on opening, cancellation, loss, moderation withdrawal or any other terminal state. There is no hidden queue and no sender-specific limit; technical anti-spam rate limits remain separate.
 
 ## 9. Storms, loss, and public expiry
 
@@ -282,6 +286,8 @@ Decided 2026-09-19 (§9.3): expiry is permanent — the bottle never resumes and
 
 Public read access must end after rescue, discard, expiry, cancellation, or moderation restriction. This cannot retract screenshots or copies already made. Proposed: authenticated eligible visitors only, no public search-engine indexing, no retained copy for visitors. Concurrent visitors may read while available; only one valid rescue or discard can commit. Whether reading should temporarily reserve a bottle is open.
 
+**Device time zone — decided (product decision 9):** the app reads the IANA zone from `Intl` (no GPS), validates it, sends it on start and whenever it changes, and displays times in it, falling back to the harbour's zone and then UTC. The zone never affects duration, ETA, arrival, outcome, suspension, appeal, retention or rate limits, and changing the clock or zone never speeds up, delays or rerolls a journey. **Reported conflict:** storm-risk policy v3 above counts storm nights in the sender's account zone, so a zone change can move *future* storm nights of new bottles (never past ones; at most four changes a day). This was left unchanged pending an owner decision on a v4 risk policy (`docs/REMEDIATION.md` D7).
+
 ## 10. Letters, typography, aging, and metadata
 
 ### 10.1 Content and fonts
@@ -296,6 +302,10 @@ Public read access must end after rescue, discard, expiry, cancellation, or mode
 - Support line breaks, text selection where appropriate, screen readers, scalable text, RTL layout, and a fallback font for unsupported scripts. Review font licenses before distribution.
 
 Safety removal/redaction is distinct from user editing: immutability must not prevent content withdrawal or moderation.
+
+**Direction controls — decided (product decision 11):** a letter containing the invisible direction-control characters U+202A–U+202E or U+2066–U+2069 is refused (not stripped) with a clear message, on the client and authoritatively on the server. Hebrew, Arabic, English, emoji (including joiners), LRM/RLM/ALM, ZWNJ and punctuation are unaffected. Moderation views still reveal any controls in stored letters.
+
+**Finder — decided, final (product decision 12):** one reading session, resumable for 15 minutes; never added to Received, archive or history; no friendship or access to the writer; reporting and blocking stay available during the session.
 
 ### 10.2 Visual aging
 
@@ -419,6 +429,8 @@ Claude Design should provide screen layouts, storyboards, assets/layers, anchors
 | Arrival/read receipt | Sender | Arrival: the existing *reached its destination* notice. A notification about whether the recipient opened the letter was considered and rejected (2026-09-19). |
 | Delivery invalidated | Sender | Generic message; do not expose a block |
 
+**Lifetime (product decision 6):** user-visible notifications are never deleted automatically. Each keeps its type, related item, time and read state; marking read only clears the badge, and the history is paginated. Operational data — delivery attempts, retries, worker state, provider errors — may be pruned after 90 days. Cleanup never deletes letters or journeys. A full shore produces one `shore_full` notice per episode.
+
 In-app events are required. Push delivery depends on platform and permission; the journey works without push permission. Hide letter excerpts on lock screens by default. Notification failure never rolls back arrival. Use event IDs, retry limits, and stale-event checks; notifications must not leak hidden incoming journeys.
 
 ## 15. MVP scope
@@ -455,7 +467,7 @@ Directed correspondence with conditional public exposure must not be advertised 
 ### 16.1 Documents and consent — implemented
 
 The Terms of Use, Community Rules, Privacy Policy and Child Safety Standards are published at
-version 1.0, in English, readable before registration and from account settings, and served as
+version 1.1 (a material change carrying the product decisions of 2026-09), in English, readable before registration and from account settings, and served as
 public unauthenticated HTML at `/legal/*` and `/support` for store-listing use. Registration
 requires two separate, initially unchecked decisions — agreeing to the Terms of Use and
 Community Rules, and confirming the Privacy Policy has been read — validated by the server,
@@ -479,9 +491,12 @@ correspondence in both directions and also prevents the two accounts encounterin
 through public-ocean interactions.
 
 A locally run model reviews each case and returns a validated accept / reject / uncertain with
-its reasoning, a translation beside the original, and, when unsure, why. It holds no database or
-administrative power: its verdict is a recommendation, uncertainty always goes to a person, and
-`MIB_AI_AUTO_DECIDE` remains off. It has no path at all to the critical child-safety action. If
+its reasoning, a translation beside the original, and, when unsure, why. It sees only reported
+letters and holds no database or administrative power: its verdict is a recommendation and it
+never decides, sanctions or bans (`MIB_AI_AUTO_DECIDE` was removed; `true` stops the API). If it
+flags a possible child-safety issue the case is marked urgent and listed first with the
+recommendation, reasoning, uncertainty and translation; a case is visible to administrators
+before the model answers. It has no path at all to the critical child-safety action. If
 an external provider is ever used, the Privacy Policy and the store Data Safety declaration are
 updated before any report content is sent to it.
 
@@ -495,9 +510,17 @@ it permanently.
 **Upheld violations never expire.** Serving a suspension does not remove one from the count; the
 only thing that does is an accepted appeal. Rejected and undecided reports never count.
 
-A confirmed critical child-safety violation bans immediately, without the ladder. It requires an
-administrator, a mandatory written reason and an explicit confirmation, and records the
-administrator, the timestamp, the classification and the action in the audit trail.
+The administrator makes one of three decisions (product decision 2): reject; uphold an ordinary
+violation; or confirm a critical child-safety violation, which bans immediately, without the
+ladder, and withdraws the letter. Each requires a written reason; the critical one also a strong
+confirmation stating that it bans permanently and immediately, and records the administrator,
+the timestamp, the classification, the reason and the action in the audit trail. Escalating an
+ordinary violation that was never appealed (waived, lapsed or still open) to critical opens one
+new 30-day appeal.
+
+**Finality (product decision 1):** one administrator decides; there is no second approval and no
+revoke, reopen or reverse. Only the sender's appeal changes a decision. The console shows the
+consequence before every confirmation.
 
 ### 16.4 The decision notice and the single appeal — implemented
 
@@ -508,7 +531,9 @@ offers **Appeal decision** and **Continue without appealing**; continuing asks a
 
 Only confirming **Skip appeal** waives the appeal, and it is permanent. Closing, refreshing or
 leaving SeaYou without choosing waives nothing: the unresolved notice returns on the next
-eligible visit. Each violation may be appealed once; a rejected appeal is final inside SeaYou;
+eligible visit. Each violation may be appealed once, within **30 days of the decision** measured
+on server time; afterwards the notice shows the decision and says the appeal period has
+expired, with a single acknowledgement. A rejected appeal is final inside SeaYou;
 an accepted appeal revokes the violation and recalculates standing immediately. Presentation,
 waiver and appeal are server-authoritative, transactional, idempotent and audit logged.
 
@@ -522,18 +547,18 @@ themselves — ten an hour and forty a day — with per-address windows on top. 
 letter already reported writes nothing and costs nothing, and reading one's standing, answering
 a decision notice and appealing carry no limit at all.
 
-A case's content evidence is redacted **seven days after the case becomes final**, automatically
-and idempotently. A case is final when the report is rejected, when an upheld sender explicitly
-waives the appeal, or when a submitted appeal is decided. It is not final while the report is
-undecided, while the sender has not yet answered the decision notice, or while an appeal is
-pending. Redaction clears the moderation copy of the letter and the reporters' explanations, and
+A case's content evidence — the copied letter, the reporters' explanations and the AI
+translation and notes — is kept **30 days from the human decision** (product decision 5), the
+same window as the appeal, and a timely appeal keeps it until the appeal is decided; it is
+redactable at the later of the two, automatically and idempotently. An undecided report keeps its
+evidence; an unopened decision notice does not extend it. Redaction clears that evidence, and
 preserves the case identity and deduplication, the decision and its reason, the administrator,
 the decision and appeal timestamps, the violation and enforcement count, the report relationship
 needed for abuse prevention, and the account's standing history — because upheld violations do
 not expire.
 
-Evidence is kept beyond seven days only under a documented legal or immediate child-safety hold,
-which records the reason, who placed it and when; releasing it returns the case to the ordinary
+Evidence is kept longer only under a documented legal or child-safety hold, which records the
+reason, who placed it and when; releasing it returns the case to the ordinary
 calculation. There is no undocumented path to indefinite retention. The process supports a
 dry-run plan and a safe apply (`retention:plan`, `-- --apply`).
 
@@ -674,12 +699,12 @@ This roadmap is a plan only. The current task ends with the updated specificatio
 
 | ID | Decision | Recommendation or clarification |
 | --- | --- | --- |
-| D01 | Travel speed and duration | Tie travel to route length; decide range. Same-shore behaviour decided 2026-09-19: immediate delivery (§6.3). No approved duration yet. |
+| D01 | Travel speed and duration | **Decided (product decision 15):** keep the current constants (`MIB_MS_PER_CHART_UNIT`, `MIB_MIN_JOURNEY_MS`); same-harbour delivery stays immediate; device time has no effect. No retune. |
 | D02 | Fate after three public days | **Decided 2026-09-19:** permanent removal after exactly 72 hours from the loss; no resumption (§9.3). |
 | D03 | Public identity fields and participant access | Hide recipient/destination; propose excluding sender and recipient from discovery interactions. Decide sender attribution. |
 | D04 | Completion and retention | Propose private received archive and visual recycling; user confirmed only that opening ends the journey. Decide sender copy after loss. |
 | D05 | Unread timing and expiration | Set notification interval; separately decide whether unopened bottles ever expire. |
-| D06 | Capacity and anti-spam | Set slot count, reservations, release rules, and technical limits without reinstating a daily product quota. |
+| D06 | Capacity and anti-spam | **Decided (product decision 8):** 100 concurrent bottles per shore (travelling + delivered-unread), atomic reservation, refusal without a queue, one full notice per episode (§8.3). |
 | D07 | Friends and changing eligibility | Confirm mutual approval, discovery method, unfriending behavior, and in-flight cancellation policy. |
 | D08 | Risk model | **Decided 2026-09-19** as risk policy v1 (§9.3): 25 % storm nights, 1 % loss per eligible decision, five-decision cap, internal progress protection, 75/25 adrift/sunk. Rescue risk and repeat stranding remain out of scope. |
 | D09 | Shore catalog | Confirm nearest-connected-coast rule, naming, supported passages, and shore changes during transit. |

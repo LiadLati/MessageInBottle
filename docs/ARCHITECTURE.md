@@ -263,6 +263,27 @@ and the new `risk_decisions` table (one row per bottle per storm night, unique o
   idempotency key replays the same delivered bottle. No sea journey, storm risk, reminder or
   separate opening rule exists for it, and no notification about the recipient opening it.
 
+## Product decisions: capacity, notifications, blocks, letters and time zone
+
+- **Shore capacity** is 100 bottles per recipient account (`MIB_SHORE_CAPACITY`), counted as
+  `capacity_reservations` in state `held` for that recipient — travelling plus delivered-unread —
+  inside the release transaction, so concurrent releases cannot overfill it. A full shore
+  refuses with `shore_full` and creates nothing. `users.shore_full_since` marks a full episode:
+  set with one `shore_full` notification, cleared when `releaseCapacityOnce` frees a slot.
+- **Notifications** are user history and are never pruned; `notificationPage` pages them with a
+  `createdAt.rowid` cursor and returns the unread count. `services/housekeeping.ts` prunes only
+  operational data (worker retry state older than 90 days).
+- **Blocks and unblocks.** `listBlocked` shows only blocks the caller placed. `unblockUser`
+  removes the block and any friendship row, restoring nothing. A finder's block of an anonymous
+  writer stores `blocks.found_bottle_id` and is listed and undone by that bottle only.
+- **Direction controls.** `validateLetterText` rejects U+202A–U+202E and U+2066–U+2069 on client
+  and server (`letter_direction_controls`); other invisible characters used by real RTL and
+  emoji text stay allowed.
+- **Time zone.** The web app sends a validated IANA zone on start and resume
+  (`packages/shared/src/timezone.ts`); display falls back to the harbour's nautical zone, then
+  UTC. Journey duration, arrival and every deadline ignore it; storm-risk policy v3 still counts
+  nights in the account zone (the reported conflict, `docs/REMEDIATION.md` D7).
+
 ## Notifications inbox and the My Shore badge
 
 - **Events.** Four approved events, each one row per account per bottle under its own dedupe
@@ -309,10 +330,12 @@ and the new `risk_decisions` table (one row per bottle per storm night, unique o
   plus a required confirmation, rate-limited per address, reusing `login` and the same deletion
   service as SeaYou.
 - **Deletion.** `services/deletion.ts` is one transaction and is idempotent. It revokes sessions,
-  clears identifiers, drops friendships, blocks, notifications and idempotency records, cancels
-  in-flight letters (releasing the harbour reservation, recording a `cancelled` event and
-  clearing the text), keeps delivered letters with their recipient under the name
-  "Deleted account", and leaves moderation evidence to `services/retention.ts`. The `users` row
+  clears identifiers and preferences, drops friendships, blocks, notifications, acceptances and
+  idempotency records, cancels in-flight letters (releasing each reservation once and recording
+  a `cancelled` event), erases the text of every letter the account wrote unless its case has an
+  active hold, hides deleted authors' letters from recipients (`bottles.ts` `deletedSenders`),
+  shows the account as "Deleted user" in other people's Sent history, and leaves moderation
+  evidence to `services/retention.ts`. The `users` row
   survives anonymised with `deleted_at` set, because letters other people hold reference it.
   `login` and `resolveSession` already refuse a non-active account, so the status change alone
   ends access.
@@ -343,14 +366,31 @@ and the new `risk_decisions` table (one row per bottle per storm night, unique o
   it produces, never the count. `severity = 'critical'` bans on its own: `decideCaseCritical`
   takes a required `AuthUser`, so the review worker (which passes `null`) has no path to it, and
   it records the administrator, the reason, the classification and the time.
-- **Evidence retention.** `services/retention.ts` redacts a case's content evidence seven days
-  after `finalityOf` says it is final — rejected, waived, or appeal decided — and is enabled by
+- **Evidence retention.** `services/retention.ts` redacts a case's content evidence 30 days
+  after the human decision — the appeal window, anchored at the later of the decision and a
+  reopened window (`violations.appeal_window_starts_at`) — or when a timely appeal is decided,
+  whichever is later. A pending appeal holds it; an unopened notice does not. It is enabled by
   default. `planRetention` is a pure dry run; `applyRetention` re-checks every case inside the
   transaction, so an appeal or hold that arrived since the plan wins. A documented `legal` or
   `child_safety` hold outranks the timer and is the only way past it; releasing it returns the
-  case to the ordinary calculation. Redaction clears the evidence copy and the reporters'
-  explanations only: the decision, the violation and the audit trail outlive them, because an
+  case to the ordinary calculation. Redaction clears the evidence copy, the reporters'
+  explanations and the AI translation, reason and uncertainty only: the decision, the violation and the audit trail outlive them, because an
   upheld violation does.
+- **Finality and the three decisions.** An administrator rejects, upholds an ordinary
+  violation, or confirms a critical child-safety violation; each needs a written reason, and
+  none can be revoked or reopened (there is no route for it). Escalating an unappealed ordinary
+  violation to critical restarts its 30-day appeal window once (`appeal_reopened` audit row).
+  Appeals close 30 days after the decision on the real clock (`appealDeadline`).
+- **Automated review recommends only.** `services/ai-review.ts` stores a verdict, reasoning,
+  uncertainty, translation and a `childSafety` flag; a flag sets `moderation_cases.urgent_at`
+  once, which sorts the case first in `listCases`. Cases are listed before the model answers.
+  `MIB_AI_AUTO_DECIDE=true` is a configuration error.
+- **Restricted accounts.** `services/restriction.ts`: when a suspension or ban takes effect,
+  bottles travelling to the account are cancelled with capacity released once and the sender
+  told only "Delivery unavailable"; `commitArrival` refuses delivery to a restricted recipient;
+  restricted accounts vanish from friend lists and requests while friendships stay stored; the
+  notification inbox is closed to them (`requireGoodStanding`). Standing is derived from the
+  violations and the real clock, so a suspension ends by itself.
 - **Audit.** `moderation_audit` is append-only and written inside the transaction of the action
   it describes, so there is no path that changes what a person may do without leaving a row —
   and the trail survives the evidence it describes being redacted.

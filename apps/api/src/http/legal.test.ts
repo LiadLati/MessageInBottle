@@ -82,8 +82,10 @@ describe('the public account-deletion page', () => {
     const html = await res.text();
     expect(html).toContain('<h1>Delete your account</h1>');
     expect(html).toMatch(/every signed-in session ends at once/i);
-    expect(html).toMatch(/letters of yours that are still at sea/i);
-    expect(html).toMatch(/still open or still in force/i);
+    expect(html).toMatch(/text of every letter you wrote is erased/i);
+    expect(html).toMatch(/letters still at sea or adrift in the public ocean are cancelled/i);
+    expect(html).toMatch(/“Deleted user”/);
+    expect(html).toMatch(/30-day retention period/i);
     expect(html).toContain('name="username"');
     expect(html).toContain('type="password"');
     expect(html).toContain('name="confirm"');

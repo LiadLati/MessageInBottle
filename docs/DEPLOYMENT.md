@@ -2,7 +2,8 @@
 
 What a SeaYou deployment must provide. It is provider-neutral: any Linux host, VM or container
 platform that can run one Node 22 process with a persistent disk satisfies it. **Choosing the
-provider, the domain and the mail service are open decisions** (see the end of this file).
+provider and the domain are open decisions** (see the end of this file). Password-reset mail goes
+through Gmail from `seayou.support@gmail.com` (section 2a).
 
 ## 1. The artefact
 
@@ -26,10 +27,46 @@ CI proves the artefact on every pull request (`apps/api/scripts/smoke-artefact.m
 | `MIB_DEV_MODE` | Unset or `false`. `true` is refused by the compiled server. |
 | `MIB_TRUST_PROXY` | `true` behind the reverse proxy below; then bind the API to `127.0.0.1` so nothing can reach it except through the proxy. |
 | `MIB_TRUSTED_PROXY_HOPS` | Number of proxies that append to `X-Forwarded-For` (default `1`). The client address is read that many entries from the right. |
-| `MIB_MAIL_PROVIDER`, `MIB_SMTP_*`, `MIB_MAIL_FROM` | `smtp` with real credentials, or accept that password recovery sends nothing (`disabled`, the default). |
+| `MIB_MAIL_PROVIDER`, `MIB_SMTP_*`, `MIB_MAIL_FROM` | `smtp` through Gmail (section 2a), or accept that password recovery sends nothing (`disabled`, the default). |
 | `MIB_SUPPORT_EMAIL` | The published support address (it appears in the Privacy Policy and Child Safety Standards). |
-| `MIB_AI_ENABLED` | `false` unless an Ollama-compatible model runs on infrastructure the operator controls. `MIB_AI_AUTO_DECIDE` must stay `false` (the server refuses `true` while the published documents say a person decides every case). |
+| `MIB_AI_ENABLED` | `false` unless an Ollama-compatible model runs on infrastructure the operator controls. The model only recommends; `MIB_AI_AUTO_DECIDE=true` stops the server (the setting was removed). |
+| `MIB_SHORE_CAPACITY` | Optional. Bottles one account's shore holds at once (default `100`, product decision 8). |
+| `MIB_RETENTION_DAYS` | Optional. Leave unset: evidence is redacted 30 days after the decision (or once a timely appeal is decided), matching the published Privacy Policy. |
 | `MIB_LOG_REQUESTS` | Request lines include ids in paths; decide a log retention period (below). |
+
+## 2a. Password-reset email through Gmail
+
+Reset links are sent from `seayou.support@gmail.com` over SMTP with a Gmail **App Password**.
+The App Password is a credential: it lives only in the host's secret store (or a git-ignored
+`.env` on the host). Never put it in code, tests, fixtures, logs, `.env.example` or Git.
+
+1. Sign in to the `seayou.support@gmail.com` Google Account → **Security** → turn on
+   **2-Step Verification** (App Passwords do not exist without it).
+2. **Security** → **2-Step Verification** → **App passwords** (or visit
+   `https://myaccount.google.com/apppasswords`). Create one named, for example, `SeaYou API`.
+   Google shows 16 characters once; copy them straight into the secret store, without spaces.
+3. Set the environment for the API process:
+
+   ```bash
+   MIB_MAIL_PROVIDER=smtp
+   MIB_SMTP_HOST=smtp.gmail.com
+   MIB_SMTP_PORT=465
+   MIB_SMTP_SECURE=true
+   MIB_SMTP_USER=seayou.support@gmail.com
+   MIB_SMTP_PASS=<the App Password, from the secret store>
+   MIB_MAIL_FROM="SeaYou <seayou.support@gmail.com>"
+   MIB_APP_URL=https://<your domain>
+   ```
+
+4. Restart the API, request a reset for an account you control, and check the message arrives
+   and its link opens `MIB_APP_URL`. Links expire after 30 minutes and work once; using one
+   revokes every session and every other reset link.
+5. To rotate: create a new App Password, update the secret, restart, then revoke the old one in
+   the Google Account. Revoke it immediately if it may have leaked.
+
+Automated tests never contact Gmail: `apps/api/src/http/smtp-reset.test.ts` runs the real SMTP
+adapter against an in-process fake server. The development outbox (`MIB_MAIL_PROVIDER=outbox`)
+exists only with `MIB_DEV_MODE=true` and only for a signed-in developer.
 
 ## 3. Exactly one API process
 
@@ -97,7 +134,14 @@ MIB_DATABASE_PATH=… node dist/grant-admin.js --email you@example.com --confirm
 
 1. Hosting provider and region.
 2. The public domain (sets `MIB_APP_URL`).
-3. SMTP provider and sender address, or launching without password recovery.
+3. Creating the Gmail App Password and storing it as a production secret (section 2a), with the
+   other production secrets.
 4. Backup schedule, off-host destination and retention period.
 5. Log destination and retention period.
 6. Who holds shell access to grant roles on the live host.
+7. Running the historical deletion backfill (`deletion:backfill`, dry run first, after a
+   backup) on the real database — owner-operated, never run by development work.
+8. Enabling GitHub branch protection so CI blocks merges.
+9. Store packaging and the Play Console Data Safety form (`docs/LEGAL_DOCUMENTS.md`).
+10. Tamper-evident storage for the moderation audit trail (unresolved: today it is readable and
+    exportable but not tamper-evident).
