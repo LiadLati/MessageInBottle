@@ -134,9 +134,12 @@ export type FriendsResponse = z.infer<typeof FriendsResponseSchema>;
 // Settings → Blocked users (product decision 10): the accounts this person has blocked, and
 // only those — never who has blocked them.
 export const BlockedUserSchema = z.object({
-  username: z.string(),
+  // Null for the anonymous writer of a bottle found adrift: the finder never learns who that
+  // is, so the entry is named, and undone, by the bottle instead (product decision 12).
+  username: z.string().nullable(),
   displayName: z.string(),
   blockedAt: z.string(),
+  foundBottleId: z.string().nullable(),
 });
 export const BlockedUsersResponseSchema = z.object({ blocked: z.array(BlockedUserSchema) });
 export type BlockedUsersResponse = z.infer<typeof BlockedUsersResponseSchema>;
@@ -602,13 +605,13 @@ export const AdminCaseDetailSchema = AdminCaseSummarySchema.extend({
       createdAt: z.string(),
     })
     .nullable(),
-  // Where this case stands in the seven-day evidence retention calculation, so an
+  // Where this case stands in the 30-day evidence retention calculation, so an
   // administrator can see why evidence is still here — or why it is about to go.
   retention: z.object({
     // The instant nothing could need the evidence any more; null while something still can.
     finalAt: z.string().nullable(),
     redactableAt: z.string().nullable(),
-    // Why it is being kept: 'notice_unresolved', 'appeal_pending', 'legal_hold', …
+    // Why it is being kept: 'appeal_pending', 'legal_hold', 'child_safety_hold', …
     hold: z.string().nullable(),
   }),
   // A documented legal or immediate child-safety hold, if one was placed.

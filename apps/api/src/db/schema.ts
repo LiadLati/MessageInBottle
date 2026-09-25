@@ -137,6 +137,9 @@ export const blocks = sqliteTable(
       .notNull()
       .references(() => users.id),
     createdAt: integer('created_at').notNull(),
+    // Set when a finder blocked the anonymous writer of a bottle found adrift (product decision
+    // 12): the finder never learns who that is, so their Blocked list names the bottle instead.
+    foundBottleId: text('found_bottle_id'),
   },
   (t) => [primaryKey({ columns: [t.blockerId, t.blockedId] })],
 );

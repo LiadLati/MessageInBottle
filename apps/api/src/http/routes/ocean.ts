@@ -5,6 +5,7 @@ import {
   listPublicOcean,
   openPublicBottle,
 } from '../../services/outcomes.js';
+import { blockFoundWriter } from '../../services/friends.js';
 import type { AppEnv } from '../app.js';
 import { requireAuth } from '../middleware/auth.js';
 import { requireGoodStanding } from '../middleware/admin.js';
@@ -37,6 +38,11 @@ export function oceanRoutes() {
   // Closing the reader ends the finder's access immediately.
   r.post('/public/:id/close', (c) => {
     closeReading(c.get('ctx'), c.get('user'), c.req.param('id'));
+    return c.body(null, 204);
+  });
+  // Blocking the writer from inside the reading, without ever learning who they are.
+  r.post('/public/:id/block', (c) => {
+    blockFoundWriter(c.get('ctx'), c.get('user').id, c.req.param('id'));
     return c.body(null, 204);
   });
   return r;

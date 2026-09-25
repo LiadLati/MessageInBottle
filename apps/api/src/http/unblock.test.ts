@@ -119,4 +119,51 @@ describe('blocked users and unblocking (product decision 10)', () => {
     expect((await call(ada.token, 'DELETE', '/friends/blocks/bo')).status).toBe(404);
     expect((await call(ada.token, 'DELETE', '/friends/blocks/nobody-at-all')).status).toBe(404);
   });
+
+  it('lets a finder block the writer during the reading without learning who it is', async () => {
+    const { w, app, bo, call } = await setup();
+    const cy = await loginAs(app, 'cy');
+    const bottleId = releaseBottle(
+      w.ctx,
+      w.user('bo'),
+      releaseInput(w.user('ada').id, key()),
+    ).bottleId;
+    devLoseBottle(w.ctx, w.user('bo'), bottleId, 'adrift');
+    // Not before the reading exists.
+    expect((await call(cy.token, 'POST', `/ocean/public/${bottleId}/block`)).status).toBe(404);
+    expect((await call(cy.token, 'POST', `/ocean/public/${bottleId}/open`)).status).toBe(200);
+    // Nobody but the finder can use the bottle to block its writer.
+    expect((await call(bo.token, 'POST', `/ocean/public/${bottleId}/block`)).status).toBe(404);
+    expect((await call(cy.token, 'POST', `/ocean/public/${bottleId}/block`)).status).toBe(204);
+
+    const list = await json<BlockedUsersResponse>(await call(cy.token, 'GET', '/friends/blocks'));
+    expect(list.blocked).toHaveLength(1);
+    expect(list.blocked[0]).toMatchObject({ username: null, foundBottleId: bottleId });
+    const writer = w.user('bo');
+    expect(JSON.stringify(list)).not.toContain(writer.id);
+    expect(JSON.stringify(list)).not.toContain(`"${writer.displayName}"`);
+    expect(JSON.stringify(list)).not.toContain('"bo"');
+    // The block works like any other: Bo's future drifting bottles never reach Cy.
+    const next = releaseBottle(w.ctx, w.user('bo'), releaseInput(w.user('ada').id, key())).bottleId;
+    devLoseBottle(w.ctx, w.user('bo'), next, 'adrift');
+    expect(listPublicOcean(w.ctx, w.user('cy')).map((b) => b.id)).not.toContain(next);
+    // Guessing names cannot confirm the writer: unblocking by name finds no such block.
+    expect((await call(cy.token, 'DELETE', '/friends/blocks/bo')).status).toBe(404);
+    expect((await call(cy.token, 'DELETE', `/friends/blocks/found/${bottleId}`)).status).toBe(204);
+    expect(listPublicOcean(w.ctx, w.user('cy')).map((b) => b.id)).toContain(next);
+  });
+
+  it('refuses a finder block after the reading has been closed', async () => {
+    const { w, app, call } = await setup();
+    const cy = await loginAs(app, 'cy');
+    const bottleId = releaseBottle(
+      w.ctx,
+      w.user('bo'),
+      releaseInput(w.user('ada').id, key()),
+    ).bottleId;
+    devLoseBottle(w.ctx, w.user('bo'), bottleId, 'adrift');
+    await call(cy.token, 'POST', `/ocean/public/${bottleId}/open`);
+    await call(cy.token, 'POST', `/ocean/public/${bottleId}/close`);
+    expect((await call(cy.token, 'POST', `/ocean/public/${bottleId}/block`)).status).toBe(404);
+  });
 });

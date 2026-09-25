@@ -6,6 +6,7 @@ import {
   denyFriendRequest,
   listBlocked,
   listFriends,
+  unblockFoundWriter,
   unblockUser,
   sendFriendRequest,
 } from '../../services/friends.js';
@@ -37,6 +38,10 @@ export function friendRoutes() {
   });
   // Settings → Blocked users (product decision 10).
   r.get('/blocks', (c) => c.json(listBlocked(c.get('ctx'), c.get('user').id)));
+  r.delete('/blocks/found/:bottleId', (c) => {
+    unblockFoundWriter(c.get('ctx'), c.get('user').id, c.req.param('bottleId'));
+    return c.body(null, 204);
+  });
   r.delete('/blocks/:username', (c) => {
     unblockUser(c.get('ctx'), c.get('user').id, c.req.param('username'));
     return c.body(null, 204);

@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "6f5b7cfb-a5db-4ad4-a155-c5fbcba130b5",
+  "id": "07f8a7b4-f6b6-444e-a35a-bbd120eeeff7",
   "prevId": "6c7c9b4c-15cc-4a23-bbd2-e80cf87ff26b",
   "tables": {
     "appeals": {
@@ -156,6 +156,13 @@
           "type": "integer",
           "primaryKey": false,
           "notNull": true,
+          "autoincrement": false
+        },
+        "found_bottle_id": {
+          "name": "found_bottle_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
           "autoincrement": false
         }
       },
