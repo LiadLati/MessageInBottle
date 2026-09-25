@@ -1,5 +1,6 @@
 import { useEffect, useId, useState, type FormEvent } from 'react';
 import {
+  EMAIL_TAKEN_MESSAGE,
   PUBLISHED_DOCUMENTS,
   confirmationProblem,
   currentPolicyVersions,
@@ -31,7 +32,7 @@ function describeFailure(err: unknown, mode: Mode): string {
     if (err.code === UNREACHABLE) return err.message;
     if (err.status === 401) return 'Incorrect username or password.';
     if (err.code === 'username_taken') return 'That username is already taken. Choose another.';
-    if (err.code === 'email_taken') return 'That email is already registered. Sign in instead.';
+    if (err.code === 'email_taken') return EMAIL_TAKEN_MESSAGE;
     if (err.code === 'policy_version_stale')
       return 'The Terms or Privacy Policy changed while this page was open. Reload and read them again.';
     if (err.code === 'policies_not_released')

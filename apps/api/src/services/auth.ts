@@ -1,6 +1,12 @@
 import { and, eq, gt, isNull, ne } from 'drizzle-orm';
 import type { PolicyAcceptanceRequest } from '@mib/shared';
-import { RESET_TOKEN_TTL_MS, normalizeEmail, normalizeUsername } from '@mib/shared';
+import {
+  EMAIL_TAKEN_MESSAGE,
+  isIanaTimeZone,
+  RESET_TOKEN_TTL_MS,
+  normalizeEmail,
+  normalizeUsername,
+} from '@mib/shared';
 import * as t from '../db/schema.js';
 import { newId, newSecretToken, sha256 } from '../lib/ids.js';
 import { AppError, badRequest, conflict } from '../lib/errors.js';
@@ -20,14 +26,10 @@ export function toAuthUser(row: typeof t.users.$inferSelect): AuthUser {
   };
 }
 
-// Is this an IANA zone the runtime knows? Anything else is refused rather than stored.
+// Is this an IANA zone name the runtime knows (product decision 9)? Offsets, abbreviations and
+// arbitrary text are refused rather than stored.
 export function isKnownTimeZone(zone: string): boolean {
-  try {
-    new Intl.DateTimeFormat('en-US', { timeZone: zone });
-    return true;
-  } catch {
-    return false;
-  }
+  return isIanaTimeZone(zone);
 }
 
 // The account's night zone (spec §9.3): first learned from the device, re-synced on every app
@@ -100,8 +102,7 @@ export async function register(
   } catch (err) {
     // The unique indexes are the authority; the normalized lookups are only friendlier pre-checks.
     if (isUniqueViolation(err)) {
-      if (String(err).includes('email'))
-        throw conflict('email_taken', 'that email is already registered');
+      if (String(err).includes('email')) throw conflict('email_taken', EMAIL_TAKEN_MESSAGE);
       throw conflict('username_taken', 'that username is already taken');
     }
     throw err;

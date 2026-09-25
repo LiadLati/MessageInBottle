@@ -66,7 +66,13 @@ describe('registration with e-mail', () => {
       }),
     );
     expect(dup.status).toBe(409);
-    expect(((await dup.json()) as { error: { code: string } }).error.code).toBe('email_taken');
+    // Product decision 3: said plainly, as an accepted trade-off.
+    expect(((await dup.json()) as { error: { code: string; message: string } }).error).toEqual(
+      expect.objectContaining({
+        code: 'email_taken',
+        message: 'This email is already registered. Sign in or reset your password.',
+      }),
+    );
     // Seeded accounts predate e-mail and simply have none.
     const me = await app.request('/api/auth/me', bearer(a.token));
     expect(((await me.json()) as { email: string }).email).toBe('mira@example.com');

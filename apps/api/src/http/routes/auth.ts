@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import { clientAddress } from '../client-address.js';
 import {
+  EMAIL_TAKEN_MESSAGE,
   ForgotPasswordRequestSchema,
   LoginRequestSchema,
   RegisterRequestSchema,
@@ -9,11 +10,12 @@ import {
   normalizeEmail,
   normalizeUsername,
 } from '@mib/shared';
-import { conflict, tooManyRequests } from '../../lib/errors.js';
+import { badRequest, conflict, tooManyRequests } from '../../lib/errors.js';
 import { RateLimiter, type RateLimitRule } from '../../lib/rate-limit.js';
 import {
   emailTaken,
   login,
+  isKnownTimeZone,
   logout,
   register,
   requestPasswordReset,
@@ -75,8 +77,7 @@ export function authRoutes(limiter = new RateLimiter()) {
     const ctx = c.get('ctx');
     if (usernameTaken(ctx, body.username))
       throw conflict('username_taken', 'that username is already taken');
-    if (emailTaken(ctx, body.email))
-      throw conflict('email_taken', 'that email is already registered');
+    if (emailTaken(ctx, body.email)) throw conflict('email_taken', EMAIL_TAKEN_MESSAGE);
     const session = await register(ctx, body);
     return c.json({ token: session.token, user: withPolicies(ctx, session.user) }, 201);
   });
@@ -118,6 +119,8 @@ export function authRoutes(limiter = new RateLimiter()) {
     // Each zone change moves the account's nights forward, so rotating zones used to dodge
     // every storm (audit ARCH-010). Real travel changes a zone a few times a day at most;
     // resyncing the same zone is free.
+    // An invalid zone is refused before it can spend the change budget (product decision 9).
+    if (!isKnownTimeZone(timeZone)) throw badRequest('unknown_time_zone', 'unknown time zone');
     if (timeZone !== user.timeZone) enforce(`tz:${user.id}`, ZONE_CHANGES_PER_ACCOUNT);
     return c.json(withPolicies(c.get('ctx'), setAccountTimeZone(c.get('ctx'), user, timeZone)));
   });
