@@ -10,6 +10,11 @@ deletion minimisation, time-zone use and fallback, the explicit "email already r
 message and the 30-minute single-use reset link. Every account that accepted 1.0 is asked to
 accept 1.1 through the gate below (`apps/api/src/http/policies.test.ts`).
 
+Before 1.1 was released anywhere, two Privacy Policy sentences were corrected for risk policy v4
+(the account's authoritative map clock drives day, night and storm eligibility; the browser keeps
+the account's zone as last received from the server). 1.1 had not been published or accepted by
+any account, so it was corrected in place rather than superseded by 1.2.
+
 The documents live in `packages/shared/src/policies.ts` as structured content, in English and
 left-to-right. One module serves three surfaces — the in-app reader, the public web pages and
 the acceptance records — so the text a person was shown, the version stored against their

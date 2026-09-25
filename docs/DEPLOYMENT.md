@@ -30,6 +30,7 @@ CI proves the artefact on every pull request (`apps/api/scripts/smoke-artefact.m
 | `MIB_MAIL_PROVIDER`, `MIB_SMTP_*`, `MIB_MAIL_FROM` | `smtp` through Gmail (section 2a), or accept that password recovery sends nothing (`disabled`, the default). |
 | `MIB_SUPPORT_EMAIL` | The published support address (it appears in the Privacy Policy and Child Safety Standards). |
 | `MIB_AI_ENABLED` | `false` unless an Ollama-compatible model runs on infrastructure the operator controls. The model only recommends; `MIB_AI_AUTO_DECIDE=true` stops the server (the setting was removed). |
+| `MIB_RISK_POLICY_VERSION` | Leave unset (`4`, the approved policy: one map clock per account, storms follow the map). `0` disables automatic outcomes for new journeys. |
 | `MIB_SHORE_CAPACITY` | Optional. Bottles one account's shore holds at once (default `100`, product decision 8). |
 | `MIB_RETENTION_DAYS` | Optional. Leave unset: evidence is redacted 30 days after the decision (or once a timely appeal is decided), matching the published Privacy Policy. |
 | `MIB_LOG_REQUESTS` | Request lines include ids in paths; decide a log retention period (below). |
@@ -67,6 +68,18 @@ The App Password is a credential: it lives only in the host's secret store (or a
 Automated tests never contact Gmail: `apps/api/src/http/smtp-reset.test.ts` runs the real SMTP
 adapter against an in-process fake server. The development outbox (`MIB_MAIL_PROVIDER=outbox`)
 exists only with `MIB_DEV_MODE=true` and only for a signed-in developer.
+
+## 2b. Moderation audit: external append-only export (required)
+
+`moderation_audit` is append-only through every application route, but it is a table in the same
+SQLite file as the rest of the data, so on its own it is **not tamper-evident**: anyone with write
+access to the database file could change it. Approved production decision: every moderation
+event must also be exported to an external append-only or immutable logging destination (for
+example a write-once log service or an object store with retention lock) that the application
+host cannot rewrite. The concrete integration is chosen together with the hosting and logging
+provider; until it is in place, production launch is blocked on it. The export must carry no
+letter content, report text or reset material — only what the audit row holds (action, case,
+violation, appeal, subject and actor ids, role, reason, detail, time).
 
 ## 3. Exactly one API process
 
@@ -143,5 +156,10 @@ MIB_DATABASE_PATH=… node dist/grant-admin.js --email you@example.com --confirm
    backup) on the real database — owner-operated, never run by development work.
 8. Enabling GitHub branch protection so CI blocks merges.
 9. Store packaging and the Play Console Data Safety form (`docs/LEGAL_DOCUMENTS.md`).
-10. Tamper-evident storage for the moderation audit trail (unresolved: today it is readable and
-    exportable but not tamper-evident).
+10. The external append-only or immutable log for moderation events (section 2b), chosen with
+    the hosting and logging provider. This is a production deployment dependency, not an open
+    product decision; the local table is not tamper-evident by itself.
+11. Risk policy v4 activates at the first boot of this version (`risk_policy_activations`). No
+    transition tool exists or is needed: migrations `0016`/`0017` are additive, and journeys at
+    sea from earlier policies keep every recorded decision and are decided by account storms
+    from that boot on.

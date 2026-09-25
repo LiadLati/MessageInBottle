@@ -1,10 +1,9 @@
 // Product decision 9: the device reports its IANA time zone
-// (Intl.DateTimeFormat().resolvedOptions().timeZone); no location permission is involved. The
-// zone shapes what the person sees. Journey duration, arrival, deadlines, suspensions,
-// appeals, retention and rate limits run on server time and never read it. One exception is
-// recorded in docs/REMEDIATION.md (D7): the approved storm-risk policy v3 counts storm nights
-// in the sender's account zone, so a zone change can move *future* storm nights (never past
-// ones, and at most four changes a day).
+// (Intl.DateTimeFormat().resolvedOptions().timeZone); no location permission is involved. Once
+// the server accepts it, it is the account's authoritative map clock: the map's day and night
+// and future storm eligibility (risk policy v4, weather.ts). Journey duration, arrival,
+// deadlines, suspensions, appeals, retention and rate limits run on server time and never read
+// it, and a change never rerolls weather or touches a decision already made.
 
 // An IANA zone name of the forms the tz database uses ("Europe/Berlin", "America/Argentina/
 // Buenos_Aires", "Etc/GMT-2", "UTC") that the runtime also knows. Offsets such as "+05:00",

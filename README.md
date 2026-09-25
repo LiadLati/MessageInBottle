@@ -174,13 +174,12 @@ All variables are optional and documented in `.env.example`. The important ones:
   still open). Defaults give roughly 1–4 days per crossing.
 - `MIB_SHORE_CAPACITY`: bottles one account's shore holds at once — travelling plus
   delivered-unread (default 100). `MIB_DEFAULT_SHORE_CAPACITY` only seeds a legacy column.
-- `MIB_RISK_POLICY_VERSION` (default `3`): the automatic storm-outcome policy new journeys are
-  released under (spec §9.3). `3` is the approved policy — a bottle's nights are its sender's
-  nights, in the account's own time zone; `0` releases new journeys with no automatic risk at
-  all. The value is stamped on each bottle at release; journeys released before the policy
-  existed carry no version and are never put at risk. There is no server-side zone setting:
-  each account's zone comes from its own device (`PUT /api/auth/time-zone`, sent on every app
-  start and resume).
+- `MIB_RISK_POLICY_VERSION` (default `4`): the automatic storm-outcome policy new journeys are
+  released under (spec §9.3). `4` is the approved policy — one map clock per account, storms
+  that follow the map; `0` releases new journeys with no automatic risk at all. The value is
+  stamped on each bottle at release; journeys released before automatic outcomes existed carry
+  no version and are never put at risk. There is no server-side zone setting: each account's
+  zone comes from its own devices (`PUT /api/auth/time-zone`).
 
 ### Map provider
 
@@ -201,32 +200,37 @@ downloads. Use a key restricted to your domain by the provider, or proxy the til
 
 ### Time of day and simulated weather
 
-The Ocean map switches between the approved daylight and night palettes automatically. Simulated
-weather belongs to **each bottle**: at night an at-sea bottle may be in a storm on its own (two
-bottles on one route can differ), shown as a small cloud glyph above its marker and an `In a storm`
-chip on its card. The card's **View at sea** button opens a real-time view of that bottle on open
-water — calm or stormy, day or night — and **Back to map** returns to exactly the same map view.
-My Shore has its own independent weather. **All of it is cosmetic** — it never changes a route, a
-duration, an arrival or any risk (product spec §9.1), and watching a bottle changes nothing.
+**One clock per account** (risk policy v4, spec §9.3). The device reports its IANA time zone —
+never GPS or coordinates — after sign-in, on start, on return to the foreground and when it
+changes. The server validates it, and the latest one it accepts becomes the account's
+authoritative map clock on every device (before any, the harbour's zone; else UTC). The Ocean
+map's day and night palette, the sea view's lighting and My Shore all follow that clock, read from
+`GET /api/ocean/weather`, so a phone and a desktop of the same account always agree.
+
+**Storms follow the map.** A daytime map has no storm. When the map enters a night, the account
+rolls once: a deterministic 25 % chance that the night holds one storm of 40–100 minutes,
+wholly inside that night. The roll is persisted and never repeated — the account gets at most one
+roll in any 24 hours, so changing time zone, crossing midnight, reopening SeaYou or restarting
+the server cannot produce another. The storm is drawn once over the map, only at night; every
+bottle at sea is in it and shows an `In a storm` chip, and at the storm's midpoint each bottle gets
+its own independent risk decision (1 % loss for an eligible decision; at most five risky storms
+per journey; none at or after 80 % of the way; arrival wins). If a time-zone change turns the map
+to day before the midpoint, the storm disappears, its decision is cancelled and the roll stays
+used. A change never alters a journey's duration or arrival, a decision already made, or any
+deadline or rate limit.
 
 | Setting | Default | Where |
 | --- | --- | --- |
-| Daylight window | 07:00–19:00 local, configurable, may wrap midnight | `DAYLIGHT_DEFAULTS` |
-| Zone | the browser's own IANA timezone (never GPS or coordinates) | `state/weather.tsx` |
-| Ocean storm window / chance | 3 h / 45 % per at-sea bottle, night only | `OCEAN_SCHEDULE` |
-| Ocean storm duration | 40–100 min | `OCEAN_SCHEDULE` |
-| Shore storm window / chance | 4 h / 35 % per user | `SHORE_SCHEDULE` |
-| Shore storm duration | 50–150 min | `SHORE_SCHEDULE` |
-| Schedule version | 1 | `SCHEDULE_VERSION` |
+| Daylight window | 07:00–19:00 local | `DAYLIGHT_DEFAULTS` |
+| Zone | the account's authoritative IANA zone | `services/weather.ts`, `state/weather.tsx` |
+| Storm chance | 25 % per night entered, at most one roll per 24 hours | `RISK_POLICY` |
+| Storm duration | 40–100 min, inside one night | `RISK_POLICY` |
+| Policy version | 4 | `RISK_POLICY_VERSION` |
 
-The schedule is a pure function of the bottle or user id, the schedule version and the time
-window, so a refresh, a different selection or a server restart reproduces exactly the same
-weather with nothing stored and no migration. In development the dev-clock offset moves weather
-along with journeys; sessions are unaffected because authentication runs on real time.
-
-In a development build the dev bar carries **Sky**, **Ocean storm** and **Shore storm** preview
-switches. They change only what is drawn — no request is made and no bottle is touched. The sea
-view follows the same switches, so calm/storm and day/night can be previewed there too.
+In development the dev-clock offset moves weather along with journeys; sessions are unaffected
+because authentication runs on real time. A development build's dev bar carries **Sky**,
+**Ocean storm** and **Shore storm** preview switches: they change only what is drawn — no request
+is made, nothing is rolled and no bottle is touched.
 
 ### Notifications
 
@@ -270,10 +274,9 @@ The map always names your own harbour with an anchor label, and the destination 
 bottle you have selected.
 
 Outcomes are server-owned and written once: retrying, refreshing, viewing a bottle or opening the
-sea viewer can never move or reroll them, and a journey cannot both arrive and be lost. **Nothing
-loses a bottle on its own yet**: the risk policy (spec D08) is not approved, so in development the
-dev bar offers *Adrift* / *Sink* controls per at-sea bottle (`POST /api/dev/lose`), and
-production has no automatic outcomes.
+sea viewer can never move or reroll them, and a journey cannot both arrive and be lost. Automatic
+outcomes come only from the account's storms (above); in development the dev bar also offers
+*Adrift* / *Sink* controls per at-sea bottle (`POST /api/dev/lose`).
 
 ### Geographic datasets and the sea-route graph
 

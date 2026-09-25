@@ -458,7 +458,7 @@ export const PRIVACY_POLICY: PolicyDocument = {
     {
       type: 'ul',
       items: [
-        'Account details: your username, display name, the email address you registered with, a hashed password (never the password itself), and the time zone your device reports. The time zone is the IANA name from your device settings — no location permission and no GPS are used. It is used to show times in your local time and to decide when your night falls for the simulated weather, which can move storm nights for bottles you send from then on; it never changes a journey’s duration or arrival, and is never used for deadlines, suspensions, appeals, evidence retention or rate limits, which all run on the server’s clock. If your device gives no usable zone, the zone of your chosen harbour is used, and otherwise UTC.',
+        'Account details: your username, display name, the email address you registered with, a hashed password (never the password itself), and the time zone your device reports. The time zone is the IANA name from your device settings — no location permission and no GPS are used. The latest valid one the server accepts becomes your account’s map clock on every device you use: it sets day and night on your map and when simulated weather may happen — a daytime map has no storm, and each night has a 25% chance of one. A change affects only future day and night and future storm chances: it never changes a journey’s duration or arrival, never rerolls weather in the 24 hours after a roll, never alters a decision already made, and is never used for deadlines, suspensions, appeals, evidence retention or rate limits, which all run on the server’s clock. Until a device reports a usable zone, the zone of your chosen harbour is used, and otherwise UTC. The history of accepted zones, with when each took effect, and a record of each night’s weather roll are kept with your account.',
         'Letters you write, their recipient, and the journey and outcome of each bottle.',
         'Your connections, and the accounts you have blocked.',
         'Notifications generated for you: what happened, the item it concerns, when, and whether you have read it. They are kept for as long as your account exists and are never deleted automatically; marking them read only clears the badge. Operational records about delivering them and running background work — attempts, retries, worker state and provider error messages — are kept for up to 90 days.',
@@ -505,7 +505,7 @@ export const PRIVACY_POLICY: PolicyDocument = {
       items: [
         'Your session token, in sessionStorage. It is removed when you sign out, when the server rejects it, and by the browser when the tab is closed.',
         'The letter you are still writing and have not sent, in sessionStorage, so that a reload does not lose it. It is removed as soon as the letter is sent, and by the browser when the tab is closed.',
-        'The time zone your device last reported, in localStorage, so the app can tell when it changes and tell the server. It is removed when you sign out.',
+        'Your account’s time zone as last received from the server, in localStorage, so the map shows the right day or night before the server answers. It is removed when you sign out.',
       ],
     },
     {

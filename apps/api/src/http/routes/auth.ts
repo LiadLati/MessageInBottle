@@ -116,8 +116,9 @@ export function authRoutes(limiter = new RateLimiter()) {
   r.put('/time-zone', requireAuth, jsonBody(TimeZoneRequestSchema), (c) => {
     const user = c.get('user');
     const { timeZone } = c.req.valid('json');
-    // Each zone change moves the account's nights forward, so rotating zones used to dodge
-    // every storm (audit ARCH-010). Real travel changes a zone a few times a day at most;
+    // Each zone change moves the account's map clock (audit ARCH-010). Under risk policy v4 a
+    // change can never add a weather roll inside 24 hours, and this budget still bounds how
+    // often a map can be flipped: real travel changes a zone a few times a day at most;
     // resyncing the same zone is free.
     // An invalid zone is refused before it can spend the change budget (product decision 9).
     if (!isKnownTimeZone(timeZone)) throw badRequest('unknown_time_zone', 'unknown time zone');

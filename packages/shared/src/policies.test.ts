@@ -270,7 +270,12 @@ describe('the published documents', () => {
     expect(privacy).toMatch(/no location permission and no GPS/i);
     expect(privacy).toMatch(/zone of your chosen harbour is used, and otherwise UTC/i);
     expect(privacy).toMatch(/never changes a journey’s duration or arrival/i);
-    expect(privacy).toMatch(/can move storm nights/i);
+    // Risk policy v4: one map clock for day, night and storms; changes affect the future only.
+    expect(privacy).toMatch(/becomes your account’s map clock on every device/i);
+    expect(privacy).toMatch(/a daytime map has no storm, and each night has a 25% chance/i);
+    expect(privacy).toMatch(/never rerolls weather in the 24 hours after a roll/i);
+    expect(privacy).toMatch(/never alters a decision already made/i);
+    expect(privacy).not.toMatch(/bottles you send from then on/i);
     expect(privacy).toMatch(/“Deleted user”/);
     expect(privacy).toMatch(/text of every letter you wrote is erased/i);
     expect(privacy).toMatch(/letters you received are removed/i);
@@ -283,7 +288,7 @@ describe('the published documents', () => {
     // Every mechanism the implementation uses, named, with when it is cleared.
     expect(privacy).toMatch(/session token, in sessionStorage/i);
     expect(privacy).toMatch(/in sessionStorage, so that a reload does not lose it/i);
-    expect(privacy).toMatch(/time zone your device last reported, in localStorage/i);
+    expect(privacy).toMatch(/time zone as last received from the server, in localStorage/i);
     expect(privacy).toMatch(/removed when you sign out/i);
     // And the ones it does not.
     expect(privacy).toMatch(/sets no cookies, and uses no IndexedDB/i);

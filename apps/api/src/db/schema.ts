@@ -394,9 +394,10 @@ export const publicOpenings = sqliteTable(
   (t) => [index('public_openings_opener_idx').on(t.openedById, t.openedAt)],
 );
 
-// One row per (bottle, night) once the night's risk decision has been taken, storm night or
-// not — so a retry, a restart or a clock change can never take it again. `eligible` counts
-// towards the five-decision cap; `lost` records that this decision ended the journey.
+// One row per (bottle, storm) once that storm's risk decision has been taken — so a retry, a
+// restart or a clock change can never take it again. Under policy v4 `night_key` is the id of the
+// account's weather roll; rows from v1–v3 keep the local night key they were written with.
+// `eligible` counts towards the five-decision cap; `lost` records that it ended the journey.
 export const riskDecisions = sqliteTable(
   'risk_decisions',
   {

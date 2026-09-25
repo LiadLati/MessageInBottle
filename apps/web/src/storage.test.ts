@@ -99,7 +99,7 @@ describe('what SeaYou stores in the browser', () => {
     const privacy = textOf(PRIVACY_POLICY);
     expect(privacy).toMatch(/session token, in sessionStorage/i);
     expect(privacy).toMatch(/in sessionStorage, so that a reload does not lose it/i);
-    expect(privacy).toMatch(/time zone your device last reported, in localStorage/i);
+    expect(privacy).toMatch(/time zone as last received from the server, in localStorage/i);
     expect(privacy).toMatch(/sets no cookies, and uses no IndexedDB/i);
     // The policy promises they go on sign-out and on sending; the tests above prove they do.
     expect(privacy).toMatch(/removed when you sign out/i);
