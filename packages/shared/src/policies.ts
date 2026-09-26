@@ -41,7 +41,7 @@ export type PolicyStatus = 'draft' | 'released';
 
 // The published version of the whole set. A material change means a new version here, which
 // asks every account to accept again before ordinary use.
-export const POLICY_VERSION = '1.0';
+export const POLICY_VERSION = '1.1';
 // These texts take effect when the build carrying them is published; there is no separate date
 // to keep in step with a release, so the documents say exactly that.
 export const POLICY_EFFECTIVE = `Effective when published in ${PRODUCT_NAME}`;
@@ -214,6 +214,10 @@ export const TERMS_OF_USE: PolicyDocument = {
     },
     {
       type: 'p',
+      text: 'If you try to register with an email address that already has an account, you are told so, and invited to sign in or reset your password instead. A password-reset request never says whether an account exists for the address entered. A reset link expires after 30 minutes, works once, and using it signs out every session.',
+    },
+    {
+      type: 'p',
       text: `${PRODUCT_NAME} is not marketed as a children's app and is not directed at children. There is no age-verification step, and ${PRODUCT_NAME} does not claim that its users have been age-verified.`,
     },
     { type: 'h2', text: '4. How a journey works' },
@@ -224,11 +228,12 @@ export const TERMS_OF_USE: PolicyDocument = {
     {
       type: 'ul',
       items: [
-        'Changing your device clock or time zone does not make a journey arrive sooner or later. The schedule is held by the server.',
+        'Changing your device clock or time zone does not make a journey arrive sooner or later, and never re-runs its outcome. The schedule is held by the server.',
         'A letter sent to the harbour you are already at arrives immediately.',
         'A bottle may arrive at its destination, be lost and go adrift in the public ocean, or sink.',
         'A bottle adrift in the public ocean stays listed there until one eligible finder opens it, or until 72 hours after it was lost, whichever happens first.',
-        'The finder who opens an adrift bottle gets one reading session, which can be resumed for up to 15 minutes if it is interrupted. They do not keep a copy, and it does not appear in their archive afterwards.',
+        'The finder who opens an adrift bottle gets one reading session, which can be resumed for up to 15 minutes if it is interrupted. The letter is never added to their received letters, archive or history, and finding it creates no friendship and no way to contact the writer. The finder can report the letter, or block its writer without learning who they are, during the session.',
+        'Each account’s shore holds at most 100 bottles at a time: those travelling to it plus those delivered and not yet opened. If a friend’s shore is full, your bottle is not released and nothing sets sail; your unsent letter is kept on your device for you to try again later. The owner of a full shore is told once that it is full, and again only after it has had room and filled up again. No one is told who sent the bottles or how many are theirs.',
         'You can still read your own letter under the ordinary rules that apply to you as its sender.',
         'A bottle that sinks is not shown in the public ocean.',
       ],
@@ -258,6 +263,7 @@ export const TERMS_OF_USE: PolicyDocument = {
         'Blocking stops correspondence in both directions: neither account can write to the other.',
         `Blocking also keeps the two accounts from encountering each other through public-ocean interactions in ${PRODUCT_NAME}.`,
         `Blocking cannot reach anything already read, copied, photographed or saved outside ${PRODUCT_NAME}. It changes what happens next, not what has already left.`,
+        'You can unblock someone from Settings → Blocked users, after a confirmation. Unblocking allows future contact under the ordinary rules, including public-ocean encounters. It does not restore any letter that was removed, cancelled or hidden, does not restore a friendship (either of you can send a new request), and reveals nothing about what happened while the block was in place.',
       ],
     },
     { type: 'h2', text: '8. Reporting and moderation' },
@@ -269,7 +275,8 @@ export const TERMS_OF_USE: PolicyDocument = {
       type: 'ul',
       items: [
         'Several reports about one letter make a single case, and a single case can produce at most one violation.',
-        'Every case is decided by a person. Automated review, where it is used, produces a recommendation for a reviewer and never a decision.',
+        'Every case is decided by a person. Automated review, where it is used, produces a recommendation for a reviewer and never a decision, sanction or ban. If it flags a possible child-safety issue, the case is marked urgent and moved to the top of the reviewer’s queue; it is still decided by a person, and a case is never held back waiting for automated review.',
+        'A decision is final once it is made. The reviewer cannot reopen or reverse it; only your appeal can change it.',
         'The identity of whoever reported a letter is not disclosed to its sender through ' +
           `${PRODUCT_NAME}, except where disclosure is required by law.`,
         'Rejected and undecided reports do not count as violations and do not affect account standing.',
@@ -285,7 +292,8 @@ export const TERMS_OF_USE: PolicyDocument = {
       items: [
         'Closing, refreshing or leaving ' +
           `${PRODUCT_NAME} without choosing does not give up anything. The decision is shown to you again the next time you can act on it.`,
-        'Each violation can be appealed once.',
+        'Each violation can be appealed once, in the 30 days after the decision, measured by the server’s clock. After that the decision is shown to you with a note that the appeal period has expired, and it is final.',
+        'If a violation is later confirmed as a critical child-safety violation and you had not appealed it, you get one new opportunity to appeal, with a new 30-day period.',
         `An appeal that is rejected is final inside ${PRODUCT_NAME}.`,
         'An appeal that is accepted withdraws the violation, and your account standing is recalculated immediately.',
       ],
@@ -306,7 +314,15 @@ export const TERMS_OF_USE: PolicyDocument = {
     },
     {
       type: 'p',
-      text: `While an account is suspended or banned it can still sign in to read the decision, appeal it, get support, delete the account and sign out. ${PRODUCT_NAME} does not lock a person away from the decision made about them.`,
+      text: `While an account is suspended or banned it can still sign in to read the decision, appeal it within its appeal period, get support, delete the account and sign out. ${PRODUCT_NAME} does not lock a person away from the decision made about them.`,
+    },
+    {
+      type: 'ul',
+      items: [
+        'A suspended account sees its standing: the reason, when the suspension ends, the time remaining and a warning that another upheld violation means a permanent ban. A banned account sees the same, without an end.',
+        'While suspended or banned, the account cannot send or receive bottles, and does not appear in friend lists, recipient choices or search. Its friendships are kept. Bottles on their way to it are cancelled, and their senders are told only that delivery is unavailable.',
+        'A suspension ends automatically at its end time, and the account works normally again.',
+      ],
     },
     { type: 'h2', text: '10. Deleting your account' },
     {
@@ -394,6 +410,7 @@ export const COMMUNITY_RULES: PolicyDocument = {
       items: [
         'Reporting a letter opens a moderation case for a human reviewer, and hides the letter from your own reading straight away.',
         'Blocking stops correspondence in both directions and keeps the two accounts from encountering each other through public-ocean interactions. It does not, by itself, report anything.',
+        'Unblocking, from Settings → Blocked users, allows future contact again. It brings back no removed, cancelled or hidden letter and no friendship, and reveals nothing about the time the block was in place.',
       ],
     },
     {
@@ -412,15 +429,15 @@ export const COMMUNITY_RULES: PolicyDocument = {
     { type: 'h2', text: '7. When a report is upheld' },
     {
       type: 'p',
-      text: 'Every case is decided by a person. Automated review, where it is used, only produces a recommendation for that person to consider.',
+      text: 'Every case is decided by a person. Automated review, where it is used, only produces a recommendation for that person to consider; a possible child-safety issue it flags is moved to the top of the queue, and is still decided by a person. A decision is final once made: only the sender’s appeal can change it.',
     },
     {
       type: 'p',
-      text: 'When a report against you is upheld, the decision is put in front of you and that is when you can appeal it. You can appeal the decision, or continue without appealing — and continuing asks you to confirm, because it permanently gives up the appeal for that decision. Closing or reloading without choosing gives up nothing; the decision comes back the next time you can act on it. Each violation may be appealed once. A rejected appeal is final here; an accepted appeal withdraws the violation and your standing is recalculated at once.',
+      text: 'When a report against you is upheld, the decision is put in front of you and that is when you can appeal it. You can appeal the decision, or continue without appealing — and continuing asks you to confirm, because it permanently gives up the appeal for that decision. Closing or reloading without choosing gives up nothing; the decision comes back the next time you can act on it. Each violation may be appealed once, in the 30 days after the decision; after that the decision is final. A rejected appeal is final here; an accepted appeal withdraws the violation and your standing is recalculated at once.',
     },
     {
       type: 'p',
-      text: 'Upheld violations remain counted unless they are reversed on appeal: one is a warning, two a seven-day suspension, three a permanent ban. Serving a suspension does not reduce the count. A confirmed critical child-safety violation bans immediately, and can still be appealed once.',
+      text: 'Upheld violations remain counted unless they are reversed on appeal: one is a warning, two a seven-day suspension, three a permanent ban. Serving a suspension does not reduce the count. A confirmed critical child-safety violation bans immediately, and can still be appealed once — including when an earlier decision is escalated to critical and had not been appealed. Letters must not contain invisible characters that change the direction of text; such a letter is refused until they are removed.',
     },
   ],
 };
@@ -441,10 +458,10 @@ export const PRIVACY_POLICY: PolicyDocument = {
     {
       type: 'ul',
       items: [
-        'Account details: your username, display name, the email address you registered with, a hashed password (never the password itself), and the time zone your device reports, which is used to decide when your night falls.',
+        'Account details: your username, display name, the email address you registered with, a hashed password (never the password itself), and the time zone your device reports. The time zone is the IANA name from your device settings — no location permission and no GPS are used. The latest valid one the server accepts becomes your account’s map clock on every device you use: it sets day and night on your map and when simulated weather may happen — a daytime map has no storm, and each night has a 25% chance of one. A change affects only future day and night and future storm chances: it never changes a journey’s duration or arrival, never rerolls weather in the 24 hours after a roll, never alters a decision already made, and is never used for deadlines, suspensions, appeals, evidence retention or rate limits, which all run on the server’s clock. Until a device reports a usable zone, the zone of your chosen harbour is used, and otherwise UTC. The history of accepted zones, with when each took effect, and a record of each night’s weather roll are kept with your account.',
         'Letters you write, their recipient, and the journey and outcome of each bottle.',
         'Your connections, and the accounts you have blocked.',
-        'Notifications generated for you.',
+        'Notifications generated for you: what happened, the item it concerns, when, and whether you have read it. They are kept for as long as your account exists and are never deleted automatically; marking them read only clears the badge. Operational records about delivering them and running background work — attempts, retries, worker state and provider error messages — are kept for up to 90 days.',
         'The versions of these documents you accepted, and when.',
         'Moderation records: reports you make, cases about letters you sent, decisions, appeals and violations.',
         'Security and account-control records: a hashed form of your current session tokens and of any password-reset link you request, with the times they were created, expire, were used or were superseded; whether your account is active or deleted; the role it holds and when it was granted; and an audit record of each moderation action taken on it, which administrator took it and when. Sign-in and password-reset attempts are also counted, but only in the server\u2019s memory for a short window; how many letters you have reported recently is worked out from the reports themselves rather than kept as a separate count.',
@@ -458,11 +475,11 @@ export const PRIVACY_POLICY: PolicyDocument = {
     {
       type: 'ul',
       items: [
-        'Content evidence — the copied letter and the explanations reporters wrote — is redacted seven days after the case becomes final.',
-        'A case becomes final when the report is rejected, when an upheld sender explicitly gives up the appeal, or when an appeal they submitted has been decided.',
-        'While a report is undecided, while the sender has not yet seen and resolved the decision, or while an appeal is pending, the case is not final and the evidence is kept.',
+        'Content evidence is the copied letter, the explanations reporters wrote, and the automated review’s translation and content notes.',
+        'It is kept for 30 days from the reviewer’s decision — the same 30 days in which the sender can appeal. If the sender appeals in time, it is kept until the appeal is decided. It is then redacted at whichever is later.',
+        'While a report is undecided, the evidence is kept. It is not kept longer just because the sender never opened the decision.',
         'Records of the decision itself are kept after that: the case identity, the decision and its reason, which administrator made it, the timestamps, the violation and its enforcement count, the relationship to the report for abuse prevention, and your account standing history. These are kept because upheld violations do not expire.',
-        'Evidence is kept longer than seven days only under a documented legal or immediate child-safety hold, which records why it was placed and by whom. Releasing the hold returns the case to the ordinary calculation.',
+        'Evidence is kept longer only under a documented legal or child-safety hold, which records who placed it, when and why. Releasing the hold returns the case to the ordinary calculation.',
       ],
     },
     {
@@ -472,7 +489,7 @@ export const PRIVACY_POLICY: PolicyDocument = {
     { type: 'h2', text: '4. Automated review' },
     {
       type: 'p',
-      text: 'Reported letters may be examined by an automated review that runs on infrastructure the operator controls, in order to produce a recommendation — with its reasoning, a translation where the letter is not in the reviewer’s language, and a statement of its uncertainty — for a human reviewer. It never decides a case, and an uncertain result never decides anything at all.',
+      text: 'Reported letters may be examined by an automated review that runs on infrastructure the operator controls, in order to produce a recommendation — with its reasoning, a translation where the letter is not in the reviewer’s language, and a statement of its uncertainty — for a human reviewer. It only ever sees letters that were reported. It never decides a case, applies a sanction or bans anyone, and an uncertain result never decides anything at all. If it flags a possible child-safety issue, the case is marked urgent for a reviewer.',
     },
     {
       type: 'p',
@@ -488,7 +505,7 @@ export const PRIVACY_POLICY: PolicyDocument = {
       items: [
         'Your session token, in sessionStorage. It is removed when you sign out, when the server rejects it, and by the browser when the tab is closed.',
         'The letter you are still writing and have not sent, in sessionStorage, so that a reload does not lose it. It is removed as soon as the letter is sent, and by the browser when the tab is closed.',
-        'The time zone your device last reported, in localStorage, so the app can tell when it changes and tell the server. It is removed when you sign out.',
+        'Your account’s time zone as last received from the server, in localStorage, so the map shows the right day or night before the server answers. It is removed when you sign out.',
       ],
     },
     {
@@ -513,6 +530,10 @@ export const PRIVACY_POLICY: PolicyDocument = {
       type: 'p',
       text: SUPPORT_WARNING,
     },
+    {
+      type: 'p',
+      text: `Password-reset emails are sent from ${SUPPORT_EMAIL} through its email provider, which therefore handles your email address and the message. The message contains a single-use link that expires after 30 minutes.`,
+    },
     { type: 'h2', text: '8. Deleting your account' },
     {
       type: 'p',
@@ -522,14 +543,12 @@ export const PRIVACY_POLICY: PolicyDocument = {
       type: 'ul',
       items: [
         'Profile identifiers — your username, display name and email address — are removed or replaced with anonymous values, and your password is cleared so the account cannot be signed in to again.',
-        'Every session is revoked immediately.',
-        'Friend and block relationships are removed.',
-        'Bottles still travelling are cancelled, and their reserved space is released.',
-        'Letters you wrote are removed from future reading in the app, and their text is cleared — except where a copy is still held as evidence for a moderation case that is not finished, or under a documented hold. Those copies follow the retention rules in section 3.',
-        'Letters other people wrote to you are not deleted: they belong to their authors, who can still see what became of what they sent.',
-        'Your notifications are removed.',
-        'The account row itself is kept in an anonymised form, so that records which legitimately refer to it — a letter someone else wrote, a moderation case still open — do not lose their references. It holds no personal details.',
-        'Minimal anonymised journey and audit metadata remains, because moderation records and account standing history must survive the account they describe.',
+        'Every session and every password-reset link is revoked immediately.',
+        'Your time zone, preferences, notifications, document acceptances, friendships and blocks are removed.',
+        'Any letter you had not yet sent is removed. The letters you received are removed from your shore and your archive.',
+        'The text of every letter you wrote is erased, and bottles you sent that are still travelling are cancelled, with their shore space released — except where the copy is held as moderation evidence within its retention period or under a legal or child-safety hold. Those copies follow the rules in section 3.',
+        'Letters other people wrote to you stay in their own Sent history, because they belong to their authors; the recipient is shown there as “Deleted user”.',
+        'What remains is a minimal record that the account existed, with no personal details, so that records which legitimately refer to it do not lose their references; moderation evidence still within its retention period or under a hold; and minimal anonymous audit records, because moderation records and standing history must survive the account they describe.',
       ],
     },
     { type: 'h2', text: '9. Your requests' },
@@ -616,22 +635,23 @@ export const CHILD_SAFETY_STANDARDS: PolicyDocument = {
     { type: 'h2', text: '5. How a confirmed case is enforced' },
     {
       type: 'p',
-      text: 'Every case is decided by a person; automated review only produces a recommendation. When a child-safety case is confirmed, an administrator may classify it as a critical child-safety violation, which is a permanent ban applied immediately, rather than the ordinary sequence of a warning, then a suspension, then a ban.',
+      text: 'Every case is decided by a person; automated review only produces a recommendation, and only ever sees letters that were reported. If it flags a possible child-safety issue, the case is marked urgent and placed at the top of the reviewer’s queue with the recommendation, its reasoning, its uncertainty and any translation. A case is never held back waiting for automated review. For each case the reviewer chooses one of three decisions: reject the report, uphold it as an ordinary violation, or confirm a critical child-safety violation, which is a permanent ban applied immediately rather than the ordinary sequence of a warning, then a suspension, then a ban.',
     },
     {
       type: 'ul',
       items: [
-        'The classification requires an administrator, a recorded reason and an explicit confirmation.',
-        'The administrator, the timestamp, the classification and the action are recorded in an audit trail.',
+        'The classification requires an administrator, a written reason and an explicit confirmation that states it bans the account permanently and immediately.',
+        'The administrator, the timestamp, the classification, the reason and the action are recorded in an audit trail.',
+        'The decision is final once made: the administrator cannot reopen or reverse it, and only the person’s appeal can change it.',
         'Automated review can never apply it.',
         'The letter is withdrawn from any further reading in the app.',
-        'The single appeal opportunity still applies: the person is shown the decision and may appeal it once.',
+        'The single appeal opportunity still applies: the person is shown the decision and may appeal it once, in the 30 days after the decision. An earlier ordinary decision that is escalated to critical, and had not been appealed, gets one new appeal opportunity.',
       ],
     },
     { type: 'h2', text: '6. Evidence and external reporting' },
     {
       type: 'p',
-      text: 'A copy of the reported letter is kept as evidence so the case and any appeal are judged on what was actually sent. Content evidence is redacted seven days after the case becomes final, and is kept longer only under a documented legal or immediate child-safety hold, which records why it was placed and by whom. Releasing the hold returns the case to the ordinary calculation. Records of the decision itself are kept.',
+      text: 'A copy of the reported letter is kept as evidence so the case and any appeal are judged on what was actually sent. Content evidence is kept for 30 days from the decision, or until a timely appeal is decided if that is later, and is then redacted. It is kept longer only under a documented legal or child-safety hold, which records who placed it, when and why. Releasing the hold returns the case to the ordinary calculation. Records of the decision itself are kept.',
     },
     {
       type: 'p',

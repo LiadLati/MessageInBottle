@@ -1,7 +1,8 @@
 import { useEffect, useId, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { ApiError, api } from '../api/client.js';
-import { focusableIn, nextTabTarget } from '../lib/focusTrap.js';
+import { focusableIn } from '../lib/focusTrap.js';
+import { restoreFocus, useModalKeys } from '../lib/modal.js';
 import { SupportLink } from './SupportLink.js';
 
 // Settings → Delete account. Deletion is permanent, so it asks for the password again (a
@@ -33,27 +34,9 @@ export function DeleteAccountDialog({
     (focusableIn(dialogRef.current!)[0] ?? dialogRef.current)?.focus();
     return () => {
       for (const el of siblings) el.removeAttribute('inert');
-      previous?.focus();
+      restoreFocus(previous);
     };
   }, []);
-
-  const onKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Escape' && !busy) {
-      e.preventDefault();
-      onCancel();
-      return;
-    }
-    if (e.key !== 'Tab' || !dialogRef.current) return;
-    const target = nextTabTarget(
-      focusableIn(dialogRef.current),
-      document.activeElement,
-      e.shiftKey,
-    );
-    if (target) {
-      e.preventDefault();
-      target.focus();
-    }
-  };
 
   const submit = async () => {
     if (!password || !confirmed || busy) return;
@@ -72,8 +55,10 @@ export function DeleteAccountDialog({
     }
   };
 
+  useModalKeys(dialogRef, busy ? null : onCancel);
+
   return createPortal(
-    <div className="confirm-layer" onKeyDown={onKeyDown}>
+    <div className="confirm-layer">
       <div className="confirm-backdrop" onClick={busy ? undefined : onCancel} aria-hidden />
       <div
         ref={dialogRef}
@@ -87,13 +72,15 @@ export function DeleteAccountDialog({
           Delete your account
         </h2>
         <p className="secondary">
-          This is permanent and cannot be undone. Every session ends at once, your profile,
-          friendships and blocks are removed, and letters of yours still at sea are cancelled.
+          This is permanent and cannot be undone. Every session ends at once. Your profile, email,
+          password, preferences, notifications, friendships, blocks and drafts are removed, the
+          letters you received are removed, and the text of every letter you wrote is erased —
+          letters still at sea are cancelled.
         </p>
         <p className="t-meta">
-          Letters that already reached the person you sent them to stay with them, showing “Deleted
-          account” as the sender. Evidence for an open report or an active restriction is kept for
-          as long as that matter needs it.
+          Letters other people wrote to you stay in their own Sent history, addressed to “Deleted
+          user”. Only a minimal record that the account existed is kept, plus report evidence for
+          the rest of its 30-day retention period or while a legal or child-safety hold requires it.
         </p>
         <div className="field">
           <label className="t-label" htmlFor={ids.p}>

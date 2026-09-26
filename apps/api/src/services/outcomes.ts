@@ -63,7 +63,19 @@ export function commitLoss(
   reason: LossOutcome,
   at: number,
 ): CommitLossResult {
-  return ctx.db.transaction((tx) => {
+  return ctx.db.transaction((tx) => commitLossIn(ctx, tx, bottleId, reason, at));
+}
+
+// The loss itself, inside a transaction the caller owns: the risk worker records its decision
+// and the loss it causes in one transaction, so the two can never disagree (audit ARCH-007).
+export function commitLossIn(
+  ctx: AppContext,
+  tx: DbOrTx,
+  bottleId: string,
+  reason: LossOutcome,
+  at: number,
+): CommitLossResult {
+  {
     const bottle = tx.select().from(t.bottles).where(eq(t.bottles.id, bottleId)).get();
     if (!bottle) throw notFound('bottle');
     if (bottle.state === 'lost') return { committed: false, reason: 'already_resolved' };
@@ -115,7 +127,7 @@ export function commitLoss(
       now: at,
     });
     return { committed: true, reason: 'committed' };
-  });
+  }
 }
 
 // Development-only entry point: the caller must own the bottle.

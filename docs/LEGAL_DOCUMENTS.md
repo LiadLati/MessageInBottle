@@ -1,6 +1,19 @@
 # Terms of Use, Community Rules, Privacy Policy and Child Safety Standards
 
-**Published at version `1.0`. Effective when published in SeaYou.**
+**Published at version `1.1`. Effective when published in SeaYou.**
+
+Version 1.1 is a material change carrying the owner's product decisions
+(`docs/REMEDIATION.md`, "Decisions"): the 30-day appeal and evidence window, holds, decision
+finality, the three moderation decisions and urgent AI flagging, suspension and ban effects,
+100-bottle shores, the finder's reading and finder block, unblocking, notification lifetime,
+deletion minimisation, time-zone use and fallback, the explicit "email already registered"
+message and the 30-minute single-use reset link. Every account that accepted 1.0 is asked to
+accept 1.1 through the gate below (`apps/api/src/http/policies.test.ts`).
+
+Before 1.1 was released anywhere, two Privacy Policy sentences were corrected for risk policy v4
+(the account's authoritative map clock drives day, night and storm eligibility; the browser keeps
+the account's zone as last received from the server). 1.1 had not been published or accepted by
+any account, so it was corrected in place rather than superseded by 1.2.
 
 The documents live in `packages/shared/src/policies.ts` as structured content, in English and
 left-to-right. One module serves three surfaces — the in-app reader, the public web pages and
@@ -84,15 +97,17 @@ Both paths re-authenticate and call the same function. What it does:
 - deletes every session, so access ends immediately (a non-active account is also refused by
   `login` and `resolveSession`, independently of the rows);
 - deletes password-recovery records;
-- clears the username, display name, email address, password, chosen harbour and time zone, and
-  replaces the display name other people see on a letter with "Deleted account";
-- deletes friendships, friend requests and blocks, so the account leaves discovery and everyone's
-  lists;
-- deletes notifications, map-marker state and stored idempotency records;
+- clears the username, display name, email address, password, chosen harbour, time zone and
+  preferences, and shows the account as "Deleted user" wherever someone else's history still
+  refers to it (a letter they sent it stays in their Sent history, addressed to "Deleted user");
+- deletes friendships, friend requests, blocks, notifications, document acceptances, map-marker
+  state and stored idempotency records;
 - cancels letters still at sea or adrift in the public ocean, releases the place reserved at the
-  destination harbour, records a `cancelled` journey event and clears the text, so no deleted
-  account's letter can still be found and opened;
-- leaves letters that already reached their recipient with that recipient, as their correspondence;
+  destination shore exactly once, and records a `cancelled` journey event;
+- erases the text of **every** letter the account wrote — delivered ones too — and removes them
+  from recipients' shores and received lists, except a copy held as moderation evidence within
+  its retention period or under a legal or child-safety hold;
+- removes the letters it received from its own shore and archive;
 - leaves moderation cases, reports, violations and appeals in place, under the evidence-retention
   rules in `services/retention.ts`, because an open report, a pending appeal or a restriction
   still in force must outlive the account that caused it.
@@ -114,9 +129,15 @@ would make a published document false:
   `apps/api/src/http/appeals.test.ts`.
 - **Violations never expire.** Only an accepted appeal removes one from the count; serving a
   suspension does not. `standingOf` has no time-based forgiveness in it.
-- **Seven-day evidence retention.** Content evidence is redacted seven days after the case
-  becomes final, automatically, and only a documented legal or child-safety hold goes past it.
-  See `apps/api/src/services/retention.test.ts`.
+- **Thirty-day appeal and evidence window.** An appeal must be filed within 30 days of the
+  decision (server time); afterwards the notice says the period has expired. Content evidence
+  (letter copy, reporter explanations, AI translation and notes) is redacted 30 days after the
+  decision, or when a timely appeal is decided if later; only a documented legal or child-safety
+  hold goes past it. See `apps/api/src/services/retention.test.ts` and
+  `apps/api/src/http/moderation-decisions.test.ts`.
+- **Decisions are final.** No administrator can revoke, reopen or reverse a decision; only the
+  sender's appeal changes it. An ordinary violation escalated to critical gets one new appeal if
+  none was filed. Automated review never decides; it can only mark a case urgent.
 - **Browser storage.** The Privacy Policy lists exactly three things, and
   `apps/web/src/storage.test.ts` walks the source to prove there is no fourth.
 
@@ -139,9 +160,11 @@ server-rendered, and free of JavaScript, like the legal pages beside it. The add
 `MIB_SUPPORT_EMAIL`, which defaults to that address in every environment and can be overridden
 in production; the page and all of its links follow the configured value.
 
-Support is a `mailto:` link and nothing else — there is no form, no inbox integration, no SMTP
-sender and no ticket store in SeaYou, and nothing anywhere holds or asks for a password, an app
-password, an OAuth token, SMTP credentials or a verification code for the address. The page says
+Support is a `mailto:` link and nothing else — there is no form, no inbox integration and no
+ticket store in SeaYou. The same mailbox *sends* password-reset email when a deployment
+configures SMTP; its Gmail App Password is then a deployment secret held only in the host's
+secret store (`docs/DEPLOYMENT.md`, section 2a), never in the repository, and nothing in SeaYou
+ever asks a person for a password, an app password or a verification code for the address. The page says
 plainly that support will never ask for a password, a verification code, Gmail credentials,
 payment details or identity documents.
 
@@ -226,7 +249,20 @@ These cannot be satisfied by wording or by this repository:
 1. **Public policy URL** — point the listing at the deployed `/legal/privacy`. It is already a
    public, non-geofenced HTML page rather than a PDF.
 2. **Data Safety form** — complete it so it matches what SeaYou actually collects, shares,
-   secures and deletes. The Privacy Policy's section 2 is the inventory to copy from.
+   secures and deletes. The Privacy Policy's section 2 is the inventory to copy from. Points
+   version 1.1 changed:
+   - *Collected:* email address (account management, password reset), user IDs, in-app
+     messages (letters), and the device time zone (app functionality — no location permission,
+     not precise or approximate location).
+   - *Shared:* none for advertising or analytics. Password-reset email passes through the
+     operator's email provider (Gmail) as a service provider; say so if the form asks.
+   - *Retention:* notifications kept for the life of the account; operational delivery and
+     worker logs up to 90 days; moderation evidence 30 days from the decision (longer only for a
+     timely appeal or a legal or child-safety hold).
+   - *Deletion:* users can request deletion in the app and on the web; authored letter text,
+     received letters, notifications, identifiers and credentials are deleted; a minimal
+     anonymous tombstone and audit records remain.
+   - *Encryption in transit:* yes, once deployed behind HTTPS.
 3. **Target audience and content rating** — complete both declarations, and do not select
    children as a target audience for a service that shows letters between strangers.
 4. **Account deletion declaration** — give the deployed `/legal/delete-account` as the web

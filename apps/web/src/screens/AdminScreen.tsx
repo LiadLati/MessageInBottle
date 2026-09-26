@@ -1,12 +1,15 @@
 import { useState, type ReactNode } from 'react';
-import type {
-  AdminAppealDto,
-  AdminCaseDetailDto,
-  AdminCaseSummaryDto,
-  ReportReason,
+import {
+  countHiddenControls,
+  revealHiddenControls,
+  type AdminAppealDto,
+  type AdminCaseDetailDto,
+  type AdminCaseSummaryDto,
+  type ReportReason,
 } from '@mib/shared';
 import { api } from '../api/client.js';
 import { ConfirmDialog } from '../components/ConfirmDialog.js';
+import { TabList, tabId } from '../components/Tabs.js';
 import { LetterPaper } from '../components/LetterPaper.js';
 import { REPORT_REASON_LABELS } from '../components/ReportSheet.js';
 import { Avatar, BackButton, DeckScreen, ErrorNote, Skeleton } from '../components/ui.js';
@@ -35,40 +38,30 @@ export function AdminScreen({ section, onSection, onBack }: Props) {
   const [selected, setSelected] = useState<string | null>(null);
   const tabs = (
     <div className="row between" style={{ flexWrap: 'wrap', gap: 10 }}>
-      <div className="seg-tabs" role="tablist" aria-label="Admin section">
-        {(['reports', 'appeals'] as const).map((s) => (
-          <button
-            key={s}
-            type="button"
-            role="tab"
-            aria-selected={section === s}
-            className={section === s ? 'active' : ''}
-            onClick={() => {
-              onSection(s);
-              setSelected(null);
-            }}
-          >
-            {s === 'reports' ? 'Reports' : 'Appeals'}
-          </button>
-        ))}
-      </div>
-      <div className="seg-tabs" role="tablist" aria-label="Status">
-        {(['pending', 'accepted', 'rejected'] as const).map((s) => (
-          <button
-            key={s}
-            type="button"
-            role="tab"
-            aria-selected={status === s}
-            className={status === s ? 'active' : ''}
-            onClick={() => {
-              setStatus(s);
-              setSelected(null);
-            }}
-          >
-            {STATUS_LABELS[s]}
-          </button>
-        ))}
-      </div>
+      <TabList
+        base="admin-section"
+        label="Admin section"
+        items={['reports', 'appeals'] as const}
+        selected={section}
+        onSelect={(s) => {
+          onSection(s);
+          setSelected(null);
+        }}
+        labelOf={(s) => (s === 'reports' ? 'Reports' : 'Appeals')}
+        controls={ADMIN_PANEL}
+      />
+      <TabList
+        base="admin-status"
+        label="Status"
+        items={['pending', 'accepted', 'rejected'] as const}
+        selected={status}
+        onSelect={(s) => {
+          setStatus(s);
+          setSelected(null);
+        }}
+        labelOf={(s) => STATUS_LABELS[s]}
+        controls={ADMIN_PANEL}
+      />
     </div>
   );
   return section === 'reports' ? (
@@ -89,6 +82,9 @@ export function AdminScreen({ section, onSection, onBack }: Props) {
     />
   );
 }
+
+// Both tab lists (section and status) control this one panel.
+const ADMIN_PANEL = 'admin-panel';
 
 // ---------- reports ----------
 
@@ -126,7 +122,14 @@ function ReportsSection({
       wide
     >
       {tabs}
-      <div className="stack" aria-live="polite">
+      <div
+        id={ADMIN_PANEL}
+        role="tabpanel"
+        aria-labelledby={`${tabId('admin-section', 'reports')} ${tabId('admin-status', status)}`}
+        tabIndex={0}
+        className="stack"
+        aria-live="polite"
+      >
         {list.loading && !list.data ? (
           <Skeleton />
         ) : cases.length === 0 ? (
@@ -153,6 +156,11 @@ function ReportsSection({
                       {c.reasons.map((r: ReportReason) => REPORT_REASON_LABELS[r]).join(', ')} ·{' '}
                       {formatDate(c.latestReportAt)}
                     </span>
+                    {c.urgentAt ? (
+                      <span style={{ display: 'block', marginTop: 6 }}>
+                        <UrgentChip />
+                      </span>
+                    ) : null}
                   </span>
                   <AiChip ai={c.ai} />
                 </button>
@@ -164,6 +172,12 @@ function ReportsSection({
       </div>
     </DeckScreen>
   );
+}
+
+// A possible child-safety issue flagged by the model. It only moves the case up the queue:
+// nothing is decided, sanctioned or banned until an administrator does it.
+function UrgentChip() {
+  return <span className="status-chip status-lost">Urgent · possible child safety</span>;
 }
 
 function AiChip({ ai }: { ai: AdminCaseSummaryDto['ai'] }) {
@@ -196,7 +210,9 @@ function CaseView({
   onChanged: () => Promise<void>;
 }) {
   const res = useAsync(() => api.adminCase(id), [id]);
-  const [confirm, setConfirm] = useState<'accept' | 'reject' | 'critical' | 'hold' | null>(null);
+  const [confirm, setConfirm] = useState<
+    'accept' | 'reject' | 'critical' | 'hold-legal' | 'hold-child' | null
+  >(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<Error | null>(null);
   const c = res.data?.case;
@@ -216,7 +232,9 @@ function CaseView({
   const decide = (reason: string) => {
     if (confirm !== 'accept' && confirm !== 'reject') return;
     const outcome = confirm;
-    void act(() => api.adminDecideCase(id, outcome, reason));
+    if (!c) return;
+    const digest = c.evidenceDigest;
+    void act(() => api.adminDecideCase(id, outcome, reason, digest));
   };
   return (
     <DeckScreen
@@ -226,20 +244,35 @@ function CaseView({
       wide
     >
       {res.loading || !c ? <Skeleton /> : <CaseBody c={c} />}
-      {c?.status === 'pending' ? (
-        <div className="row" style={{ justifyContent: 'flex-end', gap: 8 }}>
-          <button type="button" className="btn-secondary" onClick={() => setConfirm('reject')}>
-            Reject report
-          </button>
-          <button type="button" className="btn-destructive" onClick={() => setConfirm('accept')}>
-            Accept report
-          </button>
-        </div>
+      {c?.recused ? (
+        <p className="note amber" role="status">
+          You are the sender, the recipient or a reporter on this case, so another administrator
+          must decide it, its appeal and any critical classification.
+        </p>
       ) : null}
-      {c && c.status !== 'rejected' && c.violation?.severity !== 'critical' ? (
-        <div className="row" style={{ justifyContent: 'flex-end', gap: 8 }}>
+      {/* The three decisions (product decision 2): reject, uphold an ordinary violation, or
+          confirm a critical child-safety violation. Each is final; only the sender's own
+          appeal can change it. An upheld ordinary case can still be escalated to critical. */}
+      {c && !c.recused && (c.status === 'pending' || c.violation?.severity === 'standard') ? (
+        <div className="row" style={{ justifyContent: 'flex-end', gap: 8, flexWrap: 'wrap' }}>
+          {c.status === 'pending' ? (
+            <>
+              <button type="button" className="btn-secondary" onClick={() => setConfirm('reject')}>
+                Reject report
+              </button>
+              <button
+                type="button"
+                className="btn-destructive"
+                onClick={() => setConfirm('accept')}
+              >
+                Uphold · ordinary violation
+              </button>
+            </>
+          ) : null}
           <button type="button" className="btn-destructive" onClick={() => setConfirm('critical')}>
-            Confirmed critical child safety…
+            {c.status === 'pending'
+              ? 'Confirm critical child safety…'
+              : 'Escalate to critical child safety…'}
           </button>
         </div>
       ) : null}
@@ -255,23 +288,33 @@ function CaseView({
               Release {c.hold.reason === 'legal' ? 'legal' : 'child-safety'} hold
             </button>
           ) : c.retention.hold !== 'already_redacted' ? (
-            <button type="button" className="btn-ghost" onClick={() => setConfirm('hold')}>
-              Place a legal hold…
-            </button>
+            <>
+              <button type="button" className="btn-ghost" onClick={() => setConfirm('hold-legal')}>
+                Place a legal hold…
+              </button>
+              <button type="button" className="btn-ghost" onClick={() => setConfirm('hold-child')}>
+                Place a child-safety hold…
+              </button>
+            </>
           ) : null}
         </div>
       ) : null}
       <ErrorNote error={res.error} />
-      {confirm && c ? (
+      {(confirm === 'accept' || confirm === 'reject') && c ? (
         <ConfirmDialog
-          title={confirm === 'accept' ? 'Accept this report?' : 'Reject this report?'}
+          title={
+            confirm === 'accept'
+              ? 'Uphold this report as an ordinary violation?'
+              : 'Reject this report?'
+          }
           body={
             confirm === 'accept'
-              ? `The letter from ${c.sender.displayName} will be removed from every reader and a violation recorded against their account (${c.sender.displayName} currently has ${violationWord(c)}). They will be told, but never who reported it.`
-              : `The case will be closed with no violation. ${c.sender.displayName} will not be told anything.`
+              ? `The letter from ${c.sender.displayName} will be removed from every reader and a violation recorded against their account. ${consequenceSentence(c)} They will be told, but never who reported it, and may appeal once within 30 days. ${FINAL}`
+              : `The case will be closed with no violation. ${c.sender.displayName} will not be told anything. ${FINAL}`
           }
-          confirmLabel={confirm === 'accept' ? 'Accept report' : 'Reject report'}
-          reasonLabel="Why (recorded with the decision)"
+          confirmLabel={confirm === 'accept' ? 'Uphold violation' : 'Reject report'}
+          reasonLabel="Why (mandatory; recorded with the decision)"
+          requireReason
           destructive={confirm === 'accept'}
           busy={busy}
           error={error}
@@ -282,7 +325,13 @@ function CaseView({
       {confirm === 'critical' && c ? (
         <ConfirmDialog
           title="Confirmed critical child-safety violation"
-          body={`This permanently bans ${c.sender.displayName} immediately, without the usual warning and suspension steps, and withdraws the letter from every reader. It is recorded against your administrator account with the reason you give. ${c.sender.displayName} is shown the decision and may appeal it once.`}
+          body={`This PERMANENTLY BANS ${c.sender.displayName} IMMEDIATELY, without the usual warning and suspension steps, and withdraws the letter from every reader. It is recorded with your administrator account, the time, the classification and the reason you give. ${
+            c.status === 'accepted'
+              ? c.appeal
+                ? `${c.sender.displayName} already appealed this decision, so no new appeal opens.`
+                : `Escalating gives ${c.sender.displayName} one new appeal opportunity, within 30 days.`
+              : `${c.sender.displayName} is shown the decision and may appeal it once, within 30 days.`
+          } ${FINAL}`}
           confirmLabel="Ban permanently"
           reasonLabel="Why (mandatory; recorded with your name and the time)"
           requireReason
@@ -290,20 +339,30 @@ function CaseView({
           destructive
           busy={busy}
           error={error}
-          onConfirm={(reason) => void act(() => api.adminDecideCritical(id, reason))}
+          onConfirm={(reason) =>
+            void act(() => api.adminDecideCritical(id, reason, c.evidenceDigest))
+          }
           onCancel={() => setConfirm(null)}
         />
       ) : null}
-      {confirm === 'hold' && c ? (
+      {(confirm === 'hold-legal' || confirm === 'hold-child') && c ? (
         <ConfirmDialog
-          title="Keep this evidence beyond seven days"
-          body="Content evidence is redacted seven days after a case becomes final. A hold keeps it while a documented legal or immediate child-safety reason requires it, and records why and who placed it. Releasing the hold returns the case to the ordinary calculation."
+          title={
+            confirm === 'hold-legal'
+              ? 'Place a legal hold on this evidence'
+              : 'Place a child-safety hold on this evidence'
+          }
+          body="Content evidence is redacted 30 days after the decision, or once a timely appeal is decided if that is later. A hold keeps it for as long as a documented legal or child-safety reason requires, and records why, when and who placed it. Releasing the hold returns the case to the ordinary calculation."
           confirmLabel="Place hold"
           reasonLabel="The documented reason (mandatory)"
           requireReason
           busy={busy}
           error={error}
-          onConfirm={(note) => void act(() => api.adminPlaceHold(id, 'legal', note))}
+          onConfirm={(note) =>
+            void act(() =>
+              api.adminPlaceHold(id, confirm === 'hold-legal' ? 'legal' : 'child_safety', note),
+            )
+          }
           onCancel={() => setConfirm(null)}
         />
       ) : null}
@@ -311,8 +370,25 @@ function CaseView({
   );
 }
 
-function violationWord(_c: AdminCaseDetailDto): string {
-  return 'a record you can check under Appeals';
+// Decision 1: one administrator, no second approval and no way to reopen or reverse.
+const FINAL =
+  'This decision is final: you cannot reopen or reverse it; only the sender’s appeal can change it.';
+
+// What upholding does to the sender's standing, as the server computed it (audit FE-009).
+function consequenceSentence(c: AdminCaseDetailDto): string {
+  const name = c.sender.displayName;
+  const prior = c.consequence.violationsInForce;
+  const had =
+    prior === 0
+      ? `${name} has no violation in force`
+      : `${name} already has ${prior} violation${prior === 1 ? '' : 's'} in force`;
+  const result =
+    c.consequence.ifUpheld === 'warning'
+      ? 'so this one is a warning'
+      : c.consequence.ifUpheld === 'suspension'
+        ? 'so this one suspends the account for seven days'
+        : 'so this one BANS the account permanently';
+  return `${had}, ${result}. Upheld violations never expire.`;
 }
 
 // Sender, intended recipient or finder context, the original letter (evidence), every report
@@ -337,8 +413,18 @@ function CaseBody({ c }: { c: AdminCaseDetailDto }) {
               </div>
             </div>
           </div>
-          <AiChip ai={c.ai} />
+          <div className="row" style={{ gap: 6, flexWrap: 'wrap' }}>
+            {c.urgentAt ? <UrgentChip /> : null}
+            <AiChip ai={c.ai} />
+          </div>
         </div>
+        {c.urgentAt ? (
+          <p className="note amber" role="note">
+            The review model flagged a possible child-safety issue on {formatDayTime(c.urgentAt)},
+            so this case is at the top of the queue. The model only recommends: you decide, and
+            nothing has been sanctioned.
+          </p>
+        ) : null}
         {c.decision ? (
           <p className="note">
             <strong>
@@ -365,7 +451,10 @@ function CaseBody({ c }: { c: AdminCaseDetailDto }) {
               policy. The decision and its reasoning are kept below.
             </p>
           ) : (
-            <LetterPaper text={c.letter.text} font={c.letter.font} readable toolbar="none" />
+            <>
+              <LetterPaper text={c.letter.text} font={c.letter.font} readable toolbar="none" />
+              <HiddenControlsWarning text={c.letter.text} />
+            </>
           )}
         </div>
       </section>
@@ -414,6 +503,12 @@ function CaseBody({ c }: { c: AdminCaseDetailDto }) {
                 </strong>
                 {c.ai.model ? <span className="t-meta"> · {c.ai.model}</span> : null}
               </p>
+              {c.ai.childSafety ? (
+                <p className="note amber">
+                  Flagged as a possible child-safety issue. This is a recommendation, not a
+                  classification.
+                </p>
+              ) : null}
               <p className="secondary">{c.ai.reason}</p>
               {c.ai.uncertainty ? (
                 <p className="note amber">Why it is unsure: {c.ai.uncertainty}</p>
@@ -421,8 +516,9 @@ function CaseBody({ c }: { c: AdminCaseDetailDto }) {
               {c.ai.translation ? (
                 <div className="stack">
                   <span className="t-label">
-                    Translation{c.ai.language ? ` (from ${c.ai.language})` : ''} — the original is
-                    above
+                    Machine translation{c.ai.language ? ` (from ${c.ai.language})` : ''} — produced
+                    by the review model from text the sender wrote, so it can be wrong or
+                    manipulated. The original above is the evidence.
                   </span>
                   <p className="secondary" dir="auto">
                     {c.ai.translation}
@@ -483,7 +579,14 @@ function AppealsSection({
       wide
     >
       {tabs}
-      <div className="stack" aria-live="polite">
+      <div
+        id={ADMIN_PANEL}
+        role="tabpanel"
+        aria-labelledby={`${tabId('admin-section', 'appeals')} ${tabId('admin-status', status)}`}
+        tabIndex={0}
+        className="stack"
+        aria-live="polite"
+      >
         {list.loading && !list.data ? (
           <Skeleton />
         ) : appeals.length === 0 ? (
@@ -595,11 +698,16 @@ function AppealView({
           title={confirm === 'accept' ? 'Accept this appeal?' : 'Reject this appeal?'}
           body={
             confirm === 'accept'
-              ? `The violation will be withdrawn, the letter restored to its readers, and ${a.appellant.displayName}'s standing recalculated — a suspension or ban that rested on it is lifted.`
-              : `The decision stands. ${a.appellant.displayName} will be told, and cannot appeal it again.`
+              ? `The violation will be withdrawn, the letter restored to its readers, and ${a.appellant.displayName}'s standing recalculated — a suspension or ban that rested on it is lifted. This is final.`
+              : `The decision stands permanently. ${a.appellant.displayName} will be told, and cannot appeal it again. ${
+                  a.case.violation?.severity === 'critical'
+                    ? 'The account stays permanently banned.'
+                    : consequenceNow(a)
+                } This is final.`
           }
           confirmLabel={confirm === 'accept' ? 'Accept appeal' : 'Reject appeal'}
-          reasonLabel="Why (recorded with the decision)"
+          reasonLabel="Why (mandatory; recorded with the decision)"
+          requireReason
           destructive={confirm === 'reject'}
           busy={busy}
           error={error}
@@ -608,5 +716,38 @@ function AppealView({
         />
       ) : null}
     </DeckScreen>
+  );
+}
+
+// What the violation keeps doing to the appellant's standing if the appeal is rejected.
+function consequenceNow(a: AdminAppealDto): string {
+  const n = a.case.consequence.violationsInForce;
+  return n >= 3
+    ? 'The account stays permanently banned.'
+    : n === 2
+      ? 'The violation keeps counting: the account has two in force (a suspension).'
+      : 'The violation keeps counting against the account.';
+}
+
+// A letter can carry invisible bidirectional or zero-width controls, which make the rendered
+// text read differently from what was written (audit SEC-018). The moderator is told, and is
+// shown the text with each control made visible, before deciding on it.
+function HiddenControlsWarning({ text }: { text: string }) {
+  const count = countHiddenControls(text);
+  if (count === 0) return null;
+  return (
+    <div className="note amber stack" role="note">
+      <p>
+        This letter contains{' '}
+        {count === 1
+          ? 'an invisible formatting character'
+          : `${count} invisible formatting characters`}{' '}
+        (text-direction or zero-width controls). They can make the text above read differently from
+        what was written. Here it is with each one shown:
+      </p>
+      <pre className="revealed-text" dir="ltr" style={{ whiteSpace: 'pre-wrap', margin: 0 }}>
+        {revealHiddenControls(text)}
+      </pre>
+    </div>
   );
 }

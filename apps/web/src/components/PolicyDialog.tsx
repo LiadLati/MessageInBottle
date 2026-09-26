@@ -2,8 +2,10 @@ import { useEffect, useId, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { PUBLISHED_DOCUMENTS, type DocumentId } from '@mib/shared';
 import { Icon } from '../design/Icon.js';
-import { focusableIn, nextTabTarget } from '../lib/focusTrap.js';
+import { focusableIn } from '../lib/focusTrap.js';
+import { restoreFocus, useModalKeys } from '../lib/modal.js';
 import { PolicyDocumentView } from './PolicyDocumentView.js';
+import { TabList, tabPanelProps } from './Tabs.js';
 
 // The three documents, readable before there is an account and again from account settings.
 // A modal so a half-filled registration form survives the reading; focus stays inside, Escape
@@ -13,6 +15,7 @@ export function PolicyDialog({ initial, onClose }: { initial: DocumentId; onClos
   const dialogRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const headingId = useId();
+  const tabsBase = `policy${useId().replace(/:/g, '')}`;
   const doc = PUBLISHED_DOCUMENTS.find((d) => d.id === current) ?? PUBLISHED_DOCUMENTS[0]!;
 
   useEffect(() => {
@@ -26,7 +29,7 @@ export function PolicyDialog({ initial, onClose }: { initial: DocumentId; onClos
     return () => {
       for (const el of siblings) el.removeAttribute('inert');
       document.body.style.overflow = bodyOverflow;
-      previous?.focus();
+      restoreFocus(previous);
     };
   }, []);
 
@@ -35,23 +38,7 @@ export function PolicyDialog({ initial, onClose }: { initial: DocumentId; onClos
     scrollRef.current?.scrollTo({ top: 0 });
   }, [current]);
 
-  const onKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Escape') {
-      e.preventDefault();
-      onClose();
-      return;
-    }
-    if (e.key !== 'Tab' || !dialogRef.current) return;
-    const target = nextTabTarget(
-      focusableIn(dialogRef.current),
-      document.activeElement,
-      e.shiftKey,
-    );
-    if (target) {
-      e.preventDefault();
-      target.focus();
-    }
-  };
+  useModalKeys(dialogRef, onClose);
 
   return createPortal(
     <div
@@ -60,7 +47,7 @@ export function PolicyDialog({ initial, onClose }: { initial: DocumentId; onClos
       role="dialog"
       aria-modal="true"
       aria-labelledby={headingId}
-      onKeyDown={onKeyDown}
+
       tabIndex={-1}
     >
       <div className="policy-dialog-bar">
@@ -71,21 +58,18 @@ export function PolicyDialog({ initial, onClose }: { initial: DocumentId; onClos
           <span className="t-eyebrow">SeaYou</span>
         </div>
       </div>
-      <div className="policy-tabs" role="tablist" aria-label="Documents">
-        {PUBLISHED_DOCUMENTS.map((d) => (
-          <button
-            key={d.id}
-            type="button"
-            role="tab"
-            className="btn-secondary"
-            aria-selected={d.id === current}
-            onClick={() => setCurrent(d.id)}
-          >
-            {d.title}
-          </button>
-        ))}
-      </div>
-      <div ref={scrollRef} className="policy-scroll" role="tabpanel">
+      <TabList
+        base={tabsBase}
+        className="policy-tabs"
+        tabClassName="btn-secondary"
+        label="Documents"
+        items={PUBLISHED_DOCUMENTS.map((d) => d.id)}
+        selected={current}
+        onSelect={setCurrent}
+        labelOf={(id) => PUBLISHED_DOCUMENTS.find((d) => d.id === id)?.title ?? id}
+      />
+      {/* Focusable so the keyboard can scroll the document (audit A11Y-001). */}
+      <div ref={scrollRef} className="policy-scroll" {...tabPanelProps(tabsBase, current)}>
         <PolicyDocumentView doc={doc} headingId={headingId} />
       </div>
     </div>,

@@ -3,7 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import type Database from 'better-sqlite3';
 import { eq } from 'drizzle-orm';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, onTestFinished } from 'vitest';
 import { MIGRATIONS_FOLDER, createDb, runMigrations } from './client.js';
 import * as t from './schema.js';
 import { DEV_SEED_PASSWORD } from './seed-data.js';
@@ -25,6 +25,9 @@ const NEWEST = new Set([
   '0012_policy_acceptances',
   '0013_account_deletion',
   '0014_appeal_waiver_and_holds',
+  '0015_product_decisions',
+  '0016_account_storms',
+  '0017_account_zone_backfill',
 ]);
 
 function tableNames(sqlite: Database.Database): string[] {
@@ -50,13 +53,15 @@ function dump(sqlite: Database.Database): Record<string, Row[]> {
 
 // Builds a migrations folder that stops before the newest migration, as an older deployment
 // would have applied it.
-function legacyMigrationsFolder(): string {
+function legacyMigrationsFolder(exclude: ReadonlySet<string> = NEWEST): string {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mib-legacy-'));
+  // Removed when the test ends, whether or not its assertions held.
+  onTestFinished(() => fs.rmSync(dir, { recursive: true, force: true }));
   const journal = JSON.parse(
     fs.readFileSync(path.join(MIGRATIONS_FOLDER, 'meta', '_journal.json'), 'utf8'),
   ) as { entries: Array<{ tag: string }> };
-  const entries = journal.entries.filter((e) => !NEWEST.has(e.tag));
-  expect(entries).toHaveLength(journal.entries.length - NEWEST.size);
+  const entries = journal.entries.filter((e) => !exclude.has(e.tag));
+  expect(entries).toHaveLength(journal.entries.length - exclude.size);
   fs.mkdirSync(path.join(dir, 'meta'));
   fs.writeFileSync(
     path.join(dir, 'meta', '_journal.json'),
@@ -170,10 +175,41 @@ describe('migrating a populated database', () => {
     expect(
       ctx.db.select().from(t.users).where(eq(t.users.username, 'ada')).get()!.email,
     ).toBeNull();
-    fs.rmSync(legacyDir, { recursive: true, force: true });
     void app;
     void DEV_SEED_PASSWORD;
     // Two full migrations plus the seeded sea graph land just either side of vitest's 5 s default
     // on a slow machine, so this test's budget is explicit rather than left to flake on timing.
   }, 60_000);
+});
+
+describe('the map-clock history backfill (0017)', () => {
+  it('carries each existing device zone into the history, from when it was accepted, and nothing else', () => {
+    const dir = legacyMigrationsFolder(new Set(['0017_account_zone_backfill']));
+    const { db, sqlite } = createDb(':memory:');
+    runMigrations(db, dir);
+    expect(tableNames(sqlite)).toContain('account_zone_changes');
+    const insert = sqlite.prepare(
+      'INSERT INTO users (id, username, display_name, created_at, time_zone, time_zone_since) VALUES (?, ?, ?, ?, ?, ?)',
+    );
+    insert.run('usr_with_zone', 'with_zone', 'W', T0, 'Asia/Jerusalem', T0 + 1000);
+    insert.run('usr_no_zone', 'no_zone', 'N', T0, null, null);
+    const usersBefore = sqlite.prepare('SELECT * FROM users ORDER BY id').all();
+    runMigrations(db);
+    expect(sqlite.prepare('SELECT * FROM account_zone_changes').all()).toEqual([
+      {
+        id: 'azc_backfill_usr_with_zone',
+        user_id: 'usr_with_zone',
+        zone: 'Asia/Jerusalem',
+        source: 'device',
+        effective_at: T0 + 1000,
+        created_at: T0 + 1000,
+      },
+    ]);
+    // Nothing that existed was changed, and a second run adds nothing.
+    expect(sqlite.prepare('SELECT * FROM users ORDER BY id').all()).toEqual(usersBefore);
+    runMigrations(db);
+    expect(sqlite.prepare('SELECT count(*) AS n FROM account_zone_changes').get()).toEqual({
+      n: 1,
+    });
+  });
 });

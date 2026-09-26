@@ -11,13 +11,18 @@ import { createDb, runMigrations, type Db } from '../db/client.js';
 import * as t from '../db/schema.js';
 import { DEV_SEED_PASSWORD } from '../db/seed-data.js';
 import { newId, newSecretToken, sha256 } from '../lib/ids.js';
-import { hashPassword } from '../lib/password.js';
+import { hashPassword, setPasswordHashCost } from '../lib/password.js';
 import { seedChart, seedUsers } from '../db/seed.js';
 import type { Clock } from '../lib/clock.js';
 import { OutboxMailer } from '../lib/mail.js';
 import type { createApp } from '../http/app.js';
 import type { AppContext, AuthUser } from '../services/context.js';
 import { RETENTION_DEFAULT } from '../services/retention.js';
+
+// Tests hash and verify thousands of passwords; they run at Node's old default cost (2^14)
+// rather than the production 2^16. Nothing a test asserts depends on the cost itself, except
+// the re-hash test, which sets its own.
+setPasswordHashCost(2 ** 14);
 
 export class ManualClock implements Clock {
   constructor(private current: number) {}
@@ -43,10 +48,14 @@ export function testConfig(overrides: Partial<AppConfig> = {}): AppConfig {
     msPerChartUnit: 60 * 60 * 1000,
     minJourneyMs: 6 * 60 * 60 * 1000,
     defaultShoreCapacity: 5,
+    // Small by default so tests reach "full" quickly; a test that sets defaultShoreCapacity to
+    // make room gets the same room per recipient.
+    shoreCapacity: overrides.defaultShoreCapacity ?? 5,
     journeyTickMs: 1000,
     sessionTtlMs: 60 * 60 * 1000,
     corsOrigin: '*',
     trustProxy: true,
+    trustedProxyHops: 1,
     appUrl: 'http://app.test',
     supportEmail: SUPPORT_EMAIL,
     mail: {
@@ -63,7 +72,6 @@ export function testConfig(overrides: Partial<AppConfig> = {}): AppConfig {
       model: 'test-model',
       timeoutMs: 1000,
       tickMs: 1000,
-      autoDecide: false,
     },
     retention: RETENTION_DEFAULT,
     retentionTickMs: 60 * 60 * 1000,
@@ -195,4 +203,12 @@ export function legacyAccount(
     })
     .run();
   return { id, token };
+}
+
+// The evidence digest an administrator's screen would echo back when deciding a case (the
+// stale-decision guard in services/admin.ts).
+export function evidenceDigest(w: TestWorld, caseId: string): string {
+  const c = w.db.select().from(t.moderationCases).where(eq(t.moderationCases.id, caseId)).get();
+  if (!c) throw new Error(`no case ${caseId}`);
+  return sha256(c.evidenceText);
 }

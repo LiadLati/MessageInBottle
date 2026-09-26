@@ -11,6 +11,9 @@
 //   dist/grant-admin.js       role provisioning     node dist/grant-admin.js -- …
 //   dist/grant-developer.js
 //   dist/retention.js         retention dry-run / apply
+//   dist/backup.js            online backup and backup verification
+//   dist/deletion-backfill.js deletion rules for accounts deleted earlier (dry run by default)
+//   dist/audit-export.js      moderation audit trail for one account (data-subject requests)
 //   dist/data/sea-graph.v2.json   read at start to seed the chart
 // The migrations stay in apps/api/drizzle, which config.ts resolves as <dist>/../drizzle.
 //
@@ -35,6 +38,9 @@ const entryPoints = {
   'grant-admin': 'src/tools/grant-admin.ts',
   'grant-developer': 'src/tools/grant-developer.ts',
   retention: 'src/tools/retention.ts',
+  backup: 'src/tools/backup.ts',
+  'deletion-backfill': 'src/tools/deletion-backfill.ts',
+  'audit-export': 'src/tools/audit-export.ts',
 };
 
 fs.rmSync(dist, { recursive: true, force: true });

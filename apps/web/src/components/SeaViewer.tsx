@@ -2,7 +2,7 @@ import { useEffect, useId, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import type { SentBottleSummaryDto } from '@mib/shared';
 import { Icon } from '../design/Icon.js';
-import { focusableIn, nextTabTarget } from '../lib/focusTrap.js';
+import { restoreFocus, useModalKeys } from '../lib/modal.js';
 import { formatDuration, prefersReducedMotion } from '../lib/format.js';
 import type { BottleWeather } from '../lib/oceanWeather.js';
 import { ShoreScene } from './ShoreScene.js';
@@ -49,7 +49,7 @@ export function SeaViewer({ bottle, weather, phase, onBack }: Props) {
     return () => {
       for (const el of siblings) el.removeAttribute('inert');
       document.body.style.overflow = bodyOverflow;
-      previous?.focus();
+      restoreFocus(previous);
     };
   }, []);
 
@@ -57,24 +57,6 @@ export function SeaViewer({ bottle, weather, phase, onBack }: Props) {
     if (closing) return;
     setClosing(true);
     window.setTimeout(onBack, prefersReducedMotion() ? CLOSE_MS_REDUCED : CLOSE_MS);
-  };
-
-  const onKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Escape') {
-      e.preventDefault();
-      close();
-      return;
-    }
-    if (e.key !== 'Tab' || !dialogRef.current) return;
-    const target = nextTabTarget(
-      focusableIn(dialogRef.current),
-      document.activeElement,
-      e.shiftKey,
-    );
-    if (target) {
-      e.preventDefault();
-      target.focus();
-    }
   };
 
   // An outcome that commits while the viewer is open is shown as the saved state: the viewer
@@ -101,12 +83,13 @@ export function SeaViewer({ bottle, weather, phase, onBack }: Props) {
         ? `Arrived at ${bottle.destinationShore.name}. Its journey is complete.`
         : `${formatDuration(bottle.elapsedMs)} at sea · ${sceneWeather === 'storm' ? 'rough water' : 'calm water'} · watching does not change the weather`;
 
+  useModalKeys(dialogRef, close);
+
   return createPortal(
     <div
       className={`sea-viewer ${sceneWeather}${closing ? ' closing' : ''}`}
       data-weather={sceneWeather}
       data-phase={phase}
-      onKeyDown={onKeyDown}
     >
       <div
         ref={dialogRef}

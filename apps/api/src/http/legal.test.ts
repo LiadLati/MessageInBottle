@@ -82,8 +82,10 @@ describe('the public account-deletion page', () => {
     const html = await res.text();
     expect(html).toContain('<h1>Delete your account</h1>');
     expect(html).toMatch(/every signed-in session ends at once/i);
-    expect(html).toMatch(/letters of yours that are still at sea/i);
-    expect(html).toMatch(/still open or still in force/i);
+    expect(html).toMatch(/text of every letter you wrote is erased/i);
+    expect(html).toMatch(/letters still at sea or adrift in the public ocean are cancelled/i);
+    expect(html).toMatch(/“Deleted user”/);
+    expect(html).toMatch(/30-day retention period/i);
     expect(html).toContain('name="username"');
     expect(html).toContain('type="password"');
     expect(html).toContain('name="confirm"');
@@ -133,7 +135,7 @@ describe('the public account-deletion page', () => {
     expect(row.email).toBeNull();
     expect(row.passwordHash).toBeNull();
     expect(row.username).toMatch(/^deleted_/);
-    expect(row.displayName).toBe('Deleted account');
+    expect(row.displayName).toBe('Deleted user');
     // The session is gone and cannot be used again.
     expect(w.db.select().from(t.sessions).where(eq(t.sessions.userId, ada.id)).all()).toHaveLength(
       0,
@@ -258,7 +260,7 @@ describe('the in-app deletion path', () => {
 
     const after = w.db.select().from(t.bottles).where(eq(t.bottles.id, atSea)).get()!;
     expect(after.state).toBe('cancelled');
-    expect(after.senderNameSnapshot).toBe('Deleted account');
+    expect(after.senderNameSnapshot).toBe('Deleted user');
     expect(w.db.select().from(t.letters).where(eq(t.letters.id, letterId)).get()!.text).toBe('');
     // The reserved place at the destination harbour is given back.
     const reservation = w.db

@@ -124,6 +124,20 @@ describe('the public support page', () => {
   });
 });
 
+describe('an unknown legal address (FE-018)', () => {
+  it('is an HTML page with a way back, not an API error body', async () => {
+    const res = await get(createApp(createTestWorld().ctx), '/legal/nope');
+    expect(res.status).toBe(404);
+    expect(res.headers.get('content-type')).toMatch(/text\/html/);
+    const html = await res.text();
+    expect(html).toContain('<html lang="en"');
+    expect(html).toContain('name="viewport"');
+    expect(html).toContain('href="/legal"');
+    expect(html).toContain('noindex');
+    expect(html).not.toContain('not_found');
+  });
+});
+
 describe('support stays reachable', () => {
   it('from every public legal page', async () => {
     const app = createApp(createTestWorld().ctx);

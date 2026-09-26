@@ -6,14 +6,25 @@ import { CHART_BOUNDS } from '../db/seed-data.js';
 import { buildGraph, shoreNodeId, type RouteGraph } from '../domain/routing.js';
 import { badRequest, notFound } from '../lib/errors.js';
 import type { AppContext } from './context.js';
+import { harbourChanged } from './weather.js';
 
 // Graphs are immutable once written, so each (database, version) pair is built once. The active
 // version is still read per call: it is one row and it changes when a new graph is seeded.
+//
+// The key is the underlying SQLite connection, not the Drizzle object: every transaction is a
+// new Drizzle object over the same connection, and keying on it rebuilt the 173,000-element
+// sea graph inside every release's write transaction — ~0.3–0.8 s per release, serialising
+// every writer (audit QA-006).
 const graphCache = new WeakMap<object, Map<number, RouteGraph>>();
 
+function connectionOf(db: DbOrTx): object {
+  return (db as unknown as { session?: { client?: object } }).session?.client ?? db;
+}
+
 function cacheFor(db: DbOrTx): Map<number, RouteGraph> {
-  let map = graphCache.get(db);
-  if (!map) graphCache.set(db, (map = new Map<number, RouteGraph>()));
+  const key = connectionOf(db);
+  let map = graphCache.get(key);
+  if (!map) graphCache.set(key, (map = new Map<number, RouteGraph>()));
   return map;
 }
 
@@ -50,7 +61,7 @@ export function loadActiveGraph(db: DbOrTx): RouteGraph {
 
 // Tests that edit graph rows directly call this to drop the memoised graph.
 export function invalidateGraphCache(db: DbOrTx): void {
-  graphCache.delete(db);
+  graphCache.delete(connectionOf(db));
 }
 
 export function geoOf(row: { lng: number | null; lat: number | null }): GeoPoint | null {
@@ -96,4 +107,6 @@ export function setUserShore(ctx: AppContext, userId: string, shoreId: string): 
   if (shoreNodeId(graph, shoreId) === null)
     throw badRequest('shore_unsupported', 'this shore is not connected to the sea routes');
   ctx.db.update(t.users).set({ shoreId }).where(eq(t.users.id, userId)).run();
+  // Before any device report, the harbour sets the account's map clock.
+  harbourChanged(ctx, userId);
 }

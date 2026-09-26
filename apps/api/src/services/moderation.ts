@@ -1,4 +1,5 @@
 import { and, asc, eq, gte, isNull } from 'drizzle-orm';
+import { APPEAL_WINDOW_MS } from '@mib/shared';
 import type {
   AccountStandingDto,
   ReportReason,
@@ -273,12 +274,29 @@ export function standingOf(db: DbOrTx, userId: string, now: number): Standing {
   return { standing: 'banned', suspendedUntil: null, violationsInForce: n };
 }
 
+// The appeal window (product decision 5): 30 days on server time from the decision, whether
+// or not the person has opened SeaYou since. An escalation to a critical ban that reopened the
+// appeal starts a new window from the escalation (product decision 2).
+export function appealWindowStart(v: ViolationRow): number {
+  return v.appealWindowStartsAt ?? v.decidedAt;
+}
+export function appealDeadline(v: ViolationRow): number {
+  return appealWindowStart(v) + APPEAL_WINDOW_MS;
+}
+
 // May this person still appeal this decision? The single opportunity is spent by appealing or
-// by explicitly waiving it, and a revoked violation has nothing left to appeal. Time is not a
-// factor: the offer stands until they answer it.
-export function appealAvailable(db: DbOrTx, v: ViolationRow): boolean {
+// by explicitly waiving it, lapses when the 30-day window closes, and a revoked violation has
+// nothing left to appeal.
+export function appealAvailable(db: DbOrTx, v: ViolationRow, now: number): boolean {
   if (v.revokedAt !== null) return false;
   if (v.appealWaivedAt !== null) return false;
+  if (now >= appealDeadline(v)) return false;
+  return db.select().from(t.appeals).where(eq(t.appeals.violationId, v.id)).get() === undefined;
+}
+
+// The window closed with the opportunity unused: no appeal, no waiver.
+function appealLapsed(db: DbOrTx, v: ViolationRow, now: number): boolean {
+  if (v.revokedAt !== null || v.appealWaivedAt !== null || now < appealDeadline(v)) return false;
   return db.select().from(t.appeals).where(eq(t.appeals.violationId, v.id)).get() === undefined;
 }
 
@@ -288,7 +306,7 @@ export function isRestricted(db: DbOrTx, userId: string, now: number): Standing 
   return s.standing === 'suspended' || s.standing === 'banned' ? s : null;
 }
 
-function noticeOf(db: DbOrTx, v: ViolationRow, ordinal: number): ViolationNoticeDto {
+function noticeOf(db: DbOrTx, v: ViolationRow, ordinal: number, now: number): ViolationNoticeDto {
   const bottle = db.select().from(t.bottles).where(eq(t.bottles.id, v.bottleId)).get()!;
   const appeal = db.select().from(t.appeals).where(eq(t.appeals.violationId, v.id)).get();
   return {
@@ -299,9 +317,12 @@ function noticeOf(db: DbOrTx, v: ViolationRow, ordinal: number): ViolationNotice
     revokedAt: isoOrNull(v.revokedAt),
     acknowledgedAt: isoOrNull(v.acknowledgedAt),
     severity: v.severity,
-    appealAvailable: appealAvailable(db, v),
+    appealAvailable: appealAvailable(db, v, now),
     appealWaivedAt: isoOrNull(v.appealWaivedAt),
     noticePresentedAt: isoOrNull(v.noticePresentedAt),
+    appealDeadlineAt: iso(appealDeadline(v)),
+    appealExpired: appealLapsed(db, v, now),
+    appealReopenedAt: isoOrNull(v.appealReopenedAt),
     bottle: {
       id: bottle.id,
       recipientDisplayName: bottle.recipientNameSnapshot,
@@ -331,7 +352,7 @@ export function accountStanding(ctx: AppContext, userId: string): AccountStandin
     .orderBy(asc(t.violations.decidedAt), asc(t.violations.id))
     .all();
   let ordinal = 0;
-  const notices = all.map((v) => noticeOf(ctx.db, v, v.revokedAt === null ? ++ordinal : 0));
+  const notices = all.map((v) => noticeOf(ctx.db, v, v.revokedAt === null ? ++ordinal : 0, now));
   // The first violation's warning: shown once, until acknowledged, as long as it is in force.
   const inForce = notices.filter((n) => n.revokedAt === null);
   const pendingWarning =
@@ -339,7 +360,12 @@ export function accountStanding(ctx: AppContext, userId: string): AccountStandin
   // The decision notice still owed an answer: the oldest upheld violation whose single appeal
   // is neither spent nor waived. It reappears on every eligible visit, so closing SeaYou,
   // reloading, or losing the connection resolves nothing.
-  const pendingDecision = inForce.find((n) => n.appealAvailable) ?? null;
+  // After the 30-day window the notice still comes back once, to say the decision is final and
+  // the appeal period has ended, until the person acknowledges it.
+  const pendingDecision =
+    inForce.find((n) => n.appealAvailable) ??
+    inForce.find((n) => n.appealExpired && n.acknowledgedAt === null) ??
+    null;
   return {
     standing: s.standing,
     suspendedUntil: isoOrNull(s.suspendedUntil),
@@ -383,7 +409,7 @@ export function presentDecisionNotice(
       );
     const fresh = tx.select().from(t.violations).where(eq(t.violations.id, v.id)).get()!;
     const ordinal = violationsInForce(tx, user.id).findIndex((x) => x.id === v.id) + 1;
-    return noticeOf(tx, fresh, ordinal);
+    return noticeOf(tx, fresh, ordinal, now);
   });
 }
 
@@ -431,7 +457,7 @@ export function waiveAppeal(
       );
     const fresh = tx.select().from(t.violations).where(eq(t.violations.id, v.id)).get()!;
     const ordinal = violationsInForce(tx, user.id).findIndex((x) => x.id === v.id) + 1;
-    return noticeOf(tx, fresh, ordinal);
+    return noticeOf(tx, fresh, ordinal, now);
   });
 }
 
@@ -469,13 +495,18 @@ export function submitAppeal(
     const v = tx.select().from(t.violations).where(eq(t.violations.id, input.violationId)).get();
     if (!v || v.userId !== user.id) throw notFound('violation');
     if (v.revokedAt !== null) throw badRequest('already_revoked', 'this violation was revoked');
-    // The single opportunity, once given up, is gone. There is no time limit — only this.
+    // The single opportunity, once given up, is gone.
     if (v.appealWaivedAt !== null)
       throw conflict(
         'appeal_waived',
         'You chose to continue without appealing this decision, so it can no longer be appealed.',
       );
     const existing = tx.select().from(t.appeals).where(eq(t.appeals.violationId, v.id)).get();
+    if (!existing && now >= appealDeadline(v))
+      throw conflict(
+        'appeal_expired',
+        'The 30-day appeal period for this decision has ended. The decision is final.',
+      );
     if (existing) {
       throw conflict(
         'already_appealed',
@@ -511,29 +542,68 @@ export function submitAppeal(
     );
     // A concurrent duplicate lost the unique index race: report the one that won.
     const ordinal = violationsInForce(tx, user.id).findIndex((x) => x.id === v.id) + 1;
-    return noticeOf(tx, v, ordinal);
+    return noticeOf(tx, v, ordinal, now);
   });
 }
 
 // ---------- the sender's notifications ----------
 
+// A person reads "until 30 September 2026, 01:15 CEST" in their own account zone, not an RFC
+// 1123 UTC string (audit FE-022). An account without a usable zone is told the zone is UTC.
+export function suspensionEnd(untilMs: number, timeZone: string | null): string {
+  const format = (zone: string) =>
+    new Intl.DateTimeFormat('en-GB', {
+      dateStyle: 'long',
+      timeStyle: 'short',
+      timeZone: zone,
+    }).format(new Date(untilMs));
+  if (timeZone) {
+    try {
+      const zoneName =
+        new Intl.DateTimeFormat('en-GB', { timeZone, timeZoneName: 'short' })
+          .formatToParts(new Date(untilMs))
+          .find((p) => p.type === 'timeZoneName')?.value ?? timeZone;
+      return `${format(timeZone)} ${zoneName}`;
+    } catch {
+      /* an unknown zone falls through to UTC */
+    }
+  }
+  return `${format('UTC')} UTC`;
+}
+
+function accountZone(tx: DbOrTx, userId: string): string | null {
+  return (
+    tx.select({ z: t.users.timeZone }).from(t.users).where(eq(t.users.id, userId)).get()?.z ?? null
+  );
+}
+
 // One row per event, deduplicated by key: retries and concurrent decisions insert nothing new.
 export function notifyStanding(
   tx: DbOrTx,
   userId: string,
-  violation: { id: string; recipientName: string },
+  violation: { id: string; recipientName: string; critical?: boolean },
   standing: Standing,
   now: number,
 ): void {
   const base = `Your letter to ${violation.recipientName} was reported and, after review, removed for breaking the community rules.`;
-  if (standing.standing === 'banned') {
+  if (violation.critical) {
     enqueueNotification(tx, {
       userId,
       type: 'moderation',
       kind: 'moderation_banned',
       bottleId: null,
       dedupeKey: `banned:${violation.id}`,
-      message: `${base} This is your third accepted violation: your account is permanently banned. You can still sign in to read this and to appeal.`,
+      message: `Your letter to ${violation.recipientName} was reviewed by a person and confirmed as a critical child-safety violation. Your account is permanently banned. You can still sign in to read this decision, appeal it once within 30 days, contact support, or delete your account.`,
+      now,
+    });
+  } else if (standing.standing === 'banned') {
+    enqueueNotification(tx, {
+      userId,
+      type: 'moderation',
+      kind: 'moderation_banned',
+      bottleId: null,
+      dedupeKey: `banned:${violation.id}`,
+      message: `${base} This is your third accepted violation: your account is permanently banned. You can still sign in to read this decision and to appeal it once within 30 days.`,
       now,
     });
   } else if (standing.standing === 'suspended') {
@@ -543,7 +613,7 @@ export function notifyStanding(
       kind: 'moderation_suspended',
       bottleId: null,
       dedupeKey: `suspended:${violation.id}`,
-      message: `${base} This is your second accepted violation: your account is suspended for seven days, until ${new Date(standing.suspendedUntil!).toUTCString()}. Another accepted violation means a permanent ban.`,
+      message: `${base} This is your second accepted violation: your account is suspended for seven days, until ${suspensionEnd(standing.suspendedUntil!, accountZone(tx, userId))}. Another accepted violation means a permanent ban.`,
       now,
     });
   } else {
@@ -565,6 +635,6 @@ export function assertNotRestricted(ctx: AppContext, user: AuthUser): void {
   throw forbidden(
     s.standing === 'banned'
       ? 'This account is permanently banned.'
-      : `This account is suspended until ${new Date(s.suspendedUntil!).toUTCString()}.`,
+      : `This account is suspended until ${suspensionEnd(s.suspendedUntil!, accountZone(ctx.db, user.id))}.`,
   );
 }

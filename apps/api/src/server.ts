@@ -19,16 +19,27 @@ async function main(): Promise<void> {
   const { createMailer } = await import('./lib/mail.js');
   const { runJourneyTick } = await import('./services/journey.js');
   const { activatePublicListings } = await import('./services/risk.js');
-  const { createOllamaReviewer, runAiReviewTick } = await import('./services/ai-review.js');
+  const { policyActivatedAt } = await import('./services/weather.js');
+  const { createOllamaReviewer, releaseStaleAiClaims, runAiReviewTick } =
+    await import('./services/ai-review.js');
   const { applyRetention } = await import('./services/retention.js');
+  const { pruneExpiredRecords } = await import('./services/housekeeping.js');
   const { serve } = await import('@hono/node-server');
   const { assertPolicySetServeable } = await import('./services/policies.js');
 
   const config = loadConfig();
   // A released document set that still carries an unresolved field must never be served.
   assertPolicySetServeable();
+  const { acquireProcessLock } = await import('./lib/process-lock.js');
+  const releaseLock = acquireProcessLock(config.databasePath);
+  process.once('exit', releaseLock);
   const { db, sqlite } = createDb(config.databasePath);
   prepareDatabase(db, config, Date.now());
+  // One API process per database: any review still marked running was interrupted by the last
+  // stop, whether or not AI review is enabled now.
+  const interrupted = releaseStaleAiClaims(db, Date.now(), 0);
+  if (interrupted > 0)
+    console.log(`Returned ${interrupted} interrupted AI review(s) to the queue.`);
 
   const ctx: AppContext = {
     db,
@@ -39,6 +50,8 @@ async function main(): Promise<void> {
   };
   // Adrift bottles listed before the 72-hour rule existed get a full 72 hours from now.
   const activated = activatePublicListings(ctx);
+  // Risk policy v4 takes over from this boot on (recorded once; later boots keep the first).
+  policyActivatedAt(ctx);
   if (activated > 0) console.log(`Public listing deadline set for ${activated} legacy bottle(s).`);
   const app = createApp(ctx);
 
@@ -73,13 +86,18 @@ async function main(): Promise<void> {
   // The pass is idempotent and re-checks every case inside its own transaction, so an hourly
   // tick that overlaps a decision, an appeal or a hold does the right thing.
   const retentionWorker = setInterval(() => {
+    try {
+      pruneExpiredRecords(db, Date.now());
+    } catch (err) {
+      console.error('housekeeping tick failed', err);
+    }
     if (!config.retention.enabled) return;
     try {
       const result = applyRetention(db, Date.now(), config.retention);
       if (result.redacted.length > 0)
         console.log(
-          `Evidence retention: redacted ${result.redacted.length} case(s) that became final more ` +
-            `than ${config.retention.finalAfterMs / 86_400_000} days ago.`,
+          `Evidence retention: redacted ${result.redacted.length} case(s) decided more than ` +
+            `${config.retention.afterDecisionMs / 86_400_000} days ago.`,
         );
     } catch (err) {
       console.error('retention tick failed', err);
@@ -94,7 +112,7 @@ async function main(): Promise<void> {
     );
     console.log(
       config.ai.enabled
-        ? `  AI review: ${config.ai.model} at ${config.ai.endpoint} (${config.ai.autoDecide ? 'automatic decisions ON' : 'recommendations only'}); reports queue while it is offline.`
+        ? `  AI review: ${config.ai.model} at ${config.ai.endpoint} (recommendations only); reports queue while it is offline.`
         : '  AI review is OFF: reports wait for an admin.',
     );
     if (!config.devMode && !PRODUCTION_BUILD && process.env.NODE_ENV !== 'production')
@@ -140,7 +158,11 @@ function fatal(err: unknown, port?: number): never {
   const code = (err as { code?: string } | null)?.code;
   const rule = '='.repeat(72);
   console.error(`\n${rule}\nSeaYou API failed to start.\n\n  ${message}\n`);
-  if ((err as { name?: string } | null)?.name === 'ConfigError') {
+  if ((err as { name?: string } | null)?.name === 'ProcessLockError') {
+    console.error(
+      '  Stop the other process first. This API keeps its workers and limits in memory.',
+    );
+  } else if ((err as { name?: string } | null)?.name === 'ConfigError') {
     console.error('  The configuration is invalid, so nothing was started. See .env.example.');
   } else if (code === 'ERR_MODULE_NOT_FOUND' || /Cannot find (module|package)/i.test(message)) {
     console.error('  A dependency is missing. After pulling changes, run:  pnpm install');

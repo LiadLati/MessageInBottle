@@ -3,7 +3,7 @@
 ## Product Specification — v1.0
 
 Date: 22 September 2026  
-Status: Describes the system as built. Every rule below is implemented and covered by tests unless it is marked **Open**.  
+Status: Describes the system as built, except where noted. **Known drift (audit QA-025, 2026-09-23):** §11 "As built" and §18 were reconciled with the code; the vision (§1), §9 intro and event table, §10.1–10.3, §11 invariants and §19–§21 still carry earlier wording about stranding, rescue and discard, which the product does not have. Where they disagree, §11 "As built", §18 and the code win.  
 Supersedes: v0.2 revised product baseline  
 Product name: SeaYou
 
@@ -191,6 +191,10 @@ Proposed: mutual friend-request approval, exact username or invitation-link disc
 
 Check eligibility at release, rescue, and arrival. A blocked sender must never bypass the block through a stranded bottle or public lookup.
 
+**Unblock — decided (product decision 10):** Settings → Blocked users lists only the blocks a person placed; Unblock asks for confirmation. It permits future interaction and public-ocean encounters, restores no removed, cancelled or hidden letter, restores no friendship (a new request is needed) and reveals nothing about the blocked period. A finder may block the anonymous writer during the one reading; that entry names the bottle, never the writer, and is undone by the bottle.
+
+**Suspended and banned accounts — decided (product decision 14):** hidden from friend lists and recipient choice (friendships kept); no incoming or outgoing bottles; bottles travelling to them are cancelled once with capacity released and the sender told only “Delivery unavailable”; no arrival notice reaches them. A locked standing screen (reason, end time, countdown, ban warning) permits only standing, a timely appeal, Support, deletion and sign-out, and the account restores itself when the suspension ends. A ban shows the same shell with no countdown and no inbox.
+
 Proposed: if blocking or account restrictions invalidate an in-flight delivery, cancel it with a generic “Delivery unavailable” status. Do not notify the sender that they were blocked and do not publish the bottle as a fallback. Remove any active public listing. Exact behavior for unfriending alone, account deletion, and already-delivered unread letters requires confirmation. Safety restrictions take precedence over the journey fiction.
 
 ### 8.3 Capacity
@@ -206,7 +210,7 @@ Proposed reservation model:
 - Reducing capacity does not evict accepted bottles; new releases wait until capacity is available.
 - On full capacity, reject the new release and preserve the draft. Do not create an undisclosed delivery queue.
 
-Capacity value, sender-specific limits, and reservation behavior need approval. Technical anti-spam rate limits remain necessary and must not be confused with a new daily product quota.
+**Decided (product decision 8):** each account's shore holds **100** concurrent bottles — travelling to it plus delivered and unread (`MIB_SHORE_CAPACITY`). The reservation is atomic with release and transactional under concurrency. A full shore refuses the release without creating a journey; the draft is kept and the sender sees only “This friend's shore is full right now. Your letter is kept as a draft; try again later.” The owner is notified once per full episode, and again only after the shore drops below 100 and fills again. A slot is released exactly once on opening, cancellation, loss, moderation withdrawal or any other terminal state. There is no hidden queue and no sender-specific limit; technical anti-spam rate limits remain separate.
 
 ## 9. Storms, loss, and public expiry
 
@@ -232,6 +236,8 @@ Until the numerical probabilities in this section are approved, no sinking, drif
 
 Amended 2026-09-19 (§9.3): the probabilities are approved, and a bottle's own storms are now scheduled by the server and sent to the client, so the storm drawn on a bottle is exactly the window in which its fate can be decided. Everything else in this table still holds — the palette, the sea and the shore remain presentation, and My Shore weather is cosmetic and independent.
 
+Superseded by risk policy v4 (§9.3): the storm is the **account's**, one on the map, rolled and persisted by the server on the account's authoritative map clock, and My Shore shows the same weather. The palette, the sea view and the shore scene remain presentation; the storm itself is the window in which each bottle's fate is decided at its midpoint. The per-bottle and per-user cosmetic schedules in `weather.ts` no longer drive anything shown.
+
 **Weather is per bottle.** On the Ocean map a storm belongs to one bottle, not to a region: two bottles on the same route may be in different weather, the map draws no storm areas, fog patches or map-wide rain, and a storm-affected bottle is marked only by a small glyph above its own marker and an `In a storm` chip on its card. The card's `View at sea` action — never a marker tap — opens a dedicated real-time view of that bottle on open water, which shows the same weather state and can neither change it nor anything about the journey. The view never exposes letter content and is offered only while the bottle is at sea.
 
 ### 9.2 First real outcomes: adrift and sunk (added 2026-09-18)
@@ -242,28 +248,35 @@ Two terminal outcomes are implemented end to end — **adrift** (the bottle is s
 
 **One-time reading by the finder (amended 2026-09-19, replaces the finder archive above).** The sender's lost letter appears only in the sender's own Letters → Lost. A finder is told before acting that opening removes the bottle from the public map and that the letter cannot be reopened once closed; opening then atomically withdraws the bottle and opens the letter for one reading. The letter is never added to the finder's Received list or any permanent archive. The reading stays available during the active session and may be recovered briefly after a network interruption or refresh (server-enforced, 15 minutes from opening, bound to that finder and that opening); closing the letter ends access immediately. The one-time response is not cacheable and the letter text is never kept in durable client storage. Afterwards no finder endpoint, old link or Letters page returns the letter, while the opening event stays in the journey history. The sender's access is unlimited and never claims the bottle or alters its deadline. An opened bottle never reaches the intended recipient. Openings recorded before this rule keep their history but grant no further reads. This is an in-app rule; it makes no claim about screenshots.
 
-### 9.3 Automatic storm outcomes — risk policy version 1 (decided 2026-09-19)
+### 9.3 Automatic storm outcomes — risk policy version 4 (final, supersedes v1–v3)
 
-D08 is resolved for journeys released from this version on. The policy is server-owned and versioned; every journey is stamped at release with the version it sails under, so a later change can never retroactively put an active bottle at risk, and journeys released before any policy existed carry no version and are never at risk.
+D08 is resolved. The policy is server-owned and versioned; every journey is stamped at release with the version it sails under, and journeys released before any policy existed carry no version and are never at risk.
 
-| Rule | Value (policy v1) |
+**One authoritative map clock.** Each account has one IANA time zone that sets both the day/night state of its map and storm eligibility. The app detects the device's zone (never GPS, never coordinates) and reports it after sign-in, when SeaYou starts, when it returns to the foreground and when the detected zone changes. The server validates it before storing it; the most recently accepted valid device zone is authoritative for the account, and every active session of the account draws the server's stored value, so the displayed map and the server's storm state cannot disagree. Before any valid device zone has been reported the harbour's zone is used, and UTC only if no harbour zone can be derived. A legitimate change updates the map's day/night state as soon as the server accepts it.
+
+| Rule | Value (policy v4) |
 | --- | --- |
-| Storm chance | 25 % per night per bottle, independent per bottle, on the existing day/night convention (nights 19:00–07:00 on the sender's own Ocean map — see below); calm nights carry no risk |
-| Storm length | 40–100 minutes within the night |
-| Risk decisions | at most one per storm night, taken at the midpoint of the storm window (a stable point after the storm has become visible) |
-| Eligibility | the bottle is still at sea at the decision time and its progress is below the internal protection threshold |
+| Day and night | 07:00–19:00 is day, otherwise night, in the account's authoritative zone |
+| Daytime | no storm is active and no storm-risk event is scheduled |
+| Roll | when the map enters a night — at dusk, or when an accepted zone change turns a daytime map to night — a deterministic 25 % chance that the night holds a storm; persisted, and consumed whether the result is calm or storm |
+| Rolling 24 hours | at most one roll per account in any 24 hours; a night entered sooner gets no roll (it is calm). A local date boundary, a zone change, closing or reopening SeaYou, or a worker restart never creates another. The four-changes-a-day limit on zone changes stays |
+| Storm | one per account, 40–100 minutes, start and end both inside the same displayed night, shown only while the map is at night; one storm on the map, not one per bottle |
+| Risk decision | at the storm's midpoint, one independent decision for each eligible travelling bottle of the account |
+| Eligibility (per bottle) | still at sea and not due ashore by the midpoint; progress below the internal protection threshold (80 %); within the first five eligible decisions of its journey |
 | Loss chance | 1 % per eligible decision |
-| Cap | only the first five eligible decisions of a journey carry risk — a maximum of about 4.9 % per journey |
+| Cap | at most five risky decisions per journey — about 4.9 % per journey |
 | Outcome on loss | 75 % adrift (public ocean), 25 % sunk |
 | Same harbour | no exposure — the journey never sails |
 
-**Whose night it is (policy v3, 2026-09-19).** Night is the night shown on the signed-in sender's Ocean map, whatever water a bottle is sailing on: 19:00–07:00 in the account's own time zone. The map's palette, every storm indicator on it, every risk decision and the Bottle at Sea lighting use that one server-authoritative phase, so on a daytime map no bottle can be in a risk-bearing storm. Bottles share the night but keep independent storm outcomes. The zone is the account's persisted IANA time zone, first obtained from the device and re-synced whenever the app starts or resumes; offline, the last known zone stands. A zone change affects future night windows only — past decisions are never rerolled and no loss is ever created retroactively — and daylight-saving changes are simply the zone's own. None of this touches journey timing: duration and arrival remain fixed by the water-route distance and elapsed server time, travel or a zone change never moves a bottle or its arrival, and public expiry remains exactly 72 elapsed hours. Journeys released under the two earlier versions (a single server-configured zone, then mean solar time at the bottle's position) keep their stamp and their recorded decisions and sail on under this rule.
+**Time-zone changes.** A change affects future map state and future storm eligibility only. It never changes a journey's release time, route, duration or planned arrival, a risk decision or outcome that already occurred, notification timestamps, moderation or appeal deadlines, or rate-limit windows, and it never creates another weather roll. If a change turns the map to daytime while a storm is active and its midpoint decision has not happened yet, the storm stops being shown, the pending decision is cancelled, and the roll stays consumed with no replacement inside the same 24 hours. If the midpoint decision already happened, it and its outcome stand unchanged; a midpoint that has passed on server time is always decided under the clock it happened in, even if the zone changes a moment later.
 
-The scheduling and every decision are deterministic from the bottle, the night and the policy version and are persisted, so refreshes, retries, restarts, clock changes, selection and the sea viewer never reroll fate; decisions that fell due while nothing was running are taken later at their original moment. A loss commits through the same transactional service as before: arrival and loss can never both commit, the destination slot is released once and the sender receives the existing loss notification exactly once. Storms may still be shown after the cap or the protection threshold as weather only. The protection threshold itself is internal and never appears in user-facing copy. The My Shore weather stays independent and cosmetic. If the sea viewer is open when an outcome commits, it reconciles to the saved state.
+**Determinism and persistence.** The roll, its result and the storm's start and end are persisted when first computed and are functions of the account, the moment the map entered the night and the policy version, so refreshing, polling, closing or reopening SeaYou, or restarting a worker never rerolls them. The storm exists on server time even while SeaYou is closed; a worker that was offline catches up the same rolls and decisions. Each bottle's draws depend only on the bottle and the storm, so one bottle's result never alters another's. Several bottles in one storm are decided in one atomic, retry-safe commit, and a retry never duplicates a decision. A loss commits through the same transactional service as before: arrival and loss can never both commit, the destination slot is released once and the sender receives the loss notification exactly once. The protection threshold is internal and never appears in user-facing copy. If the sea viewer is open when an outcome commits, it reconciles to the saved state. My Shore shows the same account weather as the map.
+
+**Earlier versions.** v1 counted nights in a server zone, v2 at a bottle's own meridian, v3 gave every bottle its own storm on its sender's nights. Their recorded decisions and outcomes are kept exactly as they are and no history is deleted. From v4's activation, journeys still at sea from those versions are decided only by the account's storms (their earlier eligible decisions count toward the five), so no old-schedule decision can happen under a calm or daytime map; a v3 decision that had not been taken by activation is never taken. All newly released journeys use v4.
 
 **Public expiry (resolves D02).** An adrift bottle is listed for exactly 72 hours from its persisted loss time; the server is the source of truth and sender reads do not extend it. The first eligible non-sender may open it before the deadline; at the deadline an unopened bottle is permanently removed from the public map, never resumes and is never delivered. The sender keeps letter and passport in Lost, whose action reads *Removed from the public map after 72 hours*, and receives one notification with a clock icon: *72 hours passed and the bottle you sent to [recipient] was not opened. It was removed from the public map.* Listing and opening enforce the deadline even if no worker runs; at the exact deadline opening is no longer possible, and opening and expiry are atomic against each other. Adrift bottles listed before this rule were given 72 hours from its activation.
 
-**Time of day.** The Ocean map renders a daylight palette between 07:00 and 19:00 and the approved night palette otherwise, using the local hour in the browser's own IANA timezone — never GPS and never coordinates. Both ends of the window are configurable and a window that wraps midnight is supported. The same clock and zone drive weather scheduling and weather display. Authentication is explicitly excluded: sessions, session expiry, password-reset tokens and rate limiting run on real wall-clock time, so a development clock that advances journeys can never sign a user out.
+**Time of day.** The Ocean map renders a daylight palette between 07:00 and 19:00 and the approved night palette otherwise, using the local hour in the account's authoritative IANA zone (above) — never GPS and never coordinates. The same clock drives the storm and its display. Authentication is explicitly excluded: sessions, session expiry, password-reset tokens and rate limiting run on real wall-clock time, so a development clock that advances journeys can never sign a user out.
 
 | Event | Sender feedback | Map consequence |
 | --- | --- | --- |
@@ -282,6 +295,8 @@ Decided 2026-09-19 (§9.3): expiry is permanent — the bottle never resumes and
 
 Public read access must end after rescue, discard, expiry, cancellation, or moderation restriction. This cannot retract screenshots or copies already made. Proposed: authenticated eligible visitors only, no public search-engine indexing, no retained copy for visitors. Concurrent visitors may read while available; only one valid rescue or discard can commit. Whether reading should temporarily reserve a bottle is open.
 
+**Device time zone — decided (product decision 9, final):** the device's validated IANA zone, once accepted by the server, becomes the account's authoritative map clock for both day/night and storm eligibility (§9.3, risk policy v4). A change affects future map state and future storm eligibility only; it never changes duration, ETA, arrival, a decision already made, suspension, appeal, retention or rate limits, never rerolls weather within the rolling 24 hours, and changing the clock never speeds up, delays or rerolls a journey.
+
 ## 10. Letters, typography, aging, and metadata
 
 ### 10.1 Content and fonts
@@ -296,6 +311,10 @@ Public read access must end after rescue, discard, expiry, cancellation, or mode
 - Support line breaks, text selection where appropriate, screen readers, scalable text, RTL layout, and a fallback font for unsupported scripts. Review font licenses before distribution.
 
 Safety removal/redaction is distinct from user editing: immutability must not prevent content withdrawal or moderation.
+
+**Direction controls — decided (product decision 11):** a letter containing the invisible direction-control characters U+202A–U+202E or U+2066–U+2069 is refused (not stripped) with a clear message, on the client and authoritatively on the server. Hebrew, Arabic, English, emoji (including joiners), LRM/RLM/ALM, ZWNJ and punctuation are unaffected. Moderation views still reveal any controls in stored letters.
+
+**Finder — decided, final (product decision 12):** one reading session, resumable for 15 minutes; never added to Received, archive or history; no friendship or access to the writer; reporting and blocking stay available during the session.
 
 ### 10.2 Visual aging
 
@@ -320,6 +339,8 @@ Whether the recipient sees the completed route after arrival is open. The public
 ## 11. Lifecycle and concurrency model
 
 The following model separates journey state from weather, moderation, and archive placement. This avoids treating a storm alert or a visual animation as an independent delivery state.
+
+**As built (amended 2026-09-23).** The server writes five journey states (`packages/shared/src/bottle-state.ts`): `at_sea` → `delivered` → `opened`; `at_sea` → `lost`, with loss reason `adrift` (listed on the public map for 72 hours from the loss, with a one-time reading for its single finder, then permanently removed — §9.2–9.3) or `sunk` (private to the sender); and `at_sea` → `cancelled` (a block or an inactive recipient at arrival, or an account deletion). `opened`, `lost` and `cancelled` are terminal. Drafts are kept on the client, not as a server state. The diagram and table below are the earlier design and are kept for history: StrandedPublic, Rescue, Discarded and PublicExpired do not exist — public expiry is recorded on a lost bottle, not as a state.
 
 ```mermaid
 stateDiagram-v2
@@ -417,6 +438,8 @@ Claude Design should provide screen layouts, storyboards, assets/layers, anchors
 | Arrival/read receipt | Sender | Arrival: the existing *reached its destination* notice. A notification about whether the recipient opened the letter was considered and rejected (2026-09-19). |
 | Delivery invalidated | Sender | Generic message; do not expose a block |
 
+**Lifetime (product decision 6):** user-visible notifications are never deleted automatically. Each keeps its type, related item, time and read state; marking read only clears the badge, and the history is paginated. Operational data — delivery attempts, retries, worker state, provider errors — may be pruned after 90 days. Cleanup never deletes letters or journeys. A full shore produces one `shore_full` notice per episode.
+
 In-app events are required. Push delivery depends on platform and permission; the journey works without push permission. Hide letter excerpts on lock screens by default. Notification failure never rolls back arrival. Use event IDs, retry limits, and stale-event checks; notifications must not leak hidden incoming journeys.
 
 ## 15. MVP scope
@@ -453,7 +476,7 @@ Directed correspondence with conditional public exposure must not be advertised 
 ### 16.1 Documents and consent — implemented
 
 The Terms of Use, Community Rules, Privacy Policy and Child Safety Standards are published at
-version 1.0, in English, readable before registration and from account settings, and served as
+version 1.1 (a material change carrying the product decisions of 2026-09), in English, readable before registration and from account settings, and served as
 public unauthenticated HTML at `/legal/*` and `/support` for store-listing use. Registration
 requires two separate, initially unchecked decisions — agreeing to the Terms of Use and
 Community Rules, and confirming the Privacy Policy has been read — validated by the server,
@@ -477,9 +500,12 @@ correspondence in both directions and also prevents the two accounts encounterin
 through public-ocean interactions.
 
 A locally run model reviews each case and returns a validated accept / reject / uncertain with
-its reasoning, a translation beside the original, and, when unsure, why. It holds no database or
-administrative power: its verdict is a recommendation, uncertainty always goes to a person, and
-`MIB_AI_AUTO_DECIDE` remains off. It has no path at all to the critical child-safety action. If
+its reasoning, a translation beside the original, and, when unsure, why. It sees only reported
+letters and holds no database or administrative power: its verdict is a recommendation and it
+never decides, sanctions or bans (`MIB_AI_AUTO_DECIDE` was removed; `true` stops the API). If it
+flags a possible child-safety issue the case is marked urgent and listed first with the
+recommendation, reasoning, uncertainty and translation; a case is visible to administrators
+before the model answers. It has no path at all to the critical child-safety action. If
 an external provider is ever used, the Privacy Policy and the store Data Safety declaration are
 updated before any report content is sent to it.
 
@@ -493,9 +519,17 @@ it permanently.
 **Upheld violations never expire.** Serving a suspension does not remove one from the count; the
 only thing that does is an accepted appeal. Rejected and undecided reports never count.
 
-A confirmed critical child-safety violation bans immediately, without the ladder. It requires an
-administrator, a mandatory written reason and an explicit confirmation, and records the
-administrator, the timestamp, the classification and the action in the audit trail.
+The administrator makes one of three decisions (product decision 2): reject; uphold an ordinary
+violation; or confirm a critical child-safety violation, which bans immediately, without the
+ladder, and withdraws the letter. Each requires a written reason; the critical one also a strong
+confirmation stating that it bans permanently and immediately, and records the administrator,
+the timestamp, the classification, the reason and the action in the audit trail. Escalating an
+ordinary violation that was never appealed (waived, lapsed or still open) to critical opens one
+new 30-day appeal.
+
+**Finality (product decision 1):** one administrator decides; there is no second approval and no
+revoke, reopen or reverse. Only the sender's appeal changes a decision. The console shows the
+consequence before every confirmation.
 
 ### 16.4 The decision notice and the single appeal — implemented
 
@@ -506,7 +540,9 @@ offers **Appeal decision** and **Continue without appealing**; continuing asks a
 
 Only confirming **Skip appeal** waives the appeal, and it is permanent. Closing, refreshing or
 leaving SeaYou without choosing waives nothing: the unresolved notice returns on the next
-eligible visit. Each violation may be appealed once; a rejected appeal is final inside SeaYou;
+eligible visit. Each violation may be appealed once, within **30 days of the decision** measured
+on server time; afterwards the notice shows the decision and says the appeal period has
+expired, with a single acknowledgement. A rejected appeal is final inside SeaYou;
 an accepted appeal revokes the violation and recalculates standing immediately. Presentation,
 waiver and appeal are server-authoritative, transactional, idempotent and audit logged.
 
@@ -520,18 +556,18 @@ themselves — ten an hour and forty a day — with per-address windows on top. 
 letter already reported writes nothing and costs nothing, and reading one's standing, answering
 a decision notice and appealing carry no limit at all.
 
-A case's content evidence is redacted **seven days after the case becomes final**, automatically
-and idempotently. A case is final when the report is rejected, when an upheld sender explicitly
-waives the appeal, or when a submitted appeal is decided. It is not final while the report is
-undecided, while the sender has not yet answered the decision notice, or while an appeal is
-pending. Redaction clears the moderation copy of the letter and the reporters' explanations, and
+A case's content evidence — the copied letter, the reporters' explanations and the AI
+translation and notes — is kept **30 days from the human decision** (product decision 5), the
+same window as the appeal, and a timely appeal keeps it until the appeal is decided; it is
+redactable at the later of the two, automatically and idempotently. An undecided report keeps its
+evidence; an unopened decision notice does not extend it. Redaction clears that evidence, and
 preserves the case identity and deduplication, the decision and its reason, the administrator,
 the decision and appeal timestamps, the violation and enforcement count, the report relationship
 needed for abuse prevention, and the account's standing history — because upheld violations do
 not expire.
 
-Evidence is kept beyond seven days only under a documented legal or immediate child-safety hold,
-which records the reason, who placed it and when; releasing it returns the case to the ordinary
+Evidence is kept longer only under a documented legal or child-safety hold, which records the
+reason, who placed it and when; releasing it returns the case to the ordinary
 calculation. There is no undocumented path to indefinite retention. The process supports a
 dry-run plan and a safe apply (`retention:plan`, `-- --apply`).
 
@@ -602,6 +638,8 @@ Web/PWA versus native mobile, stack, database, map provider, hosting, and animat
 
 Confirmed behavior and proposed safeguards to verify once the relevant decisions are approved:
 
+Amended 2026-09-23: criteria 9, 11–15, 17 and 21 now describe the shipped outcomes (adrift, sunk, cancelled — §9.2–9.3, §11 "As built"). Rescue, discard and a chosen fate after public expiry are not part of the product. This amendment corrects wording only; it does not mark any criterion as verified.
+
 1. Sender selects a friend; self-send is rejected and repeat sends to that friend are supported.
 2. Release fails safely for invalid recipients, blocks, full capacity, unsupported routes, or rejected content; the draft remains intact.
 3. Retried release creates exactly one bottle and one reservation.
@@ -610,19 +648,19 @@ Confirmed behavior and proposed safeguards to verify once the relevant decisions
 6. Sender sees dashed destination route, current simulated position, elapsed time, and all their outgoing history.
 7. Recipient cannot retrieve the incoming bottle or receive prearrival alerts through any ordinary endpoint.
 8. Storm resolution is consistent across clients and retries; loss remains terminal.
-9. Stranding creates one public listing and a noninteractive private marker, with sender notification.
+9. A bottle lost adrift creates one public listing and a pennant on the sender's own map, with one sender notification; a sunk bottle is private to the sender.
 10. Public projection does not expose private destination or recipient fields under the proposed privacy policy.
-11. Read, rescue, and discard honor eligibility, moderation, deadline, and version checks.
-12. Concurrent rescue/discard/expiry cannot produce more than one winning transition.
-13. Rescue retains original text, recipient, timestamp, and reserved capacity; visitors cannot append notes.
-14. After three days, the listing and its read/action access expire; the chosen subsequent fate is tested before release.
-15. A discarded, sunk, destroyed, or cancelled bottle can never arrive later.
+11. Opening an adrift bottle honors eligibility (never the sender, never across a block), moderation, and the 72-hour deadline.
+12. Concurrent openings and expiry cannot produce more than one winner: at most one finder opens a bottle, and never at or after its deadline.
+13. Opening an adrift bottle changes nothing in the sender's record: the letter, recipient and timestamps are kept, the bottle stays lost, the intended recipient is never delivered to, and the finder cannot append notes or reopen the letter after the one-time reading.
+14. After exactly 72 hours from the loss, an unopened adrift bottle is permanently removed from the public map, is never delivered, and the sender is notified once.
+15. A lost (adrift or sunk) or cancelled bottle can never arrive later.
 16. Changing device time or client refresh frequency cannot affect arrival or risk.
-17. Opening completes the journey without a keep/rerelease prompt. Public reading is not recipient opening.
+17. Opening completes the journey; there is no keep or re-release step. A finder's public reading is not recipient opening.
 18. Unread notification is sent only while still unopened and does not independently cause publication or deletion.
 19. Font changes never rewrite wording; Readable Print preserves text exactly, including supported RTL and Unicode content.
 20. Aging never removes characters or blocks accessible reading.
-21. Blocking during transit cannot be bypassed by rescue, public visibility, or delayed arrival work.
+21. Blocking during transit cannot be bypassed by public visibility or delayed arrival work: a block in either direction cancels the journey at arrival and hides an adrift bottle from anyone blocked by, or blocking, its sender.
 22. Worker recovery, notification retries, and failure handling do not duplicate events or free capacity twice.
 23. Reduced-motion and list alternatives support every essential action without sound, GPS, or push permission.
 24. Restricted/withdrawn content is unavailable through old links and ordinary cached responses; terminal records remain consistent.
@@ -670,14 +708,14 @@ This roadmap is a plan only. The current task ends with the updated specificatio
 
 | ID | Decision | Recommendation or clarification |
 | --- | --- | --- |
-| D01 | Travel speed and duration | Tie travel to route length; decide range. Same-shore behaviour decided 2026-09-19: immediate delivery (§6.3). No approved duration yet. |
+| D01 | Travel speed and duration | **Decided (product decision 15):** keep the current constants (`MIB_MS_PER_CHART_UNIT`, `MIB_MIN_JOURNEY_MS`); same-harbour delivery stays immediate; device time has no effect. No retune. |
 | D02 | Fate after three public days | **Decided 2026-09-19:** permanent removal after exactly 72 hours from the loss; no resumption (§9.3). |
 | D03 | Public identity fields and participant access | Hide recipient/destination; propose excluding sender and recipient from discovery interactions. Decide sender attribution. |
 | D04 | Completion and retention | Propose private received archive and visual recycling; user confirmed only that opening ends the journey. Decide sender copy after loss. |
 | D05 | Unread timing and expiration | Set notification interval; separately decide whether unopened bottles ever expire. |
-| D06 | Capacity and anti-spam | Set slot count, reservations, release rules, and technical limits without reinstating a daily product quota. |
+| D06 | Capacity and anti-spam | **Decided (product decision 8):** 100 concurrent bottles per shore (travelling + delivered-unread), atomic reservation, refusal without a queue, one full notice per episode (§8.3). |
 | D07 | Friends and changing eligibility | Confirm mutual approval, discovery method, unfriending behavior, and in-flight cancellation policy. |
-| D08 | Risk model | **Decided 2026-09-19** as risk policy v1 (§9.3): 25 % storm nights, 1 % loss per eligible decision, five-decision cap, internal progress protection, 75/25 adrift/sunk. Rescue risk and repeat stranding remain out of scope. |
+| D08 | Risk model | **Decided**, final as risk policy v4 (§9.3): one map clock per account; daytime maps have no storm; each night entered rolls a deterministic 25 % account storm at most once per rolling 24 hours; midpoint decisions per bottle with 1 % loss, five-decision cap, internal progress protection, arrival first, 75/25 adrift/sunk. Rescue risk and repeat stranding remain out of scope. |
 | D09 | Shore catalog | Confirm nearest-connected-coast rule, naming, supported passages, and shore changes during transit. |
 | D10 | Receipts and postarrival map | Decide sender arrival/read receipts and recipient access to completed route. |
 | D11 | Public discovery mechanics | Confirm authenticated access, concurrent reading, optional reading lease, and protections against mass discard. |

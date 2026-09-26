@@ -1,8 +1,14 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { POLICY_DOCUMENTS, RISK_POLICY_VERSION, SUPPORT_EMAIL, policySetStatus } from '@mib/shared';
+import {
+  POLICY_DOCUMENTS,
+  SHORE_CAPACITY,
+  RISK_POLICY_VERSION,
+  SUPPORT_EMAIL,
+  policySetStatus,
+} from '@mib/shared';
 import type { PoliciesConfig } from './services/policies.js';
-import { SEVEN_DAYS_MS, type RetentionPolicy } from './services/retention.js';
+import { THIRTY_DAYS_MS, type RetentionPolicy } from './services/retention.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 // src/config.ts in development, dist/<entry>.js in the built artefact: both sit one directory
@@ -50,14 +56,14 @@ function envDays(env: Env, name: string): number | null {
   return n * 24 * 60 * 60 * 1000;
 }
 
-// The published policy is seven days after a case becomes final, and it runs by default.
-// MIB_RETENTION_ENABLED=false stops it removing anything (the dry-run plan still works), and
-// MIB_RETENTION_FINAL_DAYS shortens or lengthens the window for a staging environment. Neither
-// is needed in an ordinary deployment.
+// The published policy is 30 days after the decision (or until a timely appeal is decided),
+// and it runs by default. MIB_RETENTION_ENABLED=false stops it removing anything (the dry-run
+// plan still works), and MIB_RETENTION_DAYS shortens or lengthens the window for a staging
+// environment. Neither is needed in an ordinary deployment.
 function loadRetentionPolicy(env: Env): RetentionPolicy {
   return {
     enabled: envBool(env, 'MIB_RETENTION_ENABLED', true),
-    finalAfterMs: envDays(env, 'MIB_RETENTION_FINAL_DAYS') ?? SEVEN_DAYS_MS,
+    afterDecisionMs: envDays(env, 'MIB_RETENTION_DAYS') ?? THIRTY_DAYS_MS,
   };
 }
 
@@ -67,6 +73,22 @@ function envInt(env: Env, name: string, fallback: number): number {
   const n = Number(raw);
   if (!Number.isFinite(n)) throw new ConfigError(`${name} must be a number`);
   return n;
+}
+
+function envPositiveInt(env: Env, name: string, fallback: number): number {
+  const n = envInt(env, name, fallback);
+  if (!Number.isInteger(n) || n < 1)
+    throw new ConfigError(`${name} must be a whole number of at least 1`);
+  return n;
+}
+
+// 0 (no automatic outcomes for new journeys) or the one policy the worker implements. Any other
+// number was silently stamped on bottles and never applied (audit ARCH-019).
+function riskPolicyVersionOf(env: Env): number {
+  const v = envInt(env, 'MIB_RISK_POLICY_VERSION', RISK_POLICY_VERSION);
+  if (v !== 0 && v !== RISK_POLICY_VERSION)
+    throw new ConfigError(`MIB_RISK_POLICY_VERSION must be 0 or ${RISK_POLICY_VERSION}`);
+  return v;
 }
 
 export interface AppConfig {
@@ -79,12 +101,17 @@ export interface AppConfig {
   minJourneyMs: number;
   // D06 is open: default per-shore slot count for the slice.
   defaultShoreCapacity: number;
+  // Bottles one account's shore holds at once (product decision 8). Enforced per recipient.
+  shoreCapacity: number;
   journeyTickMs: number;
   sessionTtlMs: number;
   corsOrigin: string;
   // Only behind a reverse proxy that sets X-Forwarded-For: otherwise clients could pick their
   // own rate-limit bucket by sending the header themselves.
   trustProxy: boolean;
+  // How many trusted proxies append to X-Forwarded-For in front of the API (default 1). The
+  // client address is read that many entries from the right (http/client-address.ts).
+  trustedProxyHops: number;
   // Public URL of the web app, used to build links in e-mails.
   appUrl: string;
   // The published support address shown on /support and in the legal documents. A public
@@ -119,7 +146,6 @@ export interface AiConfig {
   // false (default): the model's verdict is a recommendation shown to admins. true: a clear
   // `accept` or `reject` decides the case itself; `uncertain` always goes to an admin. Enable
   // only after running `pnpm --filter @mib/api ai:eval` against your own model.
-  autoDecide: boolean;
 }
 
 export type MailProvider = 'outbox' | 'smtp' | 'disabled';
@@ -154,6 +180,22 @@ export function loadConfig(
       'MIB_DATABASE_PATH must be set to an absolute path in production (a file on persistent ' +
         'storage outside the application directory).',
     );
+  const appUrl = env.MIB_APP_URL ?? 'http://localhost:5173';
+  // Password-reset links are built from this URL, and the Privacy Policy says a production
+  // deployment requires HTTPS; a production server with an http:// public URL would mail
+  // plain-text links to its users (SEC-014).
+  if (production && !/^https:\/\//.test(appUrl))
+    throw new ConfigError(
+      'MIB_APP_URL must be the public https:// address of the web app in production.',
+    );
+  // Automated review is recommendation-only (product decision 2): there is no automatic
+  // decision path left in the code, so the old switch is refused outright rather than
+  // silently ignored.
+  if (envBool(env, 'MIB_AI_AUTO_DECIDE', false))
+    throw new ConfigError(
+      'MIB_AI_AUTO_DECIDE=true is not supported: automated review only recommends, and every ' +
+        'case is decided by a person. Remove the setting.',
+    );
   return {
     port: envInt(env, 'MIB_PORT', 3001),
     databasePath: databasePath || path.join(API_ROOT, 'data', 'mib.sqlite'),
@@ -162,17 +204,19 @@ export function loadConfig(
     msPerChartUnit: envInt(env, 'MIB_MS_PER_CHART_UNIT', 60 * 60 * 1000),
     minJourneyMs: envInt(env, 'MIB_MIN_JOURNEY_MS', 6 * 60 * 60 * 1000),
     defaultShoreCapacity: envInt(env, 'MIB_DEFAULT_SHORE_CAPACITY', 5),
+    shoreCapacity: envInt(env, 'MIB_SHORE_CAPACITY', SHORE_CAPACITY),
     journeyTickMs: envInt(env, 'MIB_JOURNEY_TICK_MS', 15_000),
     sessionTtlMs: envInt(env, 'MIB_SESSION_TTL_MS', 30 * 24 * 60 * 60 * 1000),
     corsOrigin: env.MIB_CORS_ORIGIN ?? 'http://localhost:5173',
     trustProxy: envBool(env, 'MIB_TRUST_PROXY', false),
-    appUrl: env.MIB_APP_URL ?? 'http://localhost:5173',
+    trustedProxyHops: envPositiveInt(env, 'MIB_TRUSTED_PROXY_HOPS', 1),
+    appUrl,
     supportEmail: env.MIB_SUPPORT_EMAIL ?? SUPPORT_EMAIL,
     mail: loadMailConfig(env, devMode),
     // The published set is the authority; there is no environment switch that can release
     // documents that are not released in code, or hold back ones that are.
     policies: { status: policySetStatus(POLICY_DOCUMENTS) },
-    riskPolicyVersion: envInt(env, 'MIB_RISK_POLICY_VERSION', RISK_POLICY_VERSION),
+    riskPolicyVersion: riskPolicyVersionOf(env),
     retention: loadRetentionPolicy(env),
     // Hourly. The pass is idempotent and the window is seven days, so the exact cadence only
     // decides how soon after the boundary the evidence actually goes.
@@ -183,7 +227,6 @@ export function loadConfig(
       model: env.MIB_AI_MODEL ?? 'qwen2.5:7b',
       timeoutMs: envInt(env, 'MIB_AI_TIMEOUT_MS', 60_000),
       tickMs: envInt(env, 'MIB_AI_TICK_MS', 10_000),
-      autoDecide: envBool(env, 'MIB_AI_AUTO_DECIDE', false),
     },
   };
 }

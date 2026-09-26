@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { eq } from 'drizzle-orm';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createDb, runMigrations, type Db } from '../db/client.js';
 import * as t from '../db/schema.js';
 import { newId } from '../lib/ids.js';
@@ -12,11 +12,14 @@ import { newId } from '../lib/ids.js';
 // The grant tools are the entire surface by which a role is ever given. They are run here as
 // real processes against a real database file, because what matters is what the command does
 // when somebody types it — including the cases where it must refuse and change nothing.
+// Every test gets its own database file and sets up whatever roles it starts from, so any one
+// of them can be run, retried or reordered alone.
 
 const API_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 let dir: string;
 let dbPath: string;
 let db: Db;
+let sqlite: ReturnType<typeof createDb>['sqlite'];
 const ids: Record<string, string> = {};
 
 function run(script: 'grant-admin' | 'grant-developer', args: string[]) {
@@ -35,11 +38,20 @@ function run(script: 'grant-admin' | 'grant-developer', args: string[]) {
 const roleOf = (username: string) =>
   db.select().from(t.users).where(eq(t.users.username, username)).get()!.role;
 
-beforeAll(() => {
+// Gives an account a role directly, as a prior grant would have left it.
+function setRole(username: string, role: 'admin' | 'developer') {
+  db.update(t.users)
+    .set({ role, roleGrantedAt: Date.now(), roleGrantedBy: 'test' })
+    .where(eq(t.users.username, username))
+    .run();
+}
+
+beforeEach(() => {
   dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mib-grant-'));
   dbPath = path.join(dir, 'grant.sqlite');
   const created = createDb(dbPath);
   db = created.db;
+  sqlite = created.sqlite;
   runMigrations(db);
   for (const [username, email] of [
     ['rosa', 'rosa@example.test'],
@@ -61,7 +73,10 @@ beforeAll(() => {
   }
   db.update(t.users).set({ status: 'deleted' }).where(eq(t.users.id, ids.gone!)).run();
 }, 60_000);
-afterAll(() => fs.rmSync(dir, { recursive: true, force: true }));
+afterEach(() => {
+  sqlite.close();
+  fs.rmSync(dir, { recursive: true, force: true });
+});
 
 describe('granting a role', () => {
   it('only reports the account when asked to look it up, and changes nothing', () => {
@@ -117,7 +132,8 @@ describe('granting a role', () => {
   });
 
   it('revokes only the role it was asked about', () => {
-    // sam is an admin at this point; the developer command must not touch that.
+    setRole('sam', 'admin');
+    // sam is an admin; the developer command must not touch that.
     const wrongTool = run('grant-developer', ['--revoke', ids.sam!]);
     expect(wrongTool.code).toBe(0);
     expect(wrongTool.out).toMatch(/not a developer/);
@@ -128,6 +144,7 @@ describe('granting a role', () => {
   });
 
   it('is a no-op when the account already holds the role', () => {
+    setRole('rosa', 'admin');
     const res = run('grant-admin', ['--username', 'rosa', '--confirm', ids.rosa!]);
     expect(res.code).toBe(0);
     expect(res.out).toMatch(/already has the admin role/);

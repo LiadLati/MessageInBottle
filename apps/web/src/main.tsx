@@ -11,9 +11,12 @@ import '@fontsource/eb-garamond/500.css';
 import './design/tokens.css';
 import './styles.css';
 import { App } from './App.js';
+import { AppCrashed, ErrorBoundary } from './components/ErrorBoundary.js';
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    <App />
+    <ErrorBoundary fallback={() => <AppCrashed />}>
+      <App />
+    </ErrorBoundary>
   </StrictMode>,
 );

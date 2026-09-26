@@ -22,7 +22,7 @@ const now = Date.now();
 const policy = config.retention;
 console.log('Evidence retention policy');
 console.log(`  automatic redaction : ${policy.enabled ? 'ENABLED' : 'disabled'}`);
-console.log(`  after a case is final: ${policy.finalAfterMs / 86_400_000} days\n`);
+console.log(`  after the decision: ${policy.afterDecisionMs / 86_400_000} days\n`);
 
 const plan = planRetention(db, now, policy);
 console.log(`${plan.cases.length} case(s) examined.`);

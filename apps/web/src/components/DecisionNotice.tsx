@@ -14,6 +14,7 @@ import { SupportLink } from './SupportLink.js';
 import { ErrorNote } from './ui.js';
 import { formatDate } from '../lib/format.js';
 import { focusableIn } from '../lib/focusTrap.js';
+import { useModalKeys } from '../lib/modal.js';
 
 interface Props {
   notice: ViolationNoticeDto;
@@ -39,6 +40,9 @@ export function DecisionNotice({ notice, onResolved }: Props) {
   const [error, setError] = useState<Error | null>(null);
   const ref = useRef<HTMLDivElement>(null);
   const titleId = useId();
+  const bodyId = useId();
+  // Answer-only: no Escape, but Tab stays inside even after focus falls to <body>.
+  useModalKeys(ref, null);
 
   useEffect(() => {
     const siblings = [...document.body.children].filter((el) => el !== ref.current?.parentElement);
@@ -79,6 +83,11 @@ export function DecisionNotice({ notice, onResolved }: Props) {
           ? 'This is your second upheld violation, so your account is suspended for seven days. Serving the suspension does not remove it from the count: a third means a permanent ban.'
           : 'This is your third upheld violation, so your account is permanently banned.';
 
+  const deadline = formatDate(notice.appealDeadlineAt);
+  // The appeal window (30 days from the decision, server time) has ended without an appeal:
+  // the decision is shown, the only action is to acknowledge it.
+  const expired = notice.appealExpired;
+
   return createPortal(
     <div className="confirm-layer">
       <div className="confirm-backdrop" aria-hidden />
@@ -88,24 +97,66 @@ export function DecisionNotice({ notice, onResolved }: Props) {
         role="alertdialog"
         aria-modal="true"
         aria-labelledby={titleId}
+        // The notice's paragraphs are the decision itself: announce them, not just the title
+        // and the first control (audit A11Y-004).
+        aria-describedby={stage === 'appeal' ? undefined : bodyId}
         tabIndex={-1}
       >
-        {stage === 'notice' ? (
+        {expired ? (
           <>
             <h2 id={titleId} className="t-display-sm">
               A decision about a letter you sent
             </h2>
-            <p className="secondary">
-              Your letter to {notice.bottle.recipientDisplayName}, released{' '}
-              {formatDate(notice.bottle.releasedAt)}, was reported for{' '}
-              <strong>{REPORT_REASON_LABELS[notice.category].toLowerCase()}</strong> and, after
-              review by a person, removed for breaking the Community Rules.
-            </p>
-            <p className="secondary">{ladder}</p>
-            <p className="secondary">
-              You can appeal this decision once. Nothing is decided by closing this: it will be
-              shown to you again until you choose.
-            </p>
+            <div id={bodyId} className="stack">
+              <p className="secondary">
+                Your letter to {notice.bottle.recipientDisplayName}, released{' '}
+                {formatDate(notice.bottle.releasedAt)}, was reported for{' '}
+                <strong>{REPORT_REASON_LABELS[notice.category].toLowerCase()}</strong> and, after
+                review by a person, removed for breaking the Community Rules.
+              </p>
+              <p className="secondary">{ladder}</p>
+              <p className="note amber">
+                The appeal period for this decision expired on {deadline}. The decision is final.
+              </p>
+            </div>
+            <ErrorNote error={error} />
+            <div className="row between" style={{ gap: 8, flexWrap: 'wrap' }}>
+              <SupportLink className="btn-ghost" />
+              <button
+                type="button"
+                className="btn-primary"
+                onClick={() => void run(() => api.acknowledgeWarning(notice.id))}
+                disabled={busy}
+              >
+                {busy ? '…' : 'I understand'}
+              </button>
+            </div>
+          </>
+        ) : stage === 'notice' ? (
+          <>
+            <h2 id={titleId} className="t-display-sm">
+              A decision about a letter you sent
+            </h2>
+            <div id={bodyId} className="stack">
+              <p className="secondary">
+                Your letter to {notice.bottle.recipientDisplayName}, released{' '}
+                {formatDate(notice.bottle.releasedAt)}, was reported for{' '}
+                <strong>{REPORT_REASON_LABELS[notice.category].toLowerCase()}</strong> and, after
+                review by a person, removed for breaking the Community Rules.
+              </p>
+              <p className="secondary">{ladder}</p>
+              {notice.appealReopenedAt ? (
+                <p className="note amber">
+                  This decision was reclassified after it was first made, so you have a new
+                  opportunity to appeal it.
+                </p>
+              ) : null}
+              <p className="secondary">
+                You can appeal this decision once, until {deadline}. After that the decision is
+                final. Nothing is decided by closing this: it will be shown to you again until you
+                choose.
+              </p>
+            </div>
             <ErrorNote error={error} />
             {/* Wraps at phone width: three actions do not fit on one 390px line, and a
                 decision notice is the last place to hide a button off the edge. */}
@@ -136,7 +187,9 @@ export function DecisionNotice({ notice, onResolved }: Props) {
             <h2 id={titleId} className="t-display-sm">
               {APPEAL_ACTION_CONTINUE}
             </h2>
-            <p className="note amber">{APPEAL_WAIVER_CONFIRMATION}</p>
+            <p id={bodyId} className="note amber">
+              {APPEAL_WAIVER_CONFIRMATION}
+            </p>
             <ErrorNote error={error} />
             <div className="row" style={{ justifyContent: 'flex-end', gap: 8 }}>
               <button
@@ -171,7 +224,7 @@ export function DecisionNotice({ notice, onResolved }: Props) {
             </h2>
             <label className="field">
               <span className="t-label">
-                Why should this decision be reconsidered? You can appeal once.
+                Why should this decision be reconsidered? You can appeal once, until {deadline}.
               </span>
               <textarea
                 className="input"

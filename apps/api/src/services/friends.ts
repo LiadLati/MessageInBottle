@@ -1,10 +1,11 @@
-import { and, eq, ne, or } from 'drizzle-orm';
-import type { FriendsResponse } from '@mib/shared';
+import { and, desc, eq, isNull, ne, or, type SQL } from 'drizzle-orm';
+import type { BlockedUsersResponse, FriendsResponse } from '@mib/shared';
 import type { DbOrTx } from '../db/client.js';
 import * as t from '../db/schema.js';
 import { newId } from '../lib/ids.js';
 import { badRequest, conflict, notFound } from '../lib/errors.js';
 import type { AppContext } from './context.js';
+import { isRestricted } from './moderation.js';
 
 export function canonicalPair(a: string, b: string): [string, string] {
   return a < b ? [a, b] : [b, a];
@@ -52,6 +53,7 @@ export function listFriends(ctx: AppContext, userId: string): FriendsResponse {
     if (u) users.set(id, u);
   }
   const me = users.get(userId)!;
+  const now = ctx.realClock.now();
   const friends: FriendsResponse['friends'] = [];
   const incomingRequests: FriendsResponse['incomingRequests'] = [];
   const outgoingRequests: FriendsResponse['outgoingRequests'] = [];
@@ -59,6 +61,9 @@ export function listFriends(ctx: AppContext, userId: string): FriendsResponse {
     const otherId = r.userLowId === userId ? r.userHighId : r.userLowId;
     const other = users.get(otherId);
     if (!other || other.status !== 'active') continue;
+    // A suspended or banned account is unavailable for the whole restriction (product decision
+    // 14): hidden here, while the friendship row itself stays and reappears when it ends.
+    if (isRestricted(ctx.db, otherId, now)) continue;
     // A blocked pair is invisible to each other in the friends UI.
     if (isBlockedEitherWay(ctx.db, userId, otherId)) continue;
     if (r.status === 'accepted') {
@@ -94,8 +99,14 @@ export function sendFriendRequest(ctx: AppContext, fromId: string, toUsername: s
     .from(t.users)
     .where(eq(t.users.username, toUsername.toLowerCase()))
     .get();
-  // Same generic error whether the user is missing or has blocked the requester.
-  if (!target || target.status !== 'active' || isBlockedEitherWay(ctx.db, fromId, target.id)) {
+  // Same generic error whether the user is missing, has blocked the requester, or is suspended
+  // or banned (product decision 14: not findable while restricted).
+  if (
+    !target ||
+    target.status !== 'active' ||
+    isBlockedEitherWay(ctx.db, fromId, target.id) ||
+    isRestricted(ctx.db, target.id, ctx.realClock.now())
+  ) {
     throw notFound('user');
   }
   if (target.id === fromId) throw badRequest('self_request', 'you cannot befriend yourself');
@@ -177,4 +188,116 @@ export function blockUser(ctx: AppContext, blockerId: string, username: string):
     .values({ blockerId, blockedId: target.id, createdAt: ctx.clock.now() })
     .onConflictDoNothing()
     .run();
+}
+
+// A finder blocking the anonymous writer of the bottle they are reading (product decision 12).
+// Only during their own open reading session; the writer's identity is never returned, and the
+// block works like any other from then on (no bottles either way, no public-ocean encounters).
+export function blockFoundWriter(ctx: AppContext, finderId: string, bottleId: string): void {
+  const now = ctx.clock.now();
+  const row = ctx.db
+    .select({ senderId: t.bottles.senderId, opening: t.publicOpenings })
+    .from(t.publicOpenings)
+    .innerJoin(t.bottles, eq(t.bottles.id, t.publicOpenings.bottleId))
+    .where(and(eq(t.publicOpenings.bottleId, bottleId), eq(t.publicOpenings.openedById, finderId)))
+    .get();
+  if (
+    !row ||
+    row.opening.closedAt !== null ||
+    (row.opening.sessionExpiresAt ?? 0) <= now ||
+    row.senderId === finderId
+  ) {
+    throw notFound('reading');
+  }
+  ctx.db
+    .insert(t.blocks)
+    .values({
+      blockerId: finderId,
+      blockedId: row.senderId,
+      createdAt: now,
+      foundBottleId: bottleId,
+    })
+    .onConflictDoNothing()
+    .run();
+}
+
+// The accounts this person has blocked, newest first (product decision 10). Deleted accounts
+// drop out: deleting an account removes its blocks in both directions.
+export function listBlocked(ctx: AppContext, blockerId: string): BlockedUsersResponse {
+  const rows = ctx.db
+    .select({
+      username: t.users.username,
+      displayName: t.users.displayName,
+      status: t.users.status,
+      blockedAt: t.blocks.createdAt,
+      foundBottleId: t.blocks.foundBottleId,
+    })
+    .from(t.blocks)
+    .innerJoin(t.users, eq(t.users.id, t.blocks.blockedId))
+    .where(eq(t.blocks.blockerId, blockerId))
+    .orderBy(desc(t.blocks.createdAt))
+    .all();
+  return {
+    blocked: rows
+      .filter((r) => r.status === 'active')
+      .map((r) =>
+        r.foundBottleId
+          ? {
+              username: null,
+              displayName: FOUND_WRITER_NAME,
+              blockedAt: new Date(r.blockedAt).toISOString(),
+              foundBottleId: r.foundBottleId,
+            }
+          : {
+              username: r.username,
+              displayName: r.displayName,
+              blockedAt: new Date(r.blockedAt).toISOString(),
+              foundBottleId: null,
+            },
+      ),
+  };
+}
+
+// Unblocking permits future contact under the ordinary rules, and nothing more: it removes this
+// person's block and any friendship or pending request left over between the pair, so being
+// friends again takes a new request. Nothing cancelled, removed or hidden while the block stood
+// comes back, and nothing about that time is shown. The other person's own block, if any, stays.
+export function unblockUser(ctx: AppContext, blockerId: string, username: string): void {
+  const target = ctx.db
+    .select({ id: t.users.id })
+    .from(t.users)
+    .where(eq(t.users.username, username.toLowerCase()))
+    .get();
+  if (!target) throw notFound('user');
+  // A block made anonymously from a found bottle is undone only by that bottle, so trying names
+  // can never confirm who wrote it.
+  removeBlock(ctx, blockerId, target.id, isNull(t.blocks.foundBottleId));
+}
+
+// The label a finder sees in Blocked users for a writer they never learned the name of.
+export const FOUND_WRITER_NAME = 'The writer of a bottle you found';
+
+// Undoing an anonymous block from a found bottle. Same effects as any unblock.
+export function unblockFoundWriter(ctx: AppContext, blockerId: string, bottleId: string): void {
+  const row = ctx.db
+    .select({ blockedId: t.blocks.blockedId })
+    .from(t.blocks)
+    .where(and(eq(t.blocks.blockerId, blockerId), eq(t.blocks.foundBottleId, bottleId)))
+    .get();
+  if (!row) throw notFound('block');
+  removeBlock(ctx, blockerId, row.blockedId, eq(t.blocks.foundBottleId, bottleId));
+}
+
+function removeBlock(ctx: AppContext, blockerId: string, blockedId: string, which: SQL): void {
+  ctx.db.transaction((tx) => {
+    const removed = tx
+      .delete(t.blocks)
+      .where(and(eq(t.blocks.blockerId, blockerId), eq(t.blocks.blockedId, blockedId), which))
+      .run().changes;
+    if (removed === 0) throw notFound('block');
+    const [low, high] = canonicalPair(blockerId, blockedId);
+    tx.delete(t.friendships)
+      .where(and(eq(t.friendships.userLowId, low), eq(t.friendships.userHighId, high)))
+      .run();
+  });
 }

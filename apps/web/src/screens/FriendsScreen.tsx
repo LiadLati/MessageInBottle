@@ -1,5 +1,7 @@
 import { useState, type FormEvent } from 'react';
+import type { FriendDto } from '@mib/shared';
 import { api } from '../api/client.js';
+import { ConfirmDialog } from '../components/ConfirmDialog.js';
 import { Avatar, DeckScreen, ErrorNote, Skeleton } from '../components/ui.js';
 import { Icon } from '../design/Icon.js';
 import { useAsync } from '../lib/useAsync.js';
@@ -15,6 +17,27 @@ export function FriendsScreen({ onChanged }: Props) {
   const [username, setUsername] = useState('');
   const [error, setError] = useState<Error | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  // Blocking is destructive and, for now, permanent: it gets the same real dialog as every
+  // other irreversible action, never a browser confirm() (audit FE-016).
+  const [blocking, setBlocking] = useState<FriendDto | null>(null);
+  const [blockBusy, setBlockBusy] = useState(false);
+  const [blockError, setBlockError] = useState<Error | null>(null);
+
+  const confirmBlock = async () => {
+    if (!blocking) return;
+    setBlockBusy(true);
+    setBlockError(null);
+    try {
+      await api.blockUser(blocking.username);
+      setNotice(`${blocking.displayName} blocked`);
+      setBlocking(null);
+      await Promise.all([friends.reload(), onChanged?.()]);
+    } catch (err) {
+      setBlockError(err instanceof Error ? err : new Error(String(err)));
+    } finally {
+      setBlockBusy(false);
+    }
+  };
 
   const run = async (fn: () => Promise<void>, done?: string) => {
     setError(null);
@@ -54,7 +77,9 @@ export function FriendsScreen({ onChanged }: Props) {
           Add
         </button>
       </form>
-      {notice ? <p className="note">{notice}</p> : null}
+      <p className="note" role="status" hidden={!notice}>
+        {notice}
+      </p>
       <ErrorNote error={error ?? friends.error} />
       {friends.loading || !d ? (
         <Skeleton />
@@ -131,13 +156,8 @@ export function FriendsScreen({ onChanged }: Props) {
                       type="button"
                       className="btn-text btn-destructive"
                       onClick={() => {
-                        if (
-                          confirm(
-                            `Block ${f.displayName}? They will not be able to send you bottles.`,
-                          )
-                        ) {
-                          void run(() => api.blockUser(f.username), `${f.displayName} blocked`);
-                        }
+                        setBlockError(null);
+                        setBlocking(f);
                       }}
                     >
                       Block
@@ -167,6 +187,18 @@ export function FriendsScreen({ onChanged }: Props) {
           ) : null}
         </>
       )}
+      {blocking ? (
+        <ConfirmDialog
+          title={`Block ${blocking.displayName}?`}
+          body={`${blocking.displayName} will no longer be your friend and will not be able to send you bottles, and you will not be able to send them any. You can unblock them later from Settings → Blocked users, but that will not restore the friendship or any letter.`}
+          confirmLabel="Block"
+          destructive
+          busy={blockBusy}
+          error={blockError}
+          onConfirm={() => void confirmBlock()}
+          onCancel={() => setBlocking(null)}
+        />
+      ) : null}
     </DeckScreen>
   );
 }

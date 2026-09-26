@@ -69,14 +69,12 @@ describe('the review model recommends and never decides', () => {
       hide: false,
     }).caseId;
 
-    // `decideCase` takes `AuthUser | null`, and null is how the model decides when auto-decide
-    // is switched on. The critical path takes a required administrator instead, so there is no
-    // value the worker could pass: this is enforced by the type, and by the row it writes.
-    decideCase(w.ctx, null, caseId, 'accepted', 'model verdict');
+    // `decideCase` and `decideCaseCritical` both take a required administrator: the worker has
+    // no value it could pass. An administrator's ordinary decision walks the ladder.
+    decideCase(w.ctx, { ...w.user('cy'), role: 'admin' }, caseId, 'accepted', 'harassment');
     const v = w.db.select().from(t.violations).where(eq(t.violations.caseId, caseId)).get()!;
-    expect(v.decidedBy).toBe('ai');
-    expect(v.decidedByUserId).toBeNull();
-    // The model's decision walks the ordinary ladder; it cannot ban on a first violation.
+    expect(v.decidedBy).toBe('admin');
+    expect(v.decidedByUserId).toBe(w.user('cy').id);
     expect(v.severity).toBe('standard');
     expect(standingOf(w.db, w.user('ada').id, w.realClock.now()).standing).toBe('warned');
 
@@ -92,9 +90,9 @@ describe('the review model recommends and never decides', () => {
     expect(audit.actorUserId).toBe(w.user('cy').id);
   });
 
-  it('keeps automatic decisions switched off by default', () => {
+  it('has no automatic-decision setting at all', () => {
     const w = createTestWorld();
-    expect(w.ctx.config.ai.autoDecide).toBe(false);
+    expect('autoDecide' in w.ctx.config.ai).toBe(false);
   });
 
   it('records a hold against the administrator who placed it, never the system', () => {

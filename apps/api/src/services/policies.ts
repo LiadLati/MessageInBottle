@@ -3,6 +3,7 @@ import {
   POLICY_ACTION,
   POLICY_DOCUMENTS,
   POLICY_IDS,
+  PUBLISHED_DOCUMENTS,
   currentPolicyVersions,
   policyDocument,
   policySetStatus,
@@ -156,8 +157,10 @@ export function withPolicies<U extends { id: string }>(
   return { ...user, policies: accountPolicies(ctx, user.id) };
 }
 
+// Any published document — the three that are accepted at registration and the Child Safety
+// Standards, which GET /api/policies lists too (audit ARCH-023: it used to answer 400 for it).
 export function policyDocumentOrThrow(id: string) {
-  if (!(POLICY_IDS as readonly string[]).includes(id))
-    throw badRequest('unknown_document', 'no such document');
-  return policyDocument(id as PolicyId);
+  const doc = PUBLISHED_DOCUMENTS.find((d) => d.id === id);
+  if (!doc) throw badRequest('unknown_document', 'no such document');
+  return doc;
 }

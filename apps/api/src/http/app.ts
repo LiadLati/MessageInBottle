@@ -1,8 +1,11 @@
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
+import { bodyLimit } from 'hono/body-limit';
 import { logger } from 'hono/logger';
 import type { ZodError } from 'zod';
 import { AppError } from '../lib/errors.js';
+import { RateLimiter } from '../lib/rate-limit.js';
+import { PasswordHashingBusyError } from '../lib/password.js';
 import type { AppContext, AuthUser } from '../services/context.js';
 import { adminRoutes } from './routes/admin.js';
 import { authRoutes } from './routes/auth.js';
@@ -18,20 +21,47 @@ import { supportPage } from './legal-pages.js';
 import { legalRoutes } from './routes/legal.js';
 import { policyRoutes } from './routes/policies.js';
 import { shoreRoutes } from './routes/shore.js';
+import { securityHeaders } from './security-headers.js';
+
+export const MAX_REQUEST_BYTES = 64 * 1024;
 
 export type AppEnv = { Variables: { ctx: AppContext; user: AuthUser; token: string } };
 
 export function createApp(ctx: AppContext) {
   const app = new Hono<AppEnv>();
+  // One limiter for the whole API, so every route that checks a password spends the same
+  // per-account budget (the public deletion form included).
+  const limiter = new RateLimiter();
   app.use('*', async (c, next) => {
     c.set('ctx', ctx);
     await next();
   });
   if (ctx.config.logRequests) app.use('*', logger());
+  app.use('*', securityHeaders);
+  // No request SeaYou accepts is anywhere near this size (a letter is at most 8 KB); anything
+  // larger is refused before it is read, instead of being parsed on the one API thread
+  // (audit ARCH-027 / SEC-014).
+  app.use(
+    '*',
+    bodyLimit({
+      maxSize: MAX_REQUEST_BYTES,
+      onError: (c) =>
+        c.json({ error: { code: 'payload_too_large', message: 'request body too large' } }, 413),
+    }),
+  );
   app.use('/api/*', cors({ origin: ctx.config.corsOrigin, credentials: false }));
 
-  app.get('/api/health', (c) =>
-    c.json({
+  // A health check that the database answers, so a load balancer or process manager learns
+  // about a dead or locked database file rather than only that Node is alive (ARCH-017).
+  app.get('/api/health', (c) => {
+    try {
+      (ctx.db as unknown as { $client: { prepare(sql: string): { get(): unknown } } }).$client
+        .prepare('select 1')
+        .get();
+    } catch {
+      return c.json({ ok: false, error: { code: 'database_unavailable' } }, 503);
+    }
+    return c.json({
       ok: true,
       serverTime: new Date(ctx.clock.now()).toISOString(),
       // Development builds say how mail is handled, so the password-recovery screen can state
@@ -45,13 +75,13 @@ export function createApp(ctx: AppContext) {
             },
           }
         : {}),
-    }),
-  );
-  app.route('/api/auth', authRoutes());
+    });
+  });
+  app.route('/api/auth', authRoutes(limiter));
   app.route('/api/policies', policyRoutes());
   app.route('/api/account', accountRoutes());
   // Public, unauthenticated HTML. Deliberately not under /api: these are pages, not endpoints.
-  app.route('/legal', legalRoutes());
+  app.route('/legal', legalRoutes(limiter));
   // The support page: reachable signed out, while a new policy version is waiting to be
   // accepted, while an account is suspended or banned, and while it is being deleted.
   app.get('/support', (c) =>
@@ -61,11 +91,11 @@ export function createApp(ctx: AppContext) {
   );
   app.route('/api/chart', chartRoutes());
   app.route('/api/friends', friendRoutes());
-  app.route('/api/bottles', bottleRoutes());
+  app.route('/api/bottles', bottleRoutes(limiter));
   app.route('/api/shore', shoreRoutes());
   app.route('/api/ocean', oceanRoutes());
   app.route('/api/notifications', notificationRoutes());
-  app.route('/api/moderation', moderationRoutes());
+  app.route('/api/moderation', moderationRoutes(limiter));
   app.route('/api/admin', adminRoutes());
   if (ctx.config.devMode) app.route('/api/dev', devRoutes());
 
@@ -77,11 +107,18 @@ export function createApp(ctx: AppContext) {
         err.status as 400,
       );
     }
-    if (isZodError(err)) {
+    if (err instanceof PasswordHashingBusyError) {
+      c.header('Retry-After', '2');
       return c.json(
-        { error: { code: 'validation', message: 'invalid request', details: err.issues } },
-        400,
+        { error: { code: 'busy', message: 'The server is busy. Try again in a moment.' } },
+        503,
       );
+    }
+    if (isZodError(err)) {
+      // Path, code and message only: never the rejected input, which may be a password or a
+      // letter (ARCH-022; http/validate.ts does the same for the ordinary path).
+      const details = err.issues.map((i) => ({ path: i.path, code: i.code, message: i.message }));
+      return c.json({ error: { code: 'validation', message: 'invalid request', details } }, 400);
     }
     console.error(err);
     return c.json({ error: { code: 'internal', message: 'unexpected error' } }, 500);

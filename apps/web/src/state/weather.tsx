@@ -1,21 +1,35 @@
-import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
-import { DAYLIGHT_DEFAULTS, phaseAt, type DayPhase } from '@mib/shared';
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useState,
+  type ReactNode,
+} from 'react';
+import {
+  DAYLIGHT_DEFAULTS,
+  isIanaTimeZone,
+  phaseAt,
+  type AccountWeatherDto,
+  type DayPhase,
+} from '@mib/shared';
 import { api } from '../api/client.js';
 import { useSession } from './session.js';
 
-// One clock and one timezone policy for all simulated weather — scheduling and display alike
-// (docs/WEATHER_INTEGRATION_PLAN.md · "Clock and timezone policy"):
+// One clock for the map's day and night and for its storm (risk policy v4, spec §9.3):
 //
+//   zone    = the account's authoritative IANA zone, as the server holds it: the latest valid
+//             zone any of the account's devices reported and the server accepted; before any,
+//             the harbour's zone; else UTC. This device reports its own zone after sign-in, on
+//             start, on returning to the foreground and whenever it notices a change — never
+//             GPS, never coordinates — and every device draws the server's answer, so a phone
+//             and a desktop of the same account never disagree;
 //   instant = real time, shifted by the persisted development-clock offset when the API reports
 //             one, so dev time travel moves weather together with journeys;
-//   zone    = the account's persisted IANA zone (spec §9.3): learned from the device, never GPS
-//             and never coordinates, and re-sent to the server whenever the app starts or
-//             resumes so the server counts the same nights this map is drawn in. Offline, the
-//             last zone the account was known to have; before any account, the device's own;
-//   phase   = the local hour in that zone against a configurable day window (07:00–19:00).
-//
-// The server schedules every storm and every risk decision in that same zone, so a daytime map
-// never holds a bottle in a risk-bearing storm.
+//   phase   = the local hour in that zone against the day window (07:00–19:00);
+//   storm   = the account's one storm, persisted by the server: shown only while it lasts and
+//             only while the map is in night.
 //
 // Authentication never uses this clock: sessions and reset tokens run on real wall-clock time
 // on the server, so a development clock jump can land a bottle but never sign anyone out.
@@ -27,6 +41,10 @@ export interface WeatherState {
   /** The instant weather is scheduled against, in ms. */
   nowMs: number;
   timeZone: string;
+  /** The account's storm, as the map shows it right now. */
+  storm: 'calm' | 'storm';
+  /** When the storm now showing stops being shown, in ms; null when calm. */
+  stormUntil: number | null;
   /** Development-only previews. 'auto' means the real schedule decides. */
   phaseOverride: DayPhase | 'auto';
   oceanStormOverride: WeatherOverride;
@@ -41,17 +59,24 @@ const WeatherContext = createContext<WeatherState | null>(null);
 // Re-evaluated on this cadence; a boundary is never more than this late. Cheap: two integer
 // comparisons and a formatter.
 const TICK_MS = 30_000;
+// The account's weather is re-read on this cadence (and at once on resume and after this device
+// reports a zone), so a change made on another device reaches this one within a poll.
+const WEATHER_POLL_MS = 20_000;
+// How often a foreground tab looks for a device time-zone change it has not been told about.
+const ZONE_CHECK_MS = 60_000;
 
-function browserTimeZone(): string {
+// The device's IANA zone (product decision 9), or null when the runtime gives nothing usable.
+function browserTimeZone(): string | null {
   try {
-    return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+    const zone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    return isIanaTimeZone(zone) ? zone : null;
   } catch {
-    return 'UTC';
+    return null;
   }
 }
 
-// The last zone the account was known to have, so an offline start keeps yesterday's nights
-// rather than silently switching to the device's. A convenience, never an authority.
+// The last authoritative zone this browser saw for the account, so an offline start draws
+// yesterday's clock rather than guessing. A convenience, never an authority.
 const ZONE_KEY = 'mib.accountTimeZone';
 function readStoredZone(): string | null {
   try {
@@ -70,52 +95,75 @@ function storeZone(zone: string | null) {
 }
 
 export function WeatherProvider({ children }: { children: ReactNode }) {
-  const deviceZone = useMemo(() => browserTimeZone(), []);
   // Development clock offset, learned once and refreshed with the dev panel's own polling.
   const [offsetMs, setOffsetMs] = useState(0);
   const [nowMs, setNowMs] = useState(() => Date.now());
   const [phaseOverride, setPhaseOverride] = useState<DayPhase | 'auto'>('auto');
   const [oceanStormOverride, setOceanStormOverride] = useState<WeatherOverride>('auto');
   const [shoreStormOverride, setShoreStormOverride] = useState<WeatherOverride>('auto');
+  const [account, setAccount] = useState<AccountWeatherDto | null>(null);
 
-  // The status endpoint needs a session, so the offset is re-read whenever the signed-in user
-  // changes: a fresh sign-in must not spend its first tick on the real clock.
   const { user, setUser } = useSession();
   const userId = user?.id ?? null;
-  // The account's zone is the authority for its nights. Until the server has heard from a
-  // device, or while it cannot be reached, the last known zone stands in; before any account
-  // at all, the device's own.
-  const accountZone = user?.timeZone ?? null;
-  const timeZone = accountZone ?? readStoredZone() ?? deviceZone;
-  useEffect(() => {
-    if (accountZone) storeZone(accountZone);
-  }, [accountZone]);
+  const isDeveloper = user?.role === 'developer';
+  const reportedZone = user?.timeZone ?? null;
 
-  // Tell the server the device's zone on every start and resume. A changed zone moves the
-  // account's nights from now on — never the ones already sailed — and is a no-op otherwise.
+  // The server's answer for this account: its zone, and its storm.
+  const refresh = useCallback(() => {
+    if (!userId) return Promise.resolve();
+    return api
+      .accountWeather()
+      .then((w) => {
+        setAccount(w);
+        storeZone(w.timeZone);
+      })
+      .catch(() => {});
+  }, [userId]);
+
+  useEffect(() => {
+    if (!userId) return;
+    void refresh();
+    const id = setInterval(() => void refresh(), WEATHER_POLL_MS);
+    return () => clearInterval(id);
+  }, [userId, refresh]);
+
+  // Report the device's zone after sign-in, on start, on returning to the foreground and when
+  // a periodic look finds it changed. Unchanged zones are not sent (the server would ignore
+  // them anyway); the server validates and decides, and the map is redrawn from its answer.
   useEffect(() => {
     if (!userId) return;
     let alive = true;
     const sync = () => {
-      if (document.hidden || deviceZone === accountZone) return;
+      if (document.hidden) return;
+      const device = browserTimeZone();
+      if (!device || device === reportedZone) {
+        void refresh();
+        return;
+      }
       void api
-        .syncTimeZone(deviceZone)
+        .syncTimeZone(device)
         .then((me) => {
-          if (alive) setUser(me);
+          if (!alive) return;
+          setUser(me);
+          return refresh();
         })
-        .catch(() => {});
+        .catch(() => void refresh());
     };
     sync();
     document.addEventListener('visibilitychange', sync);
     window.addEventListener('focus', sync);
+    const id = setInterval(sync, ZONE_CHECK_MS);
     return () => {
       alive = false;
       document.removeEventListener('visibilitychange', sync);
       window.removeEventListener('focus', sync);
+      clearInterval(id);
     };
-  }, [userId, deviceZone, accountZone, setUser]);
+  }, [userId, reportedZone, setUser, refresh]);
+
   useEffect(() => {
-    if (!import.meta.env.DEV || !userId) return;
+    // Only a developer may read the dev clock; anyone else would get a 403 twice a minute (FE-021).
+    if (!import.meta.env.DEV || !userId || !isDeveloper) return;
     let alive = true;
     const read = () =>
       void api
@@ -130,7 +178,7 @@ export function WeatherProvider({ children }: { children: ReactNode }) {
       alive = false;
       clearInterval(id);
     };
-  }, [userId]);
+  }, [userId, isDeveloper]);
 
   // Keep the instant fresh while the page is open, and re-read it immediately when a
   // backgrounded tab comes back — a tab restored after midnight must not stay on yesterday.
@@ -149,13 +197,25 @@ export function WeatherProvider({ children }: { children: ReactNode }) {
     };
   }, []);
 
+  // A signed-out view keeps nothing of the last account's weather.
+  const current = userId ? account : null;
+  // Before the server has answered: the zone last seen for the account, else the device's own.
+  const timeZone = current?.timeZone ?? readStoredZone() ?? browserTimeZone() ?? 'UTC';
   const instant = nowMs + offsetMs;
   const value = useMemo<WeatherState>(() => {
     const natural = phaseAt(instant, timeZone, DAYLIGHT_DEFAULTS);
+    const span = current?.storm
+      ? { from: Date.parse(current.storm.startsAt), until: Date.parse(current.storm.endsAt) }
+      : null;
+    // A storm is drawn only while it lasts and only on a night map.
+    const active =
+      natural === 'night' && span !== null && span.from <= instant && instant < span.until;
     return {
       phase: phaseOverride === 'auto' ? natural : phaseOverride,
       nowMs: instant,
       timeZone,
+      storm: active ? 'storm' : 'calm',
+      stormUntil: active ? span.until : null,
       phaseOverride,
       oceanStormOverride,
       shoreStormOverride,
@@ -163,7 +223,7 @@ export function WeatherProvider({ children }: { children: ReactNode }) {
       setOceanStormOverride,
       setShoreStormOverride,
     };
-  }, [instant, timeZone, phaseOverride, oceanStormOverride, shoreStormOverride]);
+  }, [instant, timeZone, current, phaseOverride, oceanStormOverride, shoreStormOverride]);
 
   return <WeatherContext.Provider value={value}>{children}</WeatherContext.Provider>;
 }

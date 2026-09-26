@@ -18,6 +18,7 @@ import {
   loginAs as login,
   releaseInput,
   type TestWorld,
+  evidenceDigest,
 } from '../test/harness.js';
 
 const auth = (token: string) => ({
@@ -76,7 +77,7 @@ async function upheldOne(ctx: Awaited<ReturnType<typeof setup>>, caseId: string)
   const accepted = await ctx.app.request(`/api/admin/reports/${caseId}/accept`, {
     method: 'POST',
     headers: auth(ctx.cy.token),
-    body: JSON.stringify({ reason: 'upheld' }),
+    body: JSON.stringify({ reason: 'upheld', evidenceDigest: evidenceDigest(ctx.w, caseId) }),
   });
   expect(accepted.status).toBe(200);
   return caseId;
@@ -146,7 +147,8 @@ describe('the single appeal opportunity', () => {
       method: 'POST',
       headers: auth(ctx.ada.token),
     });
-    await comeBackLater(ctx, 30 * DAY);
+    // Within the 30-day window (product decision 5), nothing but an answer resolves it.
+    await comeBackLater(ctx, 29 * DAY);
     const later = await standingOfAda(ctx);
     expect(later.pendingDecision?.id).toBe(v.id);
     expect(later.pendingDecision?.appealAvailable).toBe(true);
@@ -393,7 +395,19 @@ describe('the single appeal opportunity', () => {
       }),
     });
     const { caseId } = (await report.json()) as { caseId: string };
-    await upheldOne(ctx, caseId);
+    // Cy reported it, so Cy may not decide it (audit SEC-010): an uninvolved administrator does.
+    w.db
+      .update(t.users)
+      .set({ role: 'admin' })
+      .where(eq(t.users.id, w.user('dee').id))
+      .run();
+    const dee = await login(app, 'dee');
+    const upheld = await app.request(`/api/admin/reports/${caseId}/accept`, {
+      method: 'POST',
+      headers: auth(dee.token),
+      body: JSON.stringify({ reason: 'upheld', evidenceDigest: evidenceDigest(w, caseId) }),
+    });
+    expect(upheld.status).toBe(200);
 
     const body = await (
       await app.request('/api/moderation/standing', { headers: auth(ada.token) })
@@ -490,7 +504,10 @@ describe('violations never expire', () => {
     await app.request(`/api/admin/reports/${cases[0]!}/reject`, {
       method: 'POST',
       headers: auth(cy.token),
-      body: JSON.stringify({ reason: 'not a violation' }),
+      body: JSON.stringify({
+        reason: 'not a violation',
+        evidenceDigest: evidenceDigest(ctx.w, cases[0]!),
+      }),
     });
     const standing = await standingOfAda(ctx);
     expect(standing.standing).toBe('good');
@@ -498,7 +515,7 @@ describe('violations never expire', () => {
     expect(standing.pendingDecision).toBeNull();
   });
 
-  it('produces at most one violation from several reports about one letter', async () => {
+  it('produces one case and one violation when the same reader reports a letter twice', async () => {
     const ctx = await setup();
     const { w, app, bo, cy } = ctx;
     const caseId = await reportedCaseFor(ctx, 'dedupe-key-00001');
@@ -508,7 +525,8 @@ describe('violations never expire', () => {
       .where(eq(t.moderationCases.id, caseId))
       .get()!.bottleId;
 
-    // Reporting the same letter again joins the same case rather than opening a second one.
+    // The same reader reporting the letter again joins the same case rather than opening a
+    // second one. (A different second reporter cannot exist: a letter has one reader.)
     const second = await app.request('/api/moderation/reports', {
       method: 'POST',
       headers: auth(bo.token),
@@ -523,9 +541,9 @@ describe('violations never expire', () => {
     await app.request(`/api/admin/reports/${caseId}/accept`, {
       method: 'POST',
       headers: auth(cy.token),
-      body: JSON.stringify({ reason: 'upheld once' }),
+      body: JSON.stringify({ reason: 'upheld once', evidenceDigest: evidenceDigest(w, caseId) }),
     });
-    // One case, one violation, whatever the number of reports.
+    // One case, one violation.
     expect(
       w.db.select().from(t.violations).where(eq(t.violations.caseId, caseId)).all(),
     ).toHaveLength(1);

@@ -14,6 +14,21 @@ export function ErrorNote({ error }: { error: Error | null }) {
   );
 }
 
+// A list that could not be loaded is not an empty list (audit FE-007): say that it failed and
+// offer to try again, instead of telling the person they have nothing.
+export function LoadFailed({ error, onRetry }: { error: Error; onRetry: () => void }) {
+  return (
+    <div className="glass-panel stack" role="alert">
+      <ErrorNote error={error} />
+      <div className="row">
+        <button type="button" className="btn-secondary" onClick={onRetry}>
+          Try again
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export function Skeleton() {
   return (
     <div className="skeleton" aria-label="Loading" role="status">
@@ -46,10 +61,7 @@ const STATUS_LABELS: Record<string, { label: string; glyph: string }> = {
   at_sea: { label: 'At sea', glyph: '◦' },
   delivered: { label: 'Arrived', glyph: '✓' },
   opened: { label: 'Opened', glyph: '✓' },
-  stranded_public: { label: 'Stranded', glyph: '◈' },
-  public_expired: { label: 'Expired', glyph: '◈' },
   lost: { label: 'Lost', glyph: '✕' },
-  discarded: { label: 'Discarded', glyph: '✕' },
   cancelled: { label: 'Unavailable', glyph: '✕' },
 };
 
@@ -65,13 +77,12 @@ export function StatusChip({ state }: { state: string }) {
 }
 
 // A journey outcome, stated in words (never colour alone): which way the sea ended it.
-export const OUTCOME_LABELS: Record<'adrift' | 'sunk' | 'destroyed', string> = {
+export const OUTCOME_LABELS: Record<'adrift' | 'sunk', string> = {
   adrift: 'Adrift in the public ocean',
   sunk: 'Sunk at sea',
-  destroyed: 'Destroyed',
 };
 
-export function OutcomeChip({ reason }: { reason: 'adrift' | 'sunk' | 'destroyed' }) {
+export function OutcomeChip({ reason }: { reason: 'adrift' | 'sunk' }) {
   return (
     <span className={`status-chip status-outcome-${reason}`}>
       <span aria-hidden>{reason === 'adrift' ? '⚑' : '✕'}</span>

@@ -36,6 +36,12 @@ export const ForgotPasswordRequestSchema = z.object({
   email: z.string().trim().max(EMAIL_MAX_LENGTH),
 });
 export const RESET_TOKEN_TTL_MS = 30 * 60 * 1000;
+// Product decision 3: registering with an address that already has an account says so plainly.
+// An accepted privacy trade-off (docs/REMEDIATION.md); forgot-password still never reveals
+// whether an address is registered.
+export const EMAIL_TAKEN_MESSAGE =
+  'This email is already registered. Sign in or reset your password.';
+
 export const ResetPasswordRequestSchema = z.object({
   token: z.string().min(32).max(128),
   password: PasswordSchema,

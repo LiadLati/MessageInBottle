@@ -4,6 +4,7 @@ import { api } from './api/client.js';
 import { Nav, type Tab } from './components/Nav.js';
 import { DeleteAccountDialog } from './components/DeleteAccountDialog.js';
 import { PolicyDialog } from './components/PolicyDialog.js';
+import { BlockedUsersDialog } from './components/BlockedUsersDialog.js';
 import { ProfileSheet } from './components/ProfileSheet.js';
 import { useAsync } from './lib/useAsync.js';
 import { useTopSlot } from './lib/useTopSlot.js';
@@ -58,7 +59,7 @@ function readPolicyHash(): DocumentId | null {
 }
 
 function Shell() {
-  const { user, loading, logout } = useSession();
+  const { user, loading, reconnecting, logout } = useSession();
   // The document dialog is owned here so it can open over the sign-in screen, over the app,
   // and over the "updated terms" screen alike.
   const [policyDoc, setPolicyDoc] = useState<DocumentId | null>(readPolicyHash);
@@ -92,16 +93,19 @@ function Shell() {
   const [epoch, setEpoch] = useState(0);
   const [profileOpen, setProfileOpen] = useState(false);
   const [deletingAccount, setDeletingAccount] = useState(false);
+  const [blockedOpen, setBlockedOpen] = useState(false);
   const [choosingShore, setChoosingShore] = useState(false);
   // Immersive screens (preview & release, the release sequence) take the whole viewport: no
   // navigation, no system strips. An opened letter is a modal over the shore instead.
   const [immersive, setImmersive] = useState(false);
   const chart = useAsync(() => (user ? api.chart() : Promise.resolve(null)), [user?.id]);
   const notifications = useAsync(
-    () => (user ? api.notifications() : Promise.resolve({ notifications: [] })),
+    () => (user ? api.notifications() : Promise.resolve(null)),
     [user?.id, epoch],
     20_000,
   );
+  // The badge is the server's unread count across the whole history, not just the first page.
+  const unreadCount = notifications.data?.unreadCount ?? 0;
   const unread = (notifications.data?.notifications ?? []).filter((n) => n.readAt === null);
   const reloadNotifications = notifications.reload;
   // The My Shore badge means one thing: a bottle is waiting there for this user to open. It is
@@ -134,17 +138,75 @@ function Shell() {
   const [standingOpen, setStandingOpen] = useState(false);
   const [admin, setAdmin] = useState<AdminSection | null>(null);
 
+  // Everything that belongs to one signed-in account goes when that session ends, so the next
+  // account in the same tab never opens onto the last one's sheets (audit FE-012). Adjusted
+  // during render when the account changes, React's pattern for state derived from an input.
+  const userId = user?.id ?? null;
+  const [shownFor, setShownFor] = useState<string | null>(userId);
+  if (shownFor !== userId) {
+    setShownFor(userId);
+    setProfileOpen(false);
+    setDeletingAccount(false);
+    setChoosingShore(false);
+    setImmersive(false);
+    setInboxOpen(false);
+    setStandingOpen(false);
+    setAdmin(null);
+    setPassportId(null);
+    setFocusId(null);
+    setFocusPublicId(null);
+    setTab('ocean');
+  }
+
+  // Browser Back walks back through the screens of this session instead of leaving the app
+  // (audit FE-015). Each user-driven change of screen pushes one history entry holding the
+  // screen; popping an entry restores it. There is no router: the URL itself stays put.
+  const navKey = JSON.stringify({
+    tab,
+    passportId,
+    inbox: inboxOpen,
+    admin,
+    standing: standingOpen,
+  } satisfies NavEntry);
+  const currentNav = useRef(navKey);
+  const restoringNav = useRef(false);
+  useEffect(() => {
+    if (!userId) {
+      currentNav.current = '';
+      return;
+    }
+    const entry = { mib: JSON.parse(navKey) as NavEntry };
+    if (currentNav.current === '') window.history.replaceState(entry, '');
+    else if (restoringNav.current) restoringNav.current = false;
+    else if (currentNav.current !== navKey) window.history.pushState(entry, '');
+    currentNav.current = navKey;
+  }, [navKey, userId]);
+  useEffect(() => {
+    const onPop = (e: PopStateEvent) => {
+      const entry = (e.state as { mib?: NavEntry } | null)?.mib;
+      if (!entry || JSON.stringify(entry) === currentNav.current) return;
+      restoringNav.current = true;
+      setTab(entry.tab);
+      setPassportId(entry.passportId);
+      setInboxOpen(entry.inbox);
+      setAdmin(entry.admin);
+      setStandingOpen(entry.standing);
+    };
+    window.addEventListener('popstate', onPop);
+    return () => window.removeEventListener('popstate', onPop);
+  }, []);
+
   // Visiting My Shore refreshes its count (a bottle opened there clears the badge); it no
   // longer marks notifications read — that is the inbox's job.
   useEffect(() => {
     if (tab === 'shore') void reloadShore();
   }, [tab, reloadShore]);
   // Opening the inbox is what marks its notifications read; the count follows.
-  const openInbox = useCallback(() => {
+  const openInbox = () => {
     setInboxOpen(true);
-    if (unread.length > 0) void api.markNotificationsRead().then(() => reloadNotifications());
-  }, [unread.length, reloadNotifications]);
-  const closeInbox = useCallback(() => setInboxOpen(false), []);
+    if (unreadCount > 0) void api.markNotificationsRead().then(() => reloadNotifications());
+  };
+  const closeInbox = () => setInboxOpen(false);
 
   const openProfile = useCallback(() => setProfileOpen(true), []);
   const closeProfile = useCallback(() => setProfileOpen(false), []);
@@ -165,7 +227,16 @@ function Shell() {
       </>
     );
   }
-  if (loading) return <main className="deck-screen" aria-busy />;
+  if (loading)
+    return (
+      <main className="deck-screen" aria-busy>
+        {reconnecting ? (
+          <p className="note amber" role="status">
+            Cannot reach the SeaYou server right now. Still signed in; trying again…
+          </p>
+        ) : null}
+      </main>
+    );
   if (!user)
     return (
       <>
@@ -186,6 +257,17 @@ function Shell() {
   // no local "dismissed" flag, because closing or reloading must not resolve it.
   const pendingDecision = standing.data?.pendingDecision ?? null;
 
+  const deleteDialog = (
+    <DeleteAccountDialog
+      onCancel={() => setDeletingAccount(false)}
+      onDeleted={() => {
+        setDeletingAccount(false);
+        // The account is gone and its session with it: drop the token and show sign-in.
+        void logout();
+      }}
+    />
+  );
+
   const restricted =
     standing.data?.standing === 'suspended' || standing.data?.standing === 'banned';
   // A suspended or banned account sees its standing, can read the decision, appeal, waive,
@@ -193,10 +275,21 @@ function Shell() {
   if (restricted && standing.data) {
     return (
       <main className="app-viewport" data-daylight="night">
-        <StandingScreen standing={standing.data} />
+        <StandingScreen
+          standing={standing.data}
+          onDeleteAccount={() => setDeletingAccount(true)}
+          onSuspensionEnded={reloadStanding}
+        />
         {pendingDecision ? (
-          <DecisionNotice notice={pendingDecision} onResolved={reloadStanding} />
+          <DecisionNotice
+            // One component per notice: a second notice owed after the first is answered starts
+            // fresh instead of inheriting the first one's busy state.
+            key={pendingDecision.id}
+            notice={pendingDecision}
+            onResolved={reloadStanding}
+          />
         ) : null}
+        {deletingAccount ? deleteDialog : null}
       </main>
     );
   }
@@ -259,6 +352,7 @@ function Shell() {
         {inboxOpen && !admin && !standingOpen ? (
           <NotificationsScreen
             notifications={notifications.data?.notifications ?? null}
+            nextCursor={notifications.data?.nextCursor ?? null}
             loading={notifications.loading && !notifications.data}
             error={notifications.error}
             onBack={closeInbox}
@@ -269,7 +363,7 @@ function Shell() {
             focusId={focusId}
             focusPublicId={focusPublicId}
             leaveRef={oceanLeave}
-            unread={unread.length}
+            unread={unreadCount}
             onOpenInbox={openInbox}
             onOpenAdmin={user.role === 'admin' ? (section) => setAdmin(section) : undefined}
             onWrite={() => leaveOceanTo('write')}
@@ -320,22 +414,31 @@ function Shell() {
             setProfileOpen(false);
             setStandingOpen(true);
           }}
+          onBlockedUsers={() => {
+            setProfileOpen(false);
+            setBlockedOpen(true);
+          }}
           onClose={closeProfile}
         />
       ) : null}
-      {pendingDecision && !immersive ? (
-        <DecisionNotice notice={pendingDecision} onResolved={reloadStanding} />
-      ) : null}
-      {deletingAccount ? (
-        <DeleteAccountDialog
-          onCancel={() => setDeletingAccount(false)}
-          onDeleted={() => {
-            setDeletingAccount(false);
-            // The account is gone and its session with it: drop the token and show sign-in.
-            void logout();
+      {blockedOpen ? (
+        <BlockedUsersDialog
+          onClose={() => {
+            setBlockedOpen(false);
+            void reloadFriends();
           }}
         />
       ) : null}
+      {pendingDecision && !immersive ? (
+        <DecisionNotice
+          // One component per notice: a second notice owed after the first is answered starts
+          // fresh instead of inheriting the first one's busy state.
+          key={pendingDecision.id}
+          notice={pendingDecision}
+          onResolved={reloadStanding}
+        />
+      ) : null}
+      {deletingAccount ? deleteDialog : null}
       {policyDialog}
       {immersive ? null : (
         <Nav
@@ -355,6 +458,14 @@ function Shell() {
       )}
     </main>
   );
+}
+
+interface NavEntry {
+  tab: Tab;
+  passportId: string | null;
+  inbox: boolean;
+  admin: AdminSection | null;
+  standing: boolean;
 }
 
 // Arrival notice: a strip in the top stack, never a cover over the header beneath it.

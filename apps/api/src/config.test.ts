@@ -13,6 +13,7 @@ import {
 // password and an unauthenticated mail outbox full of password-reset links. These tests pin the
 // fail-closed replacement. Each builds its environment from scratch — never process.env.
 const PROD_DB = path.resolve('/var/lib/seayou/seayou.sqlite');
+const PROD_URL = 'https://seayou.example';
 
 describe('development mode is off unless explicitly enabled', () => {
   it('treats a missing MIB_DEV_MODE as safe mode', () => {
@@ -90,16 +91,40 @@ describe('production fails closed', () => {
   });
 
   it('starts in safe mode with a minimal production environment', () => {
-    const config = loadConfig({ MIB_DATABASE_PATH: PROD_DB }, { productionBuild: true });
+    const config = loadConfig(
+      { MIB_DATABASE_PATH: PROD_DB, MIB_APP_URL: PROD_URL },
+      { productionBuild: true },
+    );
     expect(config.devMode).toBe(false);
     expect(config.databasePath).toBe(PROD_DB);
     expect(config.mail.provider).toBe('disabled');
   });
 
+  it('requires an https public URL in production', () => {
+    expect(() => loadConfig({ MIB_DATABASE_PATH: PROD_DB }, { productionBuild: true })).toThrow(
+      /MIB_APP_URL must be the public https/,
+    );
+    expect(() =>
+      loadConfig(
+        { MIB_DATABASE_PATH: PROD_DB, MIB_APP_URL: 'http://seayou.example' },
+        { productionBuild: true },
+      ),
+    ).toThrow(/https/);
+    // Development keeps its http default.
+    expect(loadConfig({}).appUrl).toBe('http://localhost:5173');
+  });
+
+  it('reads the trusted proxy hop count as a whole number of at least 1', () => {
+    expect(loadConfig({}).trustedProxyHops).toBe(1);
+    expect(loadConfig({ MIB_TRUSTED_PROXY_HOPS: '2' }).trustedProxyHops).toBe(2);
+    for (const bad of ['0', '-1', '1.5', 'two'])
+      expect(() => loadConfig({ MIB_TRUSTED_PROXY_HOPS: bad }), bad).toThrow(ConfigError);
+  });
+
   it('refuses the development outbox in production', () => {
     expect(() =>
       loadConfig(
-        { MIB_DATABASE_PATH: PROD_DB, MIB_MAIL_PROVIDER: 'outbox' },
+        { MIB_DATABASE_PATH: PROD_DB, MIB_APP_URL: PROD_URL, MIB_MAIL_PROVIDER: 'outbox' },
         { productionBuild: true },
       ),
     ).toThrow(/development-only/);

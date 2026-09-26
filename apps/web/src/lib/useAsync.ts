@@ -8,6 +8,10 @@ export interface AsyncState<T> {
 }
 
 // Small polling-capable loader; a data library is deferred until the app has more screens.
+//
+// Polling stops while the tab is hidden and catches up once when it is shown again: an idle
+// background tab otherwise costs ~26,000 requests a day for data that changes over hours
+// (audit FE-014).
 export function useAsync<T>(
   loader: () => Promise<T>,
   deps: unknown[],
@@ -36,8 +40,22 @@ export function useAsync<T>(
   useEffect(() => {
     void reload();
     if (!pollMs) return;
-    const id = setInterval(() => void reload(), pollMs);
-    return () => clearInterval(id);
+    let missed = false;
+    const id = setInterval(() => {
+      if (document.hidden) missed = true;
+      else void reload();
+    }, pollMs);
+    const onVisibility = () => {
+      if (!document.hidden && missed) {
+        missed = false;
+        void reload();
+      }
+    };
+    document.addEventListener('visibilitychange', onVisibility);
+    return () => {
+      clearInterval(id);
+      document.removeEventListener('visibilitychange', onVisibility);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [reload, pollMs, ...deps]);
 

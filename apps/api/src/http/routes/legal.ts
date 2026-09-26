@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import type { Context } from 'hono';
-import { getConnInfo } from '@hono/node-server/conninfo';
+import { clientAddress } from '../client-address.js';
+import { chargeSignIn, clearSignIn } from './auth.js';
 import {
   PUBLISHED_DOCUMENTS,
   SUPPORT_NAME,
@@ -12,7 +13,13 @@ import { RateLimiter, type RateLimitRule } from '../../lib/rate-limit.js';
 import { login } from '../../services/auth.js';
 import { deleteAccount, verifyAccountPassword } from '../../services/deletion.js';
 import type { AppEnv } from '../app.js';
-import { documentPage, deletionDonePage, deletionPage, page } from '../legal-pages.js';
+import {
+  documentPage,
+  deletionDonePage,
+  deletionPage,
+  notFoundPage,
+  page,
+} from '../legal-pages.js';
 
 // The public legal surface: unauthenticated HTML at stable URLs, suitable for a store listing.
 // Nothing here needs a session, JavaScript or a PDF reader, and the deletion form below is a
@@ -63,41 +70,35 @@ export function legalRoutes(limiter = new RateLimiter()) {
     if (!username || !password) return back('Enter the username and password of the account.');
     if (!confirmed) return back('Tick the box to confirm that deletion is permanent.');
 
-    // One address cannot sit here guessing credentials.
-    const key = (() => {
-      if (c.get('ctx').config.trustProxy) {
-        const first = c.req.header('x-forwarded-for')?.split(',')[0]?.trim();
-        if (first) return first;
-      }
-      try {
-        return getConnInfo(c).remote.address ?? 'local';
-      } catch {
-        return 'local';
-      }
-    })();
+    // One address cannot sit here guessing credentials, and this form spends the same
+    // per-account sign-in budget as the sign-in endpoint: it is not a side door (ARCH-009).
+    const key = clientAddress(c);
     if (!limiter.hit(`legal-delete:${key}`, DELETE_PER_ADDRESS).allowed)
       return back('Too many attempts from this device. Wait a few minutes and try again.');
+    if (!chargeSignIn(limiter, username, key).allowed)
+      return back('Too many attempts for this account. Wait a few minutes and try again.');
 
     const ctx = c.get('ctx');
     let userId: string;
     try {
       // Signing in proves the account exists and the password is right; the second check keeps
       // the in-app path and this one on exactly the same rule.
-      const session = login(ctx, { username: normalizeUsername(username), password });
+      const session = await login(ctx, { username: normalizeUsername(username), password });
       userId = session.user.id;
-      verifyAccountPassword(ctx, userId, password);
+      await verifyAccountPassword(ctx, userId, password);
     } catch (err) {
       if (err instanceof AppError && (err.status === 401 || err.status === 404))
         return back('That username and password do not match an account.');
       throw err;
     }
+    clearSignIn(limiter, username, key);
     deleteAccount(ctx, userId);
     return c.html(deletionDonePage(), 200, { 'cache-control': 'no-store' });
   });
 
   r.get('/:slug', (c) => {
     const doc = publishedDocumentBySlug(c.req.param('slug'));
-    if (!doc) return c.notFound();
+    if (!doc) return c.html(notFoundPage(), 404, { 'cache-control': 'no-store' });
     return html(c, documentPage(doc));
   });
 

@@ -86,11 +86,8 @@ describe('release eligibility (spec §5.1 step 6, §18 #1-#3)', () => {
   it('rejects when the destination shore is full and keeps the draft (no bottle created)', () => {
     const ada = w.user('ada');
     const bo = w.user('bo');
-    w.db
-      .update(t.shores)
-      .set({ capacity: 1 })
-      .where(eq(t.shores.id, 'shore_driftmoor_strand'))
-      .run();
+    // Capacity is per recipient's shore (product decision 8).
+    w.ctx.config.shoreCapacity = 1;
     releaseBottle(w.ctx, ada, releaseInput(bo.id, 'key-first-000001'));
     expectRejection(
       () => releaseBottle(w.ctx, ada, releaseInput(bo.id, 'key-second-00001')),

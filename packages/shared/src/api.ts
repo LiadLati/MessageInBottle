@@ -131,6 +131,19 @@ export const FriendsResponseSchema = z.object({
 });
 export type FriendsResponse = z.infer<typeof FriendsResponseSchema>;
 
+// Settings → Blocked users (product decision 10): the accounts this person has blocked, and
+// only those — never who has blocked them.
+export const BlockedUserSchema = z.object({
+  // Null for the anonymous writer of a bottle found adrift: the finder never learns who that
+  // is, so the entry is named, and undone, by the bottle instead (product decision 12).
+  username: z.string().nullable(),
+  displayName: z.string(),
+  blockedAt: z.string(),
+  foundBottleId: z.string().nullable(),
+});
+export const BlockedUsersResponseSchema = z.object({ blocked: z.array(BlockedUserSchema) });
+export type BlockedUsersResponse = z.infer<typeof BlockedUsersResponseSchema>;
+
 export const SendFriendRequestSchema = z.object({ username: UsernameSchema });
 export const BlockUserRequestSchema = z.object({ username: UsernameSchema });
 
@@ -157,6 +170,8 @@ export const RELEASE_REJECTIONS = [
   'shore_full',
   'route_unavailable',
   'invalid_letter',
+  // Product decision 11: invisible direction-control characters; the writer removes them.
+  'letter_direction_controls',
 ] as const;
 export type ReleaseRejection = (typeof RELEASE_REJECTIONS)[number];
 
@@ -229,13 +244,45 @@ export const OutcomeVisibilitySchema = z.object({
 });
 export type OutcomeVisibilityDto = z.infer<typeof OutcomeVisibilitySchema>;
 
-// A storm window of the server's risk schedule, sent so the map draws exactly the storms that
-// can matter (and the ones that cannot: after the risk cap, they are scenery).
+// A window of the account's storm (policy v4) while this bottle is at sea: the one storm on the
+// account's map, the same for all of its bottles, clipped to the time the map shows it.
 export const StormWindowSchema = z.object({
   startsAt: z.string(),
   endsAt: z.string(),
 });
 export type StormWindowDto = z.infer<typeof StormWindowSchema>;
+
+// The account's map clock and weather (policy v4). One answer per account, from the server, so
+// every signed-in device draws the same day, night and storm.
+export const TIME_ZONE_SOURCES = ['device', 'harbour', 'utc'] as const;
+export const AccountWeatherSchema = z.object({
+  // The authoritative IANA zone: the latest valid device zone the server accepted; before any,
+  // the harbour's zone; else UTC.
+  timeZone: z.string(),
+  timeZoneSource: z.enum(TIME_ZONE_SOURCES),
+  phase: z.enum(['day', 'night']),
+  // Tonight's storm while it can still be seen: upcoming or active, never cancelled, never in
+  // daytime. `endsAt` is when it stops being shown (its end, or an earlier morning).
+  storm: z
+    .object({
+      id: IdSchema,
+      startsAt: z.string(),
+      endsAt: z.string(),
+    })
+    .nullable(),
+  // The latest eligibility roll, as proof it happened and cannot happen again soon.
+  lastRoll: z
+    .object({
+      rolledAt: z.string(),
+      outcome: z.enum(['calm', 'storm']),
+      cancelledAt: z.string().nullable(),
+    })
+    .nullable(),
+  // No new roll before this instant (24 hours after the last one).
+  nextRollNotBefore: z.string().nullable(),
+  serverTime: z.string(),
+});
+export type AccountWeatherDto = z.infer<typeof AccountWeatherSchema>;
 
 // Where an adrift bottle stands on the public map: listed until its deadline, opened by a
 // finder, or removed unopened after 72 hours.
@@ -263,19 +310,25 @@ export const SentBottleSchema = z.object({
   // Null until the sea ends the journey; then the persisted loss/sinking record.
   outcome: OutcomeSchema.nullable(),
   visibility: OutcomeVisibilitySchema.nullable(),
-  // Storm windows around now, in the sender's account nights, only while at sea; empty
-  // otherwise. Absolute instants, always inside a night of the account's own zone.
+  // The account storm's visible windows around now, only while this bottle is at sea; empty
+  // otherwise. Absolute instants, always inside a night of the account's map clock.
   storms: z.array(StormWindowSchema),
   publicListing: PublicListingSchema.nullable(),
   letter: z.object({ text: z.string(), font: LetterFontSchema, characters: z.number().int() }),
   // True when the letter was removed after an accepted report: the text above is empty.
   removed: z.boolean().optional(),
   events: z.array(JourneyEventSchema),
+  // Storm nights this journey has sailed through so far (passport only).
+  stormsWeathered: z.number().int().nonnegative(),
   serverTime: z.string(),
 });
 export type SentBottleDto = z.infer<typeof SentBottleSchema>;
 
-export const SentBottleSummarySchema = SentBottleSchema.omit({ letter: true, events: true });
+export const SentBottleSummarySchema = SentBottleSchema.omit({
+  letter: true,
+  events: true,
+  stormsWeathered: true,
+});
 export type SentBottleSummaryDto = z.infer<typeof SentBottleSummarySchema>;
 
 export const ReleaseResponseSchema = z.object({ bottle: SentBottleSchema });
@@ -309,7 +362,9 @@ export type ShoreResponse = z.infer<typeof ShoreResponseSchema>;
 export const ReceivedLetterSchema = z.object({
   id: IdSchema,
   source: z.enum(['shore', 'public']),
-  state: z.enum(['delivered', 'opened', 'lost']),
+  // A recipient or finder sees delivered, opened or lost; a sender reading their own letter
+  // (GET /bottles/sent/:id/letter) may also see it at sea or cancelled.
+  state: z.enum(['at_sea', 'delivered', 'opened', 'lost', 'cancelled']),
   sender: z.object({ id: IdSchema, displayName: z.string() }).nullable(),
   originShore: z.object({ id: IdSchema, name: z.string() }).nullable(),
   releasedAt: z.string(),
@@ -380,6 +435,7 @@ export const NOTIFICATION_KINDS = [
   'moderation_banned',
   'moderation_appeal_accepted',
   'moderation_appeal_rejected',
+  'shore_full',
   'other',
 ] as const;
 export const NotificationKindSchema = z.enum(NOTIFICATION_KINDS);
@@ -395,6 +451,17 @@ export const NotificationSchema = z.object({
   readAt: z.string().nullable(),
 });
 export type NotificationDto = z.infer<typeof NotificationSchema>;
+
+// Product decision 6: the whole history is kept for the life of the account and read a page at
+// a time, newest first. `nextCursor` asks for the page after this one; null means the end.
+export const NOTIFICATIONS_PAGE_SIZE = 50;
+export const NotificationsPageSchema = z.object({
+  notifications: z.array(NotificationSchema),
+  nextCursor: z.string().nullable(),
+  // Across the whole history, not only this page — the badge must not depend on paging.
+  unreadCount: z.number().int().nonnegative(),
+});
+export type NotificationsPageDto = z.infer<typeof NotificationsPageSchema>;
 
 // ---------- dev ----------
 export const DevAdvanceRequestSchema = z.object({
@@ -480,6 +547,9 @@ export const AiReviewOutputSchema = z.object({
   // An English rendering of the reported text, shown beside the original, never instead of it.
   translation: z.string().trim().max(4000).nullable().optional(),
   confidence: z.number().min(0).max(1).nullable().optional(),
+  // A possible child-safety issue. It only moves the case to the top of the human queue as an
+  // urgent review; it never decides, sanctions or bans anything (product decision 2).
+  childSafety: z.boolean().nullable().optional(),
 });
 export type AiReviewOutput = z.infer<typeof AiReviewOutputSchema>;
 
@@ -495,6 +565,7 @@ export const AiReviewSchema = z.object({
   completedAt: z.string().nullable(),
   nextAttemptAt: z.string().nullable(),
   lastError: z.string().nullable(),
+  childSafety: z.boolean(),
 });
 export type AiReviewDto = z.infer<typeof AiReviewSchema>;
 
@@ -507,7 +578,8 @@ export type PersonDto = z.infer<typeof PersonSchema>;
 
 export const ModerationDecisionSchema = z.object({
   outcome: z.enum(['accepted', 'rejected']),
-  // Who decided: an admin (named) or the model under automatic decisions.
+  // Who decided. Always an administrator now; 'ai' only appears on cases decided before
+  // automatic decisions were removed (product decision 2).
   by: z.enum(['admin', 'ai']),
   admin: PersonSchema.nullable(),
   at: z.string(),
@@ -530,6 +602,8 @@ export type LetterReportDto = z.infer<typeof LetterReportSchema>;
 export const AdminCaseSummarySchema = z.object({
   id: IdSchema,
   status: CaseStatusSchema,
+  // Urgent child-safety review: listed first in the administrator's queue.
+  urgentAt: z.string().nullable(),
   bottleId: IdSchema,
   context: z.enum(['shore', 'public']),
   sender: PersonSchema,
@@ -563,13 +637,13 @@ export const AdminCaseDetailSchema = AdminCaseSummarySchema.extend({
       createdAt: z.string(),
     })
     .nullable(),
-  // Where this case stands in the seven-day evidence retention calculation, so an
+  // Where this case stands in the 30-day evidence retention calculation, so an
   // administrator can see why evidence is still here — or why it is about to go.
   retention: z.object({
     // The instant nothing could need the evidence any more; null while something still can.
     finalAt: z.string().nullable(),
     redactableAt: z.string().nullable(),
-    // Why it is being kept: 'notice_unresolved', 'appeal_pending', 'legal_hold', …
+    // Why it is being kept: 'appeal_pending', 'legal_hold', 'child_safety_hold', …
     hold: z.string().nullable(),
   }),
   // A documented legal or immediate child-safety hold, if one was placed.
@@ -592,8 +666,36 @@ export const AdminCaseDetailSchema = AdminCaseSummarySchema.extend({
       noticePresentedAt: z.string().nullable(),
     })
     .nullable(),
+  // SHA-256 of the evidence exactly as shown. A decision must echo it back, so a screen left
+  // open while the case changed cannot decide something the administrator did not see.
+  evidenceDigest: z.string(),
+  // What upholding this case would do to the sender's standing, computed by the server from
+  // the violations currently in force (audit FE-009).
+  consequence: z.object({
+    violationsInForce: z.number().int().nonnegative(),
+    ifUpheld: z.enum(['warning', 'suspension', 'ban']),
+  }),
+  // The viewing administrator is the sender, the recipient or a reporter on this case, and so
+  // may not decide it, its appeal or its critical classification (audit SEC-010).
+  recused: z.boolean(),
 });
 export type AdminCaseDetailDto = z.infer<typeof AdminCaseDetailSchema>;
+
+// One row of the moderation audit trail, as an administrator reads it (audit SEC-011).
+export const AuditEntrySchema = z.object({
+  id: IdSchema,
+  action: z.string(),
+  caseId: IdSchema.nullable(),
+  violationId: IdSchema.nullable(),
+  appealId: IdSchema.nullable(),
+  subjectUserId: IdSchema.nullable(),
+  actorUserId: IdSchema.nullable(),
+  actorRole: z.enum(['admin', 'developer', 'member', 'system']),
+  reason: z.string().nullable(),
+  detail: z.string().nullable(),
+  createdAt: z.string(),
+});
+export type AuditEntryDto = z.infer<typeof AuditEntrySchema>;
 
 export const AdminAppealSchema = z.object({
   id: IdSchema,
@@ -624,6 +726,15 @@ export const DecisionRequestSchema = z.object({
 });
 export type DecisionRequest = z.infer<typeof DecisionRequestSchema>;
 
+const EvidenceDigestSchema = z.string().regex(/^[a-f0-9]{64}$/);
+// Deciding a report: the digest of the evidence the administrator was shown (see
+// AdminCaseDetailSchema.evidenceDigest). Upholding also requires a reason; the server enforces it.
+export const CaseDecisionRequestSchema = z.object({
+  reason: z.string().trim().max(1000).optional(),
+  evidenceDigest: EvidenceDigestSchema,
+});
+export type CaseDecisionRequest = z.infer<typeof CaseDecisionRequestSchema>;
+
 // ---------- the sender's side: violations, standing, appeals ----------
 // Nothing here ever names or hints at a reporter.
 export const ViolationNoticeSchema = z.object({
@@ -652,6 +763,12 @@ export const ViolationNoticeSchema = z.object({
   appealAvailable: z.boolean(),
   appealWaivedAt: z.string().nullable(),
   noticePresentedAt: z.string().nullable(),
+  // The appeal window closes here, on server time: 30 days from the decision (or from an
+  // escalation that reopened it). After it, `appealExpired` is true and the decision is final.
+  appealDeadlineAt: z.string(),
+  appealExpired: z.boolean(),
+  // A later critical escalation reopened one appeal opportunity (product decision 2).
+  appealReopenedAt: z.string().nullable(),
 });
 export type ViolationNoticeDto = z.infer<typeof ViolationNoticeSchema>;
 
@@ -688,6 +805,16 @@ export type WaiveAppealRequest = z.infer<typeof WaiveAppealRequestSchema>;
 export const APPEAL_WAIVER_CONFIRMATION =
   'If you continue, you will permanently lose the option to appeal this decision.';
 export const APPEAL_ACTION_APPEAL = 'Appeal decision';
+// Product decision 5: one appeal within 30 days of the decision, on server time; the letter's
+// copy kept as evidence is redactable 30 days after the decision, or once a timely appeal is
+// decided, whichever is later.
+export const APPEAL_WINDOW_DAYS = 30;
+// Product decision 8: every account's shore holds 100 bottles at once — those on their way to
+// it and those delivered but not yet opened.
+export const SHORE_CAPACITY = 100;
+export const APPEAL_WINDOW_MS = APPEAL_WINDOW_DAYS * 24 * 60 * 60 * 1000;
+export const EVIDENCE_RETENTION_DAYS = 30;
+export const EVIDENCE_RETENTION_MS = EVIDENCE_RETENTION_DAYS * 24 * 60 * 60 * 1000;
 export const APPEAL_ACTION_CONTINUE = 'Continue without appealing';
 export const APPEAL_ACTION_GO_BACK = 'Go back';
 export const APPEAL_ACTION_SKIP = 'Skip appeal';
@@ -697,6 +824,7 @@ export const APPEAL_ACTION_SKIP = 'Skip appeal';
 export const CriticalDecisionRequestSchema = z.object({
   reason: z.string().trim().min(1).max(1000),
   classification: z.literal('critical_child_safety'),
+  evidenceDigest: z.string().regex(/^[a-f0-9]{64}$/),
 });
 export type CriticalDecisionRequest = z.infer<typeof CriticalDecisionRequestSchema>;
 

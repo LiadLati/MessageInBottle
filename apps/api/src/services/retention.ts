@@ -1,66 +1,64 @@
 import { and, eq, isNull } from 'drizzle-orm';
 import type { Db, DbOrTx } from '../db/client.js';
 import * as t from '../db/schema.js';
+import { EVIDENCE_RETENTION_MS } from '@mib/shared';
 import { writeAudit } from './audit.js';
 
-// Evidence retention (spec §16.5). A moderation case keeps a copy of the reported letter so
-// that administrators judge what was actually sent, and so that an appeal is decided on the
-// same text. That copy is the most sensitive thing this system stores, so it is kept for a
-// fixed, short, documented time and then removed — automatically.
+// Evidence retention (spec §16.5, product decision 5). A moderation case keeps a copy of the
+// reported letter so that administrators judge what was actually sent, and so that an appeal is
+// decided on the same text. That copy is the most sensitive thing this system stores, so it is
+// kept for a fixed, documented time and then removed — automatically.
 //
 // The rule:
 //
-//     seven elapsed days after a case becomes final, its content evidence is redacted,
-//     unless a documented legal or child-safety hold says otherwise.
+//     content evidence becomes redactable 30 days after the original administrator decision,
+//     or once a timely appeal has been decided, whichever is later — unless a documented legal
+//     or child-safety hold says otherwise.
 //
-// A case becomes final when there is nothing left to decide about it:
-//
-//   • the report was rejected; or
-//   • the report was upheld and the sender explicitly waived their appeal; or
-//   • the appeal they submitted was decided (either way).
-//
-// It is deliberately *not* final while the report is undecided, while the sender has not yet
-// seen and resolved the decision notice, or while an appeal is pending. Someone who closed
-// SeaYou without answering the notice still has their appeal, and an appeal decided on
-// redacted evidence would be no appeal at all.
+// The clock runs on server time from the decision, whether or not the sender has opened
+// SeaYou: an unanswered notice no longer keeps evidence forever. It is also the appeal window
+// (moderation.ts), so an appeal can always be decided on the evidence it disputes, and a
+// pending appeal holds the evidence however long it takes. An escalation to a critical ban that
+// reopened the appeal counts from the escalation, for the same reason.
 //
 // "Redact" is not "delete the case". The case row, its category, its decision, who decided it,
-// when, the violation it produced and the whole audit trail all survive — upheld violations
-// never expire, so the metadata that justifies one has to outlive the letter that proved it.
-// Only the content goes: the copied letter and the reporters' free-text explanations, which
-// quote it.
+// when, the reasons, the violation it produced and the whole audit trail all survive — upheld
+// violations never expire. Only content goes: the copied letter, the reporters' free-text
+// explanations and the model's translation and reasoning, all of which quote or paraphrase it.
 
-export const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
+export const THIRTY_DAYS_MS = EVIDENCE_RETENTION_MS;
 
 export interface RetentionPolicy {
-  // Whether `applyRetention` may actually change anything. On by default: the seven-day rule
-  // is the published policy, not a plan. `planRetention` works either way, so a run can always
-  // be previewed first.
+  // Whether `applyRetention` may actually change anything. On by default: the 30-day rule is
+  // the published policy, not a plan. `planRetention` works either way, so a run can always be
+  // previewed first.
   enabled: boolean;
-  // How long after a case becomes final its content evidence is redacted.
-  finalAfterMs: number;
+  // How long after the decision content evidence is kept (30 days).
+  afterDecisionMs: number;
 }
 
-export const RETENTION_DEFAULT: RetentionPolicy = { enabled: true, finalAfterMs: SEVEN_DAYS_MS };
+export const RETENTION_DEFAULT: RetentionPolicy = {
+  enabled: true,
+  afterDecisionMs: THIRTY_DAYS_MS,
+};
 // For tests and for a deployment that deliberately wants to inspect before removing.
-export const RETENTION_OFF: RetentionPolicy = { enabled: false, finalAfterMs: SEVEN_DAYS_MS };
+export const RETENTION_OFF: RetentionPolicy = { enabled: false, afterDecisionMs: THIRTY_DAYS_MS };
 
 // Why a case's evidence is still being kept. Everything except `settled` is a reason to wait.
 export type RetentionHold =
   | 'case_pending' // nobody has decided the report yet
-  | 'ai_in_queue' // the review queue still has to read it
-  | 'notice_unresolved' // the sender has not appealed or waived the appeal yet
-  | 'appeal_pending' // an appeal is waiting on it
+  | 'ai_in_queue' // the review queue is reading it right now
+  | 'appeal_pending' // a timely appeal is waiting on it
   | 'legal_hold' // a documented legal reason
   | 'child_safety_hold' // a documented immediate child-safety reason
-  | 'within_window' // final, but less than seven days ago
+  | 'within_window' // decided less than 30 days ago
   | 'already_redacted';
 
 export interface RetentionRow {
   caseId: string;
   status: 'pending' | 'accepted' | 'rejected';
   hold: RetentionHold | null;
-  // When the case became final, if it has.
+  // The decision (or reopened appeal window) the 30 days count from.
   finalAt: number | null;
   // When its evidence becomes redactable, if that is already knowable.
   redactableAt: number | null;
@@ -74,32 +72,35 @@ export interface RetentionPlan {
   held: Record<string, number>;
 }
 
-// The instant a case stopped being able to need its evidence, or null while it still can.
-// Exported because it is the single definition of "final" the whole system shares.
+// The single definition of when a case's evidence may go, shared by the job, the planner and
+// the admin view. `finalAt` is the decision instant the window counts from; `redactableAt` is
+// null while something (an undecided report, a review in flight, a pending appeal) still needs
+// the text.
 export function finalityOf(
   db: DbOrTx,
   c: typeof t.moderationCases.$inferSelect,
-): { finalAt: number | null; hold: RetentionHold | null } {
-  if (c.status === 'pending') return { finalAt: null, hold: 'case_pending' };
-  // A review actually in flight is holding this text as its input.
-  if (c.aiStatus === 'running') return { finalAt: null, hold: 'ai_in_queue' };
+  afterDecisionMs: number = THIRTY_DAYS_MS,
+): { finalAt: number | null; redactableAt: number | null; hold: RetentionHold | null } {
+  if (c.status === 'pending') return { finalAt: null, redactableAt: null, hold: 'case_pending' };
+  if (c.aiStatus === 'running') return { finalAt: null, redactableAt: null, hold: 'ai_in_queue' };
 
-  // A rejected report is over the moment it is rejected: there is no violation to appeal.
-  if (c.status === 'rejected') return { finalAt: c.decidedAt ?? c.updatedAt, hold: null };
+  const decidedAt = c.decidedAt ?? c.updatedAt;
+  if (c.status === 'rejected')
+    return { finalAt: decidedAt, redactableAt: decidedAt + afterDecisionMs, hold: null };
 
   const violation = db.select().from(t.violations).where(eq(t.violations.caseId, c.id)).get();
-  // An accepted case with no violation should not exist; wait rather than guess.
-  if (!violation) return { finalAt: null, hold: 'notice_unresolved' };
-
+  // An accepted case with no violation should not exist; count from the decision anyway.
+  const anchor = violation
+    ? Math.max(violation.decidedAt, violation.appealWindowStartsAt ?? violation.decidedAt)
+    : decidedAt;
+  const base = anchor + afterDecisionMs;
+  if (!violation) return { finalAt: anchor, redactableAt: base, hold: null };
   const appeal = db.select().from(t.appeals).where(eq(t.appeals.violationId, violation.id)).get();
-  if (appeal)
-    return appeal.status === 'pending'
-      ? { finalAt: null, hold: 'appeal_pending' }
-      : { finalAt: appeal.decidedAt, hold: null };
-  // No appeal: final only once the sender has explicitly given the appeal up. Until then the
-  // offer is still open, however long ago the decision was, and the evidence stays.
-  if (violation.appealWaivedAt !== null) return { finalAt: violation.appealWaivedAt, hold: null };
-  return { finalAt: null, hold: 'notice_unresolved' };
+  if (appeal?.status === 'pending')
+    return { finalAt: anchor, redactableAt: null, hold: 'appeal_pending' };
+  if (appeal?.decidedAt != null)
+    return { finalAt: anchor, redactableAt: Math.max(base, appeal.decidedAt), hold: null };
+  return { finalAt: anchor, redactableAt: base, hold: null };
 }
 
 // Is this case under a documented hold that has not been released?
@@ -135,12 +136,11 @@ function assess(
   if (c.evidenceRedactedAt !== null)
     return { hold: 'already_redacted', finalAt: null, redactableAt: null };
 
-  const { finalAt, hold } = finalityOf(db, c);
-  if (finalAt === null) return { hold: hold ?? 'case_pending', finalAt: null, redactableAt: null };
+  const { finalAt, redactableAt, hold } = finalityOf(db, c, policy.afterDecisionMs);
+  if (redactableAt === null) return { hold: hold ?? 'case_pending', finalAt, redactableAt: null };
 
-  const redactableAt = finalAt + policy.finalAfterMs;
   // A documented hold outranks the timer, and only a documented one can: there is no other
-  // way for a case to sit beyond seven days.
+  // way for a case to sit beyond its window.
   const held = holdOf(c);
   if (held !== null) return { hold: held, finalAt, redactableAt };
   return now >= redactableAt
@@ -181,7 +181,15 @@ export function applyRetention(db: Db, now: number, policy: RetentionPolicy): Re
       if (assess(tx, fresh, now, policy).hold !== null) continue;
       const changed = tx
         .update(t.moderationCases)
-        .set({ evidenceText: '', evidenceRedactedAt: now })
+        // The model's translation and reasoning paraphrase or quote the letter, so they are
+        // content evidence too. Its verdict, and every human decision and reason, stay.
+        .set({
+          evidenceText: '',
+          evidenceRedactedAt: now,
+          aiTranslation: null,
+          aiReason: null,
+          aiUncertainty: null,
+        })
         .where(and(eq(t.moderationCases.id, caseId), isNull(t.moderationCases.evidenceRedactedAt)))
         .run().changes;
       if (changed === 0) continue;
@@ -200,7 +208,8 @@ export function applyRetention(db: Db, now: number, policy: RetentionPolicy): Re
           subjectUserId: fresh.senderId,
           actorUserId: null,
           actorRole: 'system',
-          detail: `seven-day retention; case final, evidence and reporter explanations cleared`,
+          detail:
+            '30-day retention; letter copy, reporter explanations and model translation and reasoning cleared',
         },
         now,
       );

@@ -3,7 +3,7 @@ import type { OpenedLetterDto, ShoreBottleDto } from '@mib/shared';
 import { api } from '../api/client.js';
 import { ShoreScene } from '../components/lazy.js';
 import { LetterModal } from '../components/LetterModal.js';
-import { Avatar, ErrorNote, Skeleton } from '../components/ui.js';
+import { Avatar, ErrorNote, LoadFailed, Skeleton } from '../components/ui.js';
 import { Icon } from '../design/Icon.js';
 import { formatDayTime, formatDuration } from '../lib/format.js';
 import { featuredBottle, sealedOnly, waitingBottles } from '../lib/shoreQueue.js';
@@ -25,7 +25,7 @@ interface Props {
 // solely by "Pick it up".
 export function MyShoreScreen({ onOpenProfile, onChooseShore }: Props) {
   const { user } = useSession();
-  const { nowMs, shoreStormOverride } = useWeather();
+  const { storm, shoreStormOverride } = useWeather();
   const shore = useAsync(() => api.myShore(), [], POLL_MS);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [opened, setOpened] = useState<OpenedLetterDto | null>(null);
@@ -34,11 +34,9 @@ export function MyShoreScreen({ onOpenProfile, onChooseShore }: Props) {
   // Further arrivals stay folded so the sheet never grows over the featured bottle (C2 framing).
   const [showMore, setShowMore] = useState(false);
 
-  // My Shore keeps its own weather, on its own schedule, keyed on the user — so it never
-  // mirrors an ocean storm. It is cosmetic: it changes sky, light, rain, waves, foam and
-  // wetness, and nothing else. It never blocks a release, adds delay, alters a route or
-  // increases any risk.
-  const weather = shoreWeatherAt(user?.id ?? null, nowMs, shoreStormOverride);
+  // My Shore shows the account's own storm — the one on the Ocean map, on the same clock. It
+  // changes sky, light, rain, waves, foam and wetness, and nothing else.
+  const weather = shoreWeatherAt(storm, shoreStormOverride);
   const sealed = sealedOnly(shore.data?.bottles ?? []);
   const featured = featuredBottle(sealed, selectedId);
   const waiting = waitingBottles(sealed, featured);
@@ -116,8 +114,10 @@ export function MyShoreScreen({ onOpenProfile, onChooseShore }: Props) {
           </span>
         </aside>
       ) : null}
-      <section className="sheet on-3d" aria-label="Arrivals">
-        {shore.loading && !shore.data ? (
+      <section className="sheet on-3d" tabIndex={0} aria-label="Arrivals">
+        {shore.error && !shore.data ? (
+          <LoadFailed error={shore.error} onRetry={() => void shore.reload()} />
+        ) : shore.loading && !shore.data ? (
           <Skeleton />
         ) : !featured ? (
           <div className="stack">
@@ -195,7 +195,7 @@ export function MyShoreScreen({ onOpenProfile, onChooseShore }: Props) {
             ) : null}
           </div>
         )}
-        <ErrorNote error={error ?? shore.error} />
+        <ErrorNote error={error ?? (shore.data ? shore.error : null)} />
       </section>
       {opened ? (
         <LetterModal

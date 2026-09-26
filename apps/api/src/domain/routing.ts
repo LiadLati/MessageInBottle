@@ -144,7 +144,30 @@ function localLoop(graph: RouteGraph, shoreNode: string): PlannedPath | null {
   return best;
 }
 
+// A graph version never changes, so neither does the best route between two shores on it.
+// Dijkstra over the ~36,000-node sea graph costs up to ~0.1 s of blocking CPU on a long route
+// (audit ARCH-012); each (graph, origin, destination) is therefore planned once. Bounded, and
+// frozen so no caller can alter a shared result.
+const routeCache = new WeakMap<RouteGraph, Map<string, PlannedPath | null>>();
+const ROUTE_CACHE_LIMIT = 5000;
+
 export function planRoute(
+  graph: RouteGraph,
+  originShoreId: string,
+  destinationShoreId: string,
+): PlannedPath | null {
+  let cache = routeCache.get(graph);
+  if (!cache) routeCache.set(graph, (cache = new Map<string, PlannedPath | null>()));
+  const key = `${originShoreId}\u0000${destinationShoreId}`;
+  if (cache.has(key)) return cache.get(key)!;
+  const planned = planRouteUncached(graph, originShoreId, destinationShoreId);
+  if (planned) Object.freeze(planned.nodeIds);
+  if (cache.size >= ROUTE_CACHE_LIMIT) cache.clear();
+  cache.set(key, planned ? Object.freeze(planned) : null);
+  return planned;
+}
+
+function planRouteUncached(
   graph: RouteGraph,
   originShoreId: string,
   destinationShoreId: string,

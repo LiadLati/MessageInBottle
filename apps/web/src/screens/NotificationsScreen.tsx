@@ -1,10 +1,14 @@
+import { useState } from 'react';
 import type { NotificationDto, NotificationKind } from '@mib/shared';
+import { api } from '../api/client.js';
 import { BackButton, DeckScreen, ErrorNote, Skeleton } from '../components/ui.js';
 import { Icon, type IconName } from '../design/Icon.js';
 import { formatDate } from '../lib/format.js';
 
 interface Props {
   notifications: NotificationDto[] | null;
+  // Cursor for the page after `notifications`; null when that page is the whole history.
+  nextCursor: string | null;
   loading: boolean;
   error: Error | null;
   onBack: () => void;
@@ -21,6 +25,7 @@ const KIND_ICON: Record<NotificationKind, { icon: IconName; tone: string; label:
   sent_found: { icon: 'letters', tone: 'gold', label: 'Read by a finder' },
   sent_expired: { icon: 'clock', tone: 'muted', label: 'Removed from the public map' },
   sent_cancelled: { icon: 'lost', tone: 'muted', label: 'Delivery unavailable' },
+  shore_full: { icon: 'info', tone: 'gold', label: 'Your shore is full' },
   moderation_violation: {
     icon: 'report',
     tone: 'gold',
@@ -35,8 +40,31 @@ const KIND_ICON: Record<NotificationKind, { icon: IconName; tone: string; label:
 
 // S · Notifications inbox. Rows are information only: nothing here opens a bottle, moves to
 // another screen, or touches a map marker — reading about a sunk bottle is not seeing it.
-export function NotificationsScreen({ notifications, loading, error, onBack }: Props) {
-  const list = notifications ?? [];
+// The history is kept for the life of the account (product decision 6) and read in pages:
+// the first comes with the badge poll, older ones on request.
+export function NotificationsScreen({ notifications, nextCursor, loading, error, onBack }: Props) {
+  const [older, setOlder] = useState<NotificationDto[]>([]);
+  const [olderCursor, setOlderCursor] = useState<string | null>(null);
+  const [loadingOlder, setLoadingOlder] = useState(false);
+  const [olderError, setOlderError] = useState<Error | null>(null);
+  // Until an older page is loaded, paging continues from the polled first page.
+  const cursor = older.length === 0 ? nextCursor : olderCursor;
+  const first = notifications ?? [];
+  const seen = new Set(first.map((n) => n.id));
+  const list = [...first, ...older.filter((n) => !seen.has(n.id))];
+  const loadOlder = () => {
+    if (!cursor || loadingOlder) return;
+    setLoadingOlder(true);
+    setOlderError(null);
+    api
+      .notifications(cursor)
+      .then((page) => {
+        setOlder((prev) => [...prev, ...page.notifications]);
+        setOlderCursor(page.nextCursor);
+      })
+      .catch((e: unknown) => setOlderError(e instanceof Error ? e : new Error(String(e))))
+      .finally(() => setLoadingOlder(false));
+  };
   return (
     <DeckScreen
       title="Notifications"
@@ -80,6 +108,18 @@ export function NotificationsScreen({ notifications, loading, error, onBack }: P
           </ol>
         )}
         {error && list.length > 0 ? <ErrorNote error={error} /> : null}
+        {!loading && cursor ? (
+          <button
+            type="button"
+            className="btn-ghost"
+            onClick={loadOlder}
+            disabled={loadingOlder}
+            aria-busy={loadingOlder}
+          >
+            {loadingOlder ? 'Loading…' : 'Load older notifications'}
+          </button>
+        ) : null}
+        {olderError ? <ErrorNote error={olderError} /> : null}
       </div>
     </DeckScreen>
   );

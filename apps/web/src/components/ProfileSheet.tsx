@@ -1,9 +1,11 @@
 import { useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { PUBLISHED_DOCUMENTS, type DocumentId } from '@mib/shared';
 import { SupportLink } from './SupportLink.js';
 import { useSession } from '../state/session.js';
 import { Avatar } from './ui.js';
 import { Icon } from '../design/Icon.js';
+import { restoreFocus, useModalKeys } from '../lib/modal.js';
 
 interface Props {
   shoreName: string | null;
@@ -11,6 +13,7 @@ interface Props {
   onOpenPolicy: (doc: DocumentId) => void;
   onDeleteAccount: () => void;
   onStanding: () => void;
+  onBlockedUsers: () => void;
   onClose: () => void;
 }
 
@@ -44,26 +47,38 @@ export function ProfileSheet({
   onChangeShore,
   onOpenPolicy,
   onStanding,
+  onBlockedUsers,
   onDeleteAccount,
   onClose,
 }: Props) {
   const { user, logout } = useSession();
   const first = useRef<HTMLButtonElement>(null);
+  const dialogRef = useRef<HTMLDivElement>(null);
+  // A modal like every other dialog (audit A11Y-003): portaled beside the app, which goes
+  // inert, so Tab cannot reach the navigation behind the scrim; focus returns on close.
   useEffect(() => {
+    const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const layer = dialogRef.current?.parentElement;
+    const siblings = [...document.body.children].filter((el) => el !== layer);
+    for (const el of siblings) el.setAttribute('inert', '');
     first.current?.focus();
-    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
-    document.addEventListener('keydown', onKey);
-    return () => document.removeEventListener('keydown', onKey);
-  }, [onClose]);
+    return () => {
+      for (const el of siblings) el.removeAttribute('inert');
+      restoreFocus(previous);
+    };
+  }, []);
+  useModalKeys(dialogRef, onClose);
   if (!user) return null;
-  return (
+  return createPortal(
     <div
       role="presentation"
       onClick={onClose}
       style={{ position: 'fixed', inset: 0, zIndex: 35, background: 'rgba(3,12,20,.45)' }}
     >
       <div
+        ref={dialogRef}
         role="dialog"
+        aria-modal="true"
         aria-label="Your account"
         className="glass-panel"
         onClick={(e) => e.stopPropagation()}
@@ -72,6 +87,12 @@ export function ProfileSheet({
           top: 'calc(var(--header-pad-top) + 60px)',
           right: 16,
           width: 280,
+          maxWidth: 'calc(100vw - 32px)',
+          // Short viewports (a phone in landscape) scroll the sheet instead of cutting off
+          // Delete account and the documents (audit FE-005).
+          maxHeight: 'calc(100dvh - var(--header-pad-top) - 76px)',
+          overflowY: 'auto',
+          overscrollBehavior: 'contain',
         }}
       >
         <div className="row">
@@ -100,6 +121,9 @@ export function ProfileSheet({
           </button>
           <button type="button" className="btn-text" onClick={onStanding}>
             Account standing
+          </button>
+          <button type="button" className="btn-text" onClick={onBlockedUsers}>
+            Blocked users
           </button>
           <SupportLink className="btn-secondary" />
           <button type="button" className="btn-text" onClick={() => void logout()}>
@@ -131,6 +155,7 @@ export function ProfileSheet({
           </section>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { ApiError, UNREACHABLE, api } from './client.js';
+import { ApiError, INVALID_RESPONSE, UNREACHABLE, api } from './client.js';
 
 function respond(status: number, body: string, contentType = 'application/json') {
   vi.stubGlobal('fetch', () =>
@@ -60,10 +60,23 @@ describe('api client error mapping', () => {
     expect(limited.details).toEqual({ retryAfterSeconds: 90 });
   });
 
-  it('returns parsed data and handles 204 replies', async () => {
-    respond(200, JSON.stringify({ token: 't', user: { id: 'u' } }));
-    await expect(api.login('ada', 'secret')).resolves.toMatchObject({ token: 't' });
+  it('returns validated data and handles 204 replies', async () => {
+    respond(200, JSON.stringify({ ok: true }));
+    await expect(api.forgotPassword('a@example.test')).resolves.toEqual({ ok: true });
     vi.stubGlobal('fetch', () => Promise.resolve(new Response(null, { status: 204 })));
     await expect(api.logout()).resolves.toBeUndefined();
+  });
+
+  // QA-007: a 200 whose body does not match the shared schema is an ordinary, recoverable
+  // error — never a half-parsed object handed to a screen.
+  it('turns a wrong-shaped success body into an ApiError', async () => {
+    respond(200, JSON.stringify({ token: 't', user: { id: 'u' } }));
+    const err = await api.login('ada', 'secret').catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(ApiError);
+    expect((err as ApiError).code).toBe(INVALID_RESPONSE);
+    respond(200, JSON.stringify({ ok: 'yes' }));
+    await expect(api.forgotPassword('a@example.test')).rejects.toMatchObject({
+      code: INVALID_RESPONSE,
+    });
   });
 });

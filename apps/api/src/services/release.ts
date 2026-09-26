@@ -1,5 +1,6 @@
-import { and, count, eq } from 'drizzle-orm';
+import { and, count, eq, isNull } from 'drizzle-orm';
 import {
+  DIRECTION_CONTROLS_MESSAGE,
   normalizeLetterText,
   validateLetterText,
   type ReleasePreviewResponse,
@@ -22,8 +23,11 @@ import { newId, sha256 } from '../lib/ids.js';
 import { AppError, conflict } from '../lib/errors.js';
 import { geoOf, getShore, loadActiveGraph, toShoreDto } from './chart.js';
 import type { AppContext, AuthUser } from './context.js';
+import { ensureMapClock } from './weather.js';
 import { areAcceptedFriends, isBlockedEitherWay } from './friends.js';
 import { commitArrival } from './journey.js';
+import { isRestricted } from './moderation.js';
+import { enqueueNotification } from './notifications.js';
 
 export class ReleaseRejectedError extends AppError {
   constructor(public readonly rejection: ReleaseRejection) {
@@ -38,9 +42,11 @@ export const REJECTION_MESSAGES: Record<ReleaseRejection, string> = {
   not_friends: 'You can only send bottles to approved friends.',
   recipient_has_no_shore: 'Your friend has not chosen a shore yet.',
   recipient_unavailable: 'Delivery to this friend is unavailable.',
-  shore_full: "Your friend's shore is full right now. Your draft is kept; try again later.",
+  shore_full:
+    "This friend's shore is full right now. Your letter is kept as a draft; try again later.",
   route_unavailable: 'No connected sea route reaches that shore.',
   invalid_letter: 'The letter is empty or too long.',
+  letter_direction_controls: DIRECTION_CONTROLS_MESSAGE,
 };
 
 interface Eligibility {
@@ -53,6 +59,21 @@ interface Eligibility {
   plannedDurationMs: number;
 }
 
+// Places taken on one account's shore (product decision 8): a reservation is held from release
+// until the bottle is opened or can no longer be delivered, so this counts bottles on their
+// way to the account plus bottles delivered to it but not yet opened.
+export function heldForRecipient(db: DbOrTx, recipientId: string): number {
+  const row = db
+    .select({ n: count() })
+    .from(t.capacityReservations)
+    .innerJoin(t.bottles, eq(t.bottles.id, t.capacityReservations.bottleId))
+    .where(and(eq(t.bottles.recipientId, recipientId), eq(t.capacityReservations.status, 'held')))
+    .get();
+  return row?.n ?? 0;
+}
+
+// Held places at one harbour, across every account there. Kept for reporting; capacity is
+// enforced per account (heldForRecipient).
 export function heldReservations(db: DbOrTx, shoreId: string): number {
   const row = db
     .select({ n: count() })
@@ -85,7 +106,12 @@ export function checkEligibility(
   const recipient = db.select().from(t.users).where(eq(t.users.id, recipientId)).get();
   if (!recipient || recipient.status !== 'active')
     return { ok: false, rejection: 'recipient_not_found', partial };
-  if (isBlockedEitherWay(db, senderId, recipientId))
+  // Blocked either way, or the recipient is suspended or banned: the sender learns only that
+  // delivery is unavailable (product decision 14).
+  if (
+    isBlockedEitherWay(db, senderId, recipientId) ||
+    isRestricted(db, recipientId, ctx.realClock.now())
+  )
     return { ok: false, rejection: 'recipient_unavailable', partial };
   if (!areAcceptedFriends(db, senderId, recipientId))
     return { ok: false, rejection: 'not_friends', partial };
@@ -101,7 +127,9 @@ export function checkEligibility(
   partial.graph = graph;
   partial.path = path;
 
-  if (heldReservations(db, destinationShore.id) >= destinationShore.capacity) {
+  // Checked inside the release transaction, so concurrent releases cannot over-commit: SQLite
+  // serialises writers and the count sees every committed reservation.
+  if (heldForRecipient(db, recipientId) >= ctx.config.shoreCapacity) {
     return { ok: false, rejection: 'shore_full', partial };
   }
   const plannedDurationMs = journeyDurationMs(
@@ -188,6 +216,9 @@ export function releaseBottle(
 ): ReleaseOutcome {
   const fingerprint = requestFingerprint(user.id, req);
   return ctx.db.transaction((tx) => {
+    // A journey sails under its sender's map clock: an account no device has reported for yet
+    // gets its harbour (or UTC) clock from now, so its storms are fixed from the moment it sails.
+    ensureMapClock(ctx, user.id, tx);
     const prior = tx
       .select()
       .from(t.idempotencyKeys)
@@ -211,7 +242,10 @@ export function releaseBottle(
     }
 
     const letter = validateLetterText(req.text);
-    if (!letter.ok) throw new ReleaseRejectedError('invalid_letter');
+    if (!letter.ok)
+      throw new ReleaseRejectedError(
+        letter.reason === 'direction_controls' ? 'letter_direction_controls' : 'invalid_letter',
+      );
     const eligibility = checkEligibility(ctx, tx, user.id, req.recipientId);
     if (!eligibility.ok) throw new ReleaseRejectedError(eligibility.rejection);
     const e = eligibility.value;
@@ -280,6 +314,7 @@ export function releaseBottle(
         releasedAt: null,
       })
       .run();
+    noteShoreFullness(ctx, tx, e.recipient.id, now);
     tx.insert(t.journeyEvents)
       .values({
         id: newId('evt'),
@@ -307,8 +342,29 @@ export function releaseBottle(
       .run();
     if (sameHarbour) {
       const bottle = tx.select().from(t.bottles).where(eq(t.bottles.id, bottleId)).get()!;
-      commitArrival(tx, bottle, { plannedDurationMs: 0 }, now, now);
+      commitArrival(tx, bottle, { plannedDurationMs: 0 }, now, now, ctx.realClock.now());
     }
     return { bottleId, replayed: false };
+  });
+}
+
+// The owner hears once when their shore becomes full, and not again until it has dropped below
+// full (a place released clears the episode: journey.ts releaseCapacityOnce) and filled again.
+function noteShoreFullness(ctx: AppContext, tx: DbOrTx, recipientId: string, now: number): void {
+  if (heldForRecipient(tx, recipientId) < ctx.config.shoreCapacity) return;
+  const started = tx
+    .update(t.users)
+    .set({ shoreFullSince: now })
+    .where(and(eq(t.users.id, recipientId), isNull(t.users.shoreFullSince)))
+    .run().changes;
+  if (started !== 1) return;
+  enqueueNotification(tx, {
+    userId: recipientId,
+    type: 'journey_event',
+    kind: 'shore_full',
+    bottleId: null,
+    dedupeKey: `shore_full:${recipientId}:${now}`,
+    message: `Your shore is full: it holds ${ctx.config.shoreCapacity} bottles that are unread or on their way to you. New bottles cannot reach you until you open some.`,
+    now,
   });
 }

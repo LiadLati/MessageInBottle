@@ -4,8 +4,9 @@ Slow correspondence between friends: write a letter, seal it in a bottle, releas
 sea, and follow its simulated journey to your friend's virtual shore. The recipient only learns about
 the bottle once the server has committed its arrival.
 
-Product source of truth: `docs/SeaYou_Product_Specification.md`
-(v0.2, stage 3 "Directed delivery slice" is what this repository currently implements).
+Product source of truth: `docs/SeaYou_Product_Specification.md`. Its §11 "As built" and §18
+describe what this repository implements; the earlier v0.2 draft is historical and not in the
+repository.
 
 ## Layout
 
@@ -96,6 +97,17 @@ Walkthrough of the vertical slice:
 | `pnpm start`        | Run the compiled API (`node apps/api/dist/server.js`), production   |
 | `pnpm smoke:artefact` | Start the compiled API on a temporary database and check it       |
 
+Operator tools (`pnpm --filter @mib/api <script>`, or `node dist/<tool>.js` in the artefact; all
+read `MIB_DATABASE_PATH`):
+
+| Script              | What it does                                                                                     |
+| ------------------- | ------------------------------------------------------------------------------------------------ |
+| `db:backup`         | Online, verified backup (`--to <file>`); `--verify <file>` checks integrity, migrations, rows      |
+| `deletion:backfill` | Reports what today's deletion rules would change for accounts deleted earlier; `--apply` writes |
+| `audit:export`      | Exports the moderation audit trail about one account as JSON (`--user usr_…`)                    |
+| `retention:plan`    | Shows what evidence retention would redact                                                       |
+| `admin:grant` / `developer:grant` | Grant a role by stable user id, with a confirmation step                           |
+
 Schema changes: edit `apps/api/src/db/schema.ts`, then `pnpm --filter @mib/api db:generate`.
 
 ### Production build and start
@@ -148,20 +160,26 @@ All variables are optional and documented in `.env.example`. The important ones:
   of which, the mail outbox included, requires a signed-in `developer` account). It is refused
   in production: the compiled API, or anything run with `NODE_ENV=production`, will not start
   with it.
+- `MIB_APP_URL`: the public origin; reset links are built from it. Production requires
+  `https://`, and HSTS is sent when it is https.
+- `MIB_TRUST_PROXY` / `MIB_TRUSTED_PROXY_HOPS` (default `1`): behind a reverse proxy, the client
+  address is read that many entries from the **right** of `X-Forwarded-For`. See
+  `docs/DEPLOYMENT.md` for the whole deployment contract (one API process, which the server
+  enforces with a `<database>.lock` file; backups; headers).
 - `MIB_SESSION_TTL_MS` (default 30 days): lifetime of a sign-in token.
   The in-app dev clock bar is additionally compiled out of production bundles: it renders only
   in `vite` development builds (`import.meta.env.DEV`) and only while the API reports dev mode.
   `pnpm --filter @mib/web preview` serves the production bundle against the local API.
 - `MIB_MS_PER_CHART_UNIT` / `MIB_MIN_JOURNEY_MS`: the provisional travel model (spec decision D01 is
   still open). Defaults give roughly 1–4 days per crossing.
-- `MIB_DEFAULT_SHORE_CAPACITY`: destination slots per shore (spec D06 is open).
-- `MIB_RISK_POLICY_VERSION` (default `3`): the automatic storm-outcome policy new journeys are
-  released under (spec §9.3). `3` is the approved policy — a bottle's nights are its sender's
-  nights, in the account's own time zone; `0` releases new journeys with no automatic risk at
-  all. The value is stamped on each bottle at release; journeys released before the policy
-  existed carry no version and are never put at risk. There is no server-side zone setting:
-  each account's zone comes from its own device (`PUT /api/auth/time-zone`, sent on every app
-  start and resume).
+- `MIB_SHORE_CAPACITY`: bottles one account's shore holds at once — travelling plus
+  delivered-unread (default 100). `MIB_DEFAULT_SHORE_CAPACITY` only seeds a legacy column.
+- `MIB_RISK_POLICY_VERSION` (default `4`): the automatic storm-outcome policy new journeys are
+  released under (spec §9.3). `4` is the approved policy — one map clock per account, storms
+  that follow the map; `0` releases new journeys with no automatic risk at all. The value is
+  stamped on each bottle at release; journeys released before automatic outcomes existed carry
+  no version and are never put at risk. There is no server-side zone setting: each account's
+  zone comes from its own devices (`PUT /api/auth/time-zone`).
 
 ### Map provider
 
@@ -174,36 +192,45 @@ source for the land layer instead, set in `apps/web/.env` (see `.env.example`):
 
 - `VITE_MIB_MAP_TILES_URL` — a TileJSON URL for a vector source
 - `VITE_MIB_MAP_SOURCE_LAYER` — the name of that source's land/coastline layer
-- `VITE_MIB_MAP_ATTRIBUTION` — the provider's attribution text (shown per their terms)
+- `VITE_MIB_MAP_ATTRIBUTION` — the provider's attribution text, shown in a compact attribution
+  control on the map whenever a provider is configured
+
+Any key in that URL is **public**: Vite inlines `VITE_*` values into the JavaScript every visitor
+downloads. Use a key restricted to your domain by the provider, or proxy the tiles.
 
 ### Time of day and simulated weather
 
-The Ocean map switches between the approved daylight and night palettes automatically. Simulated
-weather belongs to **each bottle**: at night an at-sea bottle may be in a storm on its own (two
-bottles on one route can differ), shown as a small cloud glyph above its marker and an `In a storm`
-chip on its card. The card's **View at sea** button opens a real-time view of that bottle on open
-water — calm or stormy, day or night — and **Back to map** returns to exactly the same map view.
-My Shore has its own independent weather. **All of it is cosmetic** — it never changes a route, a
-duration, an arrival or any risk (product spec §9.1), and watching a bottle changes nothing.
+**One clock per account** (risk policy v4, spec §9.3). The device reports its IANA time zone —
+never GPS or coordinates — after sign-in, on start, on return to the foreground and when it
+changes. The server validates it, and the latest one it accepts becomes the account's
+authoritative map clock on every device (before any, the harbour's zone; else UTC). The Ocean
+map's day and night palette, the sea view's lighting and My Shore all follow that clock, read from
+`GET /api/ocean/weather`, so a phone and a desktop of the same account always agree.
+
+**Storms follow the map.** A daytime map has no storm. When the map enters a night, the account
+rolls once: a deterministic 25 % chance that the night holds one storm of 40–100 minutes,
+wholly inside that night. The roll is persisted and never repeated — the account gets at most one
+roll in any 24 hours, so changing time zone, crossing midnight, reopening SeaYou or restarting
+the server cannot produce another. The storm is drawn once over the map, only at night; every
+bottle at sea is in it and shows an `In a storm` chip, and at the storm's midpoint each bottle gets
+its own independent risk decision (1 % loss for an eligible decision; at most five risky storms
+per journey; none at or after 80 % of the way; arrival wins). If a time-zone change turns the map
+to day before the midpoint, the storm disappears, its decision is cancelled and the roll stays
+used. A change never alters a journey's duration or arrival, a decision already made, or any
+deadline or rate limit.
 
 | Setting | Default | Where |
 | --- | --- | --- |
-| Daylight window | 07:00–19:00 local, configurable, may wrap midnight | `DAYLIGHT_DEFAULTS` |
-| Zone | the browser's own IANA timezone (never GPS or coordinates) | `state/weather.tsx` |
-| Ocean storm window / chance | 3 h / 45 % per at-sea bottle, night only | `OCEAN_SCHEDULE` |
-| Ocean storm duration | 40–100 min | `OCEAN_SCHEDULE` |
-| Shore storm window / chance | 4 h / 35 % per user | `SHORE_SCHEDULE` |
-| Shore storm duration | 50–150 min | `SHORE_SCHEDULE` |
-| Schedule version | 1 | `SCHEDULE_VERSION` |
+| Daylight window | 07:00–19:00 local | `DAYLIGHT_DEFAULTS` |
+| Zone | the account's authoritative IANA zone | `services/weather.ts`, `state/weather.tsx` |
+| Storm chance | 25 % per night entered, at most one roll per 24 hours | `RISK_POLICY` |
+| Storm duration | 40–100 min, inside one night | `RISK_POLICY` |
+| Policy version | 4 | `RISK_POLICY_VERSION` |
 
-The schedule is a pure function of the bottle or user id, the schedule version and the time
-window, so a refresh, a different selection or a server restart reproduces exactly the same
-weather with nothing stored and no migration. In development the dev-clock offset moves weather
-along with journeys; sessions are unaffected because authentication runs on real time.
-
-In a development build the dev bar carries **Sky**, **Ocean storm** and **Shore storm** preview
-switches. They change only what is drawn — no request is made and no bottle is touched. The sea
-view follows the same switches, so calm/storm and day/night can be previewed there too.
+In development the dev-clock offset moves weather along with journeys; sessions are unaffected
+because authentication runs on real time. A development build's dev bar carries **Sky**,
+**Ocean storm** and **Shore storm** preview switches: they change only what is drawn — no request
+is made, nothing is rolled and no bottle is touched.
 
 ### Notifications
 
@@ -247,10 +274,9 @@ The map always names your own harbour with an anchor label, and the destination 
 bottle you have selected.
 
 Outcomes are server-owned and written once: retrying, refreshing, viewing a bottle or opening the
-sea viewer can never move or reroll them, and a journey cannot both arrive and be lost. **Nothing
-loses a bottle on its own yet**: the risk policy (spec D08) is not approved, so in development the
-dev bar offers *Adrift* / *Sink* controls per at-sea bottle (`POST /api/dev/lose`), and
-production has no automatic outcomes.
+sea viewer can never move or reroll them, and a journey cannot both arrive and be lost. Automatic
+outcomes come only from the account's storms (above); in development the dev bar also offers
+*Adrift* / *Sink* controls per at-sea bottle (`POST /api/dev/lose`).
 
 ### Geographic datasets and the sea-route graph
 
@@ -292,16 +318,25 @@ environment variables take precedence, and the file is git-ignored):
 
 ```
 MIB_MAIL_PROVIDER=smtp
-MIB_MAIL_FROM="SeaYou <no-reply@your-domain>"
-MIB_SMTP_HOST=smtp.your-provider.example
-MIB_SMTP_PORT=587
-MIB_SMTP_SECURE=false        # true for port 465
-MIB_SMTP_USER=your-username
-MIB_SMTP_PASS=your-password
+MIB_MAIL_FROM="SeaYou <seayou.support@gmail.com>"
+MIB_SMTP_HOST=smtp.gmail.com
+MIB_SMTP_PORT=465
+MIB_SMTP_SECURE=true
+MIB_SMTP_USER=seayou.support@gmail.com
+MIB_SMTP_PASS=<Gmail App Password — from your secret store, never committed>
 MIB_APP_URL=http://localhost:5173   # base of the link in the message
 ```
 
-You supply the provider and credentials; none are bundled. Restart the API afterwards — its
+SeaYou sends from `seayou.support@gmail.com` with a Gmail App Password; creating one (2-Step
+Verification first) and rotating it are in `docs/DEPLOYMENT.md`, section 2a. No credential is
+bundled, and none may be written into code, tests, logs, `.env.example` or Git. Reset links
+expire after 30 minutes and work once; using one revokes every session and every other link.
+Automated tests use an in-process fake SMTP server (`apps/api/src/http/smtp-reset.test.ts`) and
+never contact Gmail.
+
+Registration says "This email is already registered. Sign in or reset your password." when an
+address has an account — an accepted tradeoff (`docs/REMEDIATION.md` D3), kept rate-limited.
+The forgot-password request never reveals whether an account exists. Restart the API afterwards — its
 startup line reports the active provider, and warns when mail is captured or disabled.
 
 ### Reporting, moderation, appeals and admins
@@ -334,8 +369,9 @@ Russian/Hebrew code-switching, and the adversarial cases that produce the danger
 text that tries to dictate the verdict, and an innocent letter carrying a frightening accusation.
 Run it with `-- --repeat 3`: a model that answers the same letter differently between passes is
 not fit to decide anything. A clean run is the floor, not the bar — read the reasoning, add
-letters from your own users, and treat `MIB_AI_AUTO_DECIDE=true` as a deliberate decision.
-`uncertain` always goes to a person, whatever that setting says.
+letters from your own users. The model only ever recommends: every case is decided by a person,
+and `MIB_AI_AUTO_DECIDE=true` stops the API. A possible child-safety issue it flags marks the
+case urgent and lists it first; the case is visible to administrators before the model answers.
 
 Setting up Ollama on your machine:
 
@@ -347,18 +383,17 @@ pnpm --filter @mib/api ai:eval -- --repeat 3   # judge the model before trusting
 ```
 
 **Evidence retention.** A case keeps a copy of the reported letter so that administrators, and
-any later appeal, judge the same text. It is redacted **seven days after the case becomes
-final**, and this runs by default — it is the published policy, not a plan.
+any later appeal, judge the same text. It is redacted **30 days after the administrator's
+decision** — the length of the appeal window — or once an appeal filed within that window is
+decided, whichever is later. This runs by default; it is the published policy, not a plan.
 
-A case is final when the report was rejected, when the sender explicitly gave up their appeal,
-or when an appeal they submitted was decided. It is *not* final while the report is undecided,
-while the sender has not yet answered the decision notice, or while an appeal is pending: the
-offer of an appeal has no deadline, so the evidence it would be judged on stays until the
-person answers. Evidence is kept past seven days only under a documented legal or
-child-safety hold, which records why it was placed and by whom; releasing it returns the case
-to the ordinary calculation.
+Undecided reports keep their evidence. An unopened decision notice does not: the appeal closes
+30 days after the decision whether or not it was read, and the notice then says the appeal
+period has expired. Evidence is kept longer only under a documented legal or child-safety hold,
+which records who placed it, when and why; releasing it returns the case to the ordinary
+calculation.
 
-Redaction clears the letter copy and the reporters' explanations. The case, its decision, its
+Redaction clears the letter copy, the reporters' explanations and the AI translation and notes. The case, its decision, its
 reasoning, who decided it, the violation and the whole audit trail all survive — upheld
 violations never expire, so what justifies one has to outlive the letter that proved it.
 
@@ -412,17 +447,26 @@ Only confirming **Skip appeal** gives the appeal up, and it is permanent. Closin
 reloading, or losing the connection resolves nothing: the notice is server state, and it comes
 back on the next visit until the person answers. Presenting the notice, waiving and appealing
 are all server-authoritative, transactional, idempotent and written to the moderation audit
-trail. Each violation may be appealed once; a rejected appeal is final, and an accepted one
-revokes the violation, restores the letter and recalculates standing immediately.
+trail. Each violation may be appealed once, within 30 days of the decision (server time); a
+rejected appeal is final, and an accepted one revokes the violation, restores the letter and
+recalculates standing immediately. No administrator can revoke, reopen or reverse a decision:
+the appeal is the only way to change one. Every decision — reject, uphold, critical, and both
+appeal outcomes — needs a written reason, and the console states the consequence before it asks
+for confirmation.
 
-A suspended or banned account can still sign in, read the decision, appeal it, waive it, reach
-Help & Support, delete the account and sign out.
+A suspended or banned account sees a locked standing screen — the reason, the end time and a
+countdown for a suspension, the warning that another violation bans permanently — and can only
+read its standing, appeal in time, reach Help & Support, delete the account and sign out. It
+sends and receives no bottles, disappears from friend lists (friendships are kept), and bottles
+on their way to it are cancelled, their senders told only "Delivery unavailable". A suspension
+ends by itself at its end time.
 
 **Critical child safety.** An administrator can classify a confirmed case as a critical
 child-safety violation, which bans permanently and immediately instead of walking the ladder.
 It requires the admin role, a mandatory written reason and a strong confirmation, and records
-the administrator, the timestamp, the classification and the action. The review model can never
-apply it. The single appeal still applies.
+the administrator, the timestamp, the classification, the reason and the action. The review
+model can never apply it. The single appeal still applies, and escalating an ordinary violation
+that was never appealed opens one new 30-day appeal.
 
 ### If the app says it cannot reach the server
 
@@ -439,7 +483,7 @@ instead of blaming the request. Check, in order:
 
 ### Terms of Use, Community Rules, Privacy Policy and account deletion
 
-The documents are published at version `1.0`, in English, and are readable before there is an
+The documents are published at version `1.1`, in English, and are readable before there is an
 account: linked from the sign-in screen and from the registration form, and served as plain
 public HTML at `/legal/terms`, `/legal/community-rules`, `/legal/privacy`,
 `/legal/child-safety` and `/legal/delete-account` (indexed at `/legal`). Those URLs need no

@@ -2,10 +2,9 @@ import { and, eq, isNull, lte, sql } from 'drizzle-orm';
 import {
   RISK_POLICY,
   RISK_POLICY_VERSION,
+  bottleRiskDraws,
   decideRisk,
-  nightsOverlapping,
-  stormForNight,
-  type NightWindow,
+  firstDaytime,
   type StormWindowDto,
 } from '@mib/shared';
 import type { DbOrTx } from '../db/client.js';
@@ -15,66 +14,33 @@ import { newId } from '../lib/ids.js';
 import type { AppContext } from './context.js';
 import { activePlan, appendEvent } from './journey.js';
 import { enqueueNotification } from './notifications.js';
-import { commitLoss } from './outcomes.js';
+import { commitLossIn } from './outcomes.js';
+import { ensureRolls, visibleStorms, zoneHistory } from './weather.js';
 
-// Automatic journey outcomes (spec §9.3). The worker walks every night a bottle has been at
-// sea and takes the night's decision exactly once, in a transaction keyed on (bottle, night).
-// The storm, the decision moment and its draws are pure functions of the policy version, the
-// bottle id and the night, so a retry, a restart, a long outage or a clock change replays the
-// identical decisions — nothing is ever rolled twice. A loss goes through the same
-// transactional service as the development control, so arrival and loss can never both commit
-// and the sender is told exactly once.
+// Automatic journey outcomes (spec §9.3, risk policy v4). Weather belongs to the account's map:
+// services/weather.ts persists one eligibility roll per night (never two within 24 hours), and a
+// storm, when rolled, is one window inside that night on the account's map clock. This worker
+// takes the storm's risk at its midpoint, once, in a single transaction: every eligible bottle
+// the account has at sea gets its own independent decision, a loss is committed through the
+// same transactional service as the development control, and the roll is marked decided in the
+// same commit — so a retry, a restart or a long outage replays nothing and duplicates nothing.
+// If the map turned to day before the midpoint, the storm is cancelled instead: no decision,
+// and the roll stays consumed.
 //
 // Only journeys released under a policy version take part: bottles with a null version
-// (released before activation) are never put at risk.
-//
-// The night is the sender's night (policy v3): 19:00–07:00 in the account's persisted zone,
-// the same phase the account's Ocean map is drawn in, whatever water the bottle is on. One
-// phase per account drives the palette, every storm glyph, every risk decision and the sea
-// view's lighting, so a daytime map can never hold a bottle in a risk-bearing storm. Nights
-// are walked only from the instant the account's zone took effect: a zone change moves the
-// nights ahead, never the ones behind, and an account no device has spoken for yet has no
-// nights at all — no storms and no risk until it does. Journeys stamped with policy v1 or v2
-// keep their stamp and their past decisions; from here on they walk these nights too.
+// (released before automatic outcomes) are never put at risk. Journeys stamped v1–v3 keep their
+// stamp and every decision already recorded; from v4's activation they are decided by the
+// account's storms like any other journey, and their earlier eligible decisions count toward
+// the five-decision limit. Decisions of the per-bottle v3 schedule that had not been taken when
+// v4 took over are never taken: that schedule no longer exists anywhere on the map.
 
 const iso = (ms: number) => new Date(ms).toISOString();
 
 type BottleRow = typeof t.bottles.$inferSelect;
-type PlanRow = typeof t.routePlans.$inferSelect;
+type RollRow = typeof t.weatherRolls.$inferSelect;
 
-// The zone the sender's nights are counted in and the journey-clock instant it took effect.
-export function accountNightZone(
-  ctx: AppContext,
-  userId: string,
-): { zone: string; since: number } | null {
-  const row = ctx.db
-    .select({ zone: t.users.timeZone, since: t.users.timeZoneSince })
-    .from(t.users)
-    .where(eq(t.users.id, userId))
-    .get();
-  return row?.zone && row.since !== null ? { zone: row.zone, since: row.since } : null;
-}
-
-// The nights of one journey between two instants: the sender's account nights that began
-// after both the release and the zone's start. This is the only place a night is chosen, for
-// the worker and the map alike.
-export function journeyNights(
-  ctx: AppContext,
-  bottle: Pick<BottleRow, 'senderId' | 'releasedAt'>,
-  fromMs: number,
-  toMs: number,
-): NightWindow[] {
-  const account = accountNightZone(ctx, bottle.senderId);
-  if (!account) return [];
-  const floor = Math.max(fromMs, bottle.releasedAt, account.since);
-  return nightsOverlapping(floor, toMs, account.zone).filter((n) => n.startsAt >= floor);
-}
-
-// Storm windows for the map: the nights around `now` for one bottle. Presentation reads this;
-// the risk worker walks the same nights with the same function, so what is drawn is exactly
-// what can (or, past the limits, cannot) matter. A bottle released before automatic outcomes
-// carries no policy of its own and is shown the current rule's storms — scenery, since no
-// decision is ever taken for it.
+// The account storm's visible windows around `now`, for a bottle that is at sea. Presentation
+// reads this; the worker decides on the same persisted rolls.
 export function stormWindowsFor(
   ctx: AppContext,
   bottle: Pick<BottleRow, 'id' | 'state' | 'senderId' | 'releasedAt'>,
@@ -82,10 +48,10 @@ export function stormWindowsFor(
 ): StormWindowDto[] {
   if (bottle.state !== 'at_sea') return [];
   const dayMs = 24 * 60 * 60 * 1000;
-  return journeyNights(ctx, bottle, now - dayMs, now + dayMs)
-    .map((night) => stormForNight(bottle.id, night, RISK_POLICY_VERSION))
-    .filter((s): s is NonNullable<typeof s> => s !== null)
-    .map((s) => ({ startsAt: iso(s.startsAt), endsAt: iso(s.endsAt) }));
+  return visibleStorms(ctx, bottle.senderId, now - dayMs, now + dayMs).map((s) => ({
+    startsAt: iso(s.startsAt),
+    endsAt: iso(s.endsAt),
+  }));
 }
 
 export interface RiskTickResult {
@@ -93,12 +59,11 @@ export interface RiskTickResult {
   lost: number;
 }
 
-// Takes every due decision for every at-sea journey under a policy. Deterministic catch-up:
-// safe to run repeatedly, after downtime, or concurrently with the arrival worker.
+// Rolls every account that has a journey at risk up to `now`, then takes every due midpoint.
+// Deterministic catch-up: safe to run repeatedly, after downtime, or beside the arrival worker.
 export function processRiskDecisions(ctx: AppContext, now: number): RiskTickResult {
-  const result: RiskTickResult = { decided: 0, lost: 0 };
-  const candidates = ctx.db
-    .select({ bottle: t.bottles, plan: t.routePlans })
+  const senders = ctx.db
+    .selectDistinct({ userId: t.bottles.senderId })
     .from(t.bottles)
     .innerJoin(t.routePlans, eq(t.routePlans.bottleId, t.bottles.id))
     .where(
@@ -110,80 +75,127 @@ export function processRiskDecisions(ctx: AppContext, now: number): RiskTickResu
       ),
     )
     .all();
-  for (const { bottle, plan } of candidates) {
-    const r = processBottle(ctx, bottle, plan, now);
+  for (const { userId } of senders) ensureRolls(ctx, userId, now);
+  return decideDueStorms(ctx, ctx.db, null, now);
+}
+
+// Takes every storm midpoint that is due (for one account, or all), in order, each storm in its
+// own transaction (a savepoint when `db` is already one). Called by the worker and, before a
+// time-zone change takes effect, for the account changing zone — so a midpoint that has already
+// passed on server time is decided under the clock it happened in.
+export function decideDueStorms(
+  ctx: AppContext,
+  db: DbOrTx,
+  userId: string | null,
+  now: number,
+): RiskTickResult {
+  const result: RiskTickResult = { decided: 0, lost: 0 };
+  const due = db
+    .select()
+    .from(t.weatherRolls)
+    .where(
+      and(
+        eq(t.weatherRolls.outcome, 'storm'),
+        isNull(t.weatherRolls.decidedAt),
+        isNull(t.weatherRolls.cancelledAt),
+        lte(t.weatherRolls.decisionAt, now),
+        userId === null ? undefined : eq(t.weatherRolls.userId, userId),
+      ),
+    )
+    .orderBy(t.weatherRolls.decisionAt)
+    .all();
+  for (const roll of due) {
+    const r = db.transaction((tx) => {
+      // Re-read under the writer: a concurrent run may have decided or cancelled it.
+      const fresh = tx.select().from(t.weatherRolls).where(eq(t.weatherRolls.id, roll.id)).get();
+      if (!fresh || fresh.decidedAt !== null || fresh.cancelledAt !== null)
+        return { decided: 0, lost: 0 };
+      return decideStorm(ctx, tx, fresh, now);
+    });
     result.decided += r.decided;
     result.lost += r.lost;
   }
   return result;
 }
 
-function processBottle(
-  ctx: AppContext,
-  bottle: BottleRow,
-  plan: PlanRow,
-  now: number,
-): RiskTickResult {
+function decideStorm(ctx: AppContext, tx: DbOrTx, roll: RollRow, now: number): RiskTickResult {
   const result: RiskTickResult = { decided: 0, lost: 0 };
-  // Every versioned journey walks the current rule's nights; the stamp records the version it
-  // was released under and each decision row records the version it was taken under.
-  const version = RISK_POLICY_VERSION;
-  const nights = journeyNights(ctx, bottle, bottle.releasedAt, now);
-  for (const night of nights) {
-    const storm = stormForNight(bottle.id, night, version);
-    // A decision in the future waits for its moment.
-    if (!storm || storm.decisionAt > now) continue;
-    const taken = ctx.db.transaction((tx) => {
-      const already = tx
-        .select({ id: t.riskDecisions.id })
-        .from(t.riskDecisions)
-        .where(
-          and(eq(t.riskDecisions.bottleId, bottle.id), eq(t.riskDecisions.nightKey, night.key)),
-        )
-        .get();
-      if (already) return null;
-      const fresh = tx.select().from(t.bottles).where(eq(t.bottles.id, bottle.id)).get();
-      if (!fresh || fresh.state !== 'at_sea') return null;
-      const current = activePlan(tx, bottle.id) ?? plan;
-      const prior = tx
-        .select({ n: sql<number>`count(*)` })
-        .from(t.riskDecisions)
-        .where(and(eq(t.riskDecisions.bottleId, bottle.id), eq(t.riskDecisions.eligible, true)))
-        .get();
-      const decision = decideRisk({
-        storm,
-        progressAtDecision: progressAt(current, storm.decisionAt),
-        arrivalAt: plannedArrivalAt(current),
-        priorEligibleDecisions: prior?.n ?? 0,
-      });
-      tx.insert(t.riskDecisions)
-        .values({
-          id: newId('rsk'),
-          bottleId: bottle.id,
-          nightKey: night.key,
-          policyVersion: version,
-          stormStartsAt: storm.startsAt,
-          stormEndsAt: storm.endsAt,
-          decisionAt: storm.decisionAt,
-          eligible: decision.eligible,
-          lost: decision.lost,
-          reason: decision.reason,
-          createdAt: now,
-        })
-        .run();
-      return decision;
-    });
-    if (!taken) continue;
-    result.decided++;
-    if (taken.lost && taken.reason) {
-      // The outcome is dated at the decision moment, so its position is where the bottle was
-      // in that storm — even when the worker is catching up hours later.
-      const committed = commitLoss(ctx, bottle.id, taken.reason, storm.decisionAt);
-      if (committed.committed) result.lost++;
-      // Whether or not the loss committed (arrival may have won), nothing later can apply.
-      break;
-    }
+  const decisionAt = roll.decisionAt!;
+  // The storm needed a night on the account's map from the roll to its midpoint. A zone change
+  // that turned the map to day in between cancels the decision; the roll stays consumed.
+  const day = firstDaytime(zoneHistory(tx, roll.userId), roll.rolledAt, decisionAt);
+  if (day !== null) {
+    tx.update(t.weatherRolls)
+      .set({ cancelledAt: day, cancelReason: 'daytime' })
+      .where(and(eq(t.weatherRolls.id, roll.id), isNull(t.weatherRolls.cancelledAt)))
+      .run();
+    return result;
   }
+  // Every versioned journey of the account that had set out by the midpoint and is still at
+  // sea. Arrival wins: a bottle whose arrival was already committed is not here.
+  const bottles = tx
+    .select({ bottle: t.bottles })
+    .from(t.bottles)
+    .innerJoin(t.routePlans, eq(t.routePlans.bottleId, t.bottles.id))
+    .where(
+      and(
+        eq(t.bottles.senderId, roll.userId),
+        eq(t.bottles.state, 'at_sea'),
+        eq(t.routePlans.active, true),
+        lte(t.routePlans.startsAt, decisionAt),
+        sql`${t.bottles.riskPolicyVersion} is not null`,
+      ),
+    )
+    .orderBy(t.bottles.id)
+    .all();
+  for (const { bottle } of bottles) {
+    const already = tx
+      .select({ id: t.riskDecisions.id })
+      .from(t.riskDecisions)
+      .where(and(eq(t.riskDecisions.bottleId, bottle.id), eq(t.riskDecisions.nightKey, roll.id)))
+      .get();
+    if (already) continue;
+    const plan = activePlan(tx, bottle.id);
+    if (!plan) continue;
+    // Arrival wins: a bottle due ashore by the midpoint takes no part in the storm, exactly as
+    // if the arrival worker had already committed it — so a worker catching up after downtime
+    // writes the same rows as one that never stopped.
+    if (plannedArrivalAt(plan) <= decisionAt) continue;
+    const prior = tx
+      .select({ n: sql<number>`count(*)` })
+      .from(t.riskDecisions)
+      .where(and(eq(t.riskDecisions.bottleId, bottle.id), eq(t.riskDecisions.eligible, true)))
+      .get();
+    const decision = decideRisk({
+      storm: { decisionAt, ...bottleRiskDraws(bottle.id, roll.rolledAt) },
+      progressAtDecision: progressAt(plan, decisionAt),
+      arrivalAt: plannedArrivalAt(plan),
+      priorEligibleDecisions: prior?.n ?? 0,
+    });
+    // The loss is applied in this same transaction, dated at the midpoint so its position is
+    // where the bottle was in that storm — even when the worker is catching up.
+    let lostNow = false;
+    if (decision.lost && decision.reason)
+      lostNow = commitLossIn(ctx, tx, bottle.id, decision.reason, decisionAt).committed;
+    tx.insert(t.riskDecisions)
+      .values({
+        id: newId('rsk'),
+        bottleId: bottle.id,
+        nightKey: roll.id,
+        policyVersion: RISK_POLICY_VERSION,
+        stormStartsAt: roll.stormStartsAt,
+        stormEndsAt: roll.stormEndsAt,
+        decisionAt,
+        eligible: decision.eligible,
+        lost: lostNow,
+        reason: decision.reason,
+        createdAt: now,
+      })
+      .run();
+    result.decided++;
+    if (lostNow) result.lost++;
+  }
+  tx.update(t.weatherRolls).set({ decidedAt: now }).where(eq(t.weatherRolls.id, roll.id)).run();
   return result;
 }
 

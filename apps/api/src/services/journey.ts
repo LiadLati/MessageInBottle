@@ -1,4 +1,4 @@
-import { and, eq, lte, max } from 'drizzle-orm';
+import { and, eq, lte, max, or } from 'drizzle-orm';
 import { canTransition, type BottleState, type JourneyEventType } from '@mib/shared';
 import type { DbOrTx } from '../db/client.js';
 import * as t from '../db/schema.js';
@@ -6,6 +6,7 @@ import { deriveAgingProfile } from '../domain/aging.js';
 import { plannedArrivalAt } from '../domain/routing.js';
 import { newId } from '../lib/ids.js';
 import type { AppContext } from './context.js';
+import { isRestricted } from './moderation.js';
 import { enqueueNotification } from './notifications.js';
 import { expirePublicListings, processRiskDecisions } from './risk.js';
 
@@ -69,7 +70,7 @@ export function commitArrivalIfDue(ctx: AppContext, bottleId: string, now: numbe
     if (!plan) return false;
     const arrivalAt = plannedArrivalAt(plan);
     if (arrivalAt > now) return false;
-    return commitArrival(tx, bottle, plan, arrivalAt, now);
+    return commitArrival(tx, bottle, plan, arrivalAt, now, ctx.realClock.now());
   });
 }
 
@@ -82,15 +83,31 @@ export function commitArrival(
   plan: { plannedDurationMs: number },
   arrivalAt: number,
   now: number,
+  // Server time, for account standing; `now` is the journey clock.
+  realNow: number,
 ): boolean {
   const bottleId = bottle.id;
-  // Re-check eligibility transactionally before arrival (spec §11 invariant 4).
+  // Re-check eligibility transactionally before arrival (spec §11 invariant 4): a block placed
+  // by either person during the journey, or a recipient whose account no longer exists, ends it
+  // here with the same non-disclosing "delivery unavailable" (audit ARCH-014 / QA-005).
   const blocked = tx
     .select({ blockerId: t.blocks.blockerId })
     .from(t.blocks)
-    .where(and(eq(t.blocks.blockerId, bottle.recipientId), eq(t.blocks.blockedId, bottle.senderId)))
+    .where(
+      or(
+        and(eq(t.blocks.blockerId, bottle.recipientId), eq(t.blocks.blockedId, bottle.senderId)),
+        and(eq(t.blocks.blockerId, bottle.senderId), eq(t.blocks.blockedId, bottle.recipientId)),
+      ),
+    )
     .get();
-  if (blocked) {
+  const recipient = tx
+    .select({ status: t.users.status })
+    .from(t.users)
+    .where(eq(t.users.id, bottle.recipientId))
+    .get();
+  // A suspended or banned recipient cannot receive either (product decision 14); the sender is
+  // told the same generic "Delivery unavailable", and the recipient nothing.
+  if (blocked || recipient?.status !== 'active' || isRestricted(tx, bottle.recipientId, realNow)) {
     const moved = transitionBottle(tx, bottle, 'cancelled', { completedAt: now });
     if (!moved) return false;
     releaseCapacityOnce(tx, bottleId, now);
@@ -154,7 +171,17 @@ export function releaseCapacityOnce(db: DbOrTx, bottleId: string, now: number): 
       and(eq(t.capacityReservations.bottleId, bottleId), eq(t.capacityReservations.status, 'held')),
     )
     .run();
-  return res.changes === 1;
+  if (res.changes !== 1) return false;
+  // A place came free, so the recipient's shore is below full: the next time it fills is a
+  // new full episode with its own notice (product decision 8).
+  const owner = db
+    .select({ recipientId: t.bottles.recipientId })
+    .from(t.bottles)
+    .where(eq(t.bottles.id, bottleId))
+    .get();
+  if (owner)
+    db.update(t.users).set({ shoreFullSince: null }).where(eq(t.users.id, owner.recipientId)).run();
+  return true;
 }
 
 // Worker tick: deterministic catch-up from persisted plans; safe to run repeatedly or after
@@ -162,6 +189,9 @@ export function releaseCapacityOnce(db: DbOrTx, bottleId: string, now: number): 
 // arrival that is also due must be applied first), then arrivals, then public-listing expiry.
 export function runJourneyTick(ctx: AppContext): {
   delivered: number;
+  // Arrivals refused at the shore (a block or an inactive recipient): the journey ended
+  // without a delivery, and is not counted as one.
+  cancelled: number;
   risk: { decided: number; lost: number };
   expired: number;
 } {
@@ -180,7 +210,17 @@ export function runJourneyTick(ctx: AppContext): {
     )
     .all();
   let delivered = 0;
-  for (const { bottleId } of due) if (commitArrivalIfDue(ctx, bottleId, now)) delivered++;
+  let cancelled = 0;
+  for (const { bottleId } of due) {
+    if (!commitArrivalIfDue(ctx, bottleId, now)) continue;
+    const state = ctx.db
+      .select({ state: t.bottles.state })
+      .from(t.bottles)
+      .where(eq(t.bottles.id, bottleId))
+      .get()?.state;
+    if (state === 'delivered') delivered++;
+    else cancelled++;
+  }
   const expired = expirePublicListings(ctx, now);
-  return { delivered, risk, expired };
+  return { delivered, cancelled, risk, expired };
 }

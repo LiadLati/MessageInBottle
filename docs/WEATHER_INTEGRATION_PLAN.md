@@ -1,5 +1,12 @@
 # Weather & time-of-day — integration plan
 
+> **Superseded for storms and the clock.** Since risk policy v4 the account's authoritative time
+> zone (from the server) sets both the map's day and night and storm eligibility; there is one
+> storm per account, not one per bottle, and My Shore shows the same weather. See
+> `docs/ARCHITECTURE.md` ("Risk policy v4") and spec §9.3. The palettes, tween and scene work
+> described below still apply; the per-bottle and per-user storm schedules no longer drive
+> anything.
+
 Two approved packages are integrated here, in order:
 
 - **v1.1 “weather & time-of-day handoff”** (16 Sep 2026) — daylight palette, day↔night tween, the

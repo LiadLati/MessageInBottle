@@ -1,7 +1,7 @@
 # Architecture notes — stage 3 foundation
 
 This document records the decisions taken to start implementation from an empty repository. The
-product specification (v0.2) remains the source of truth; where the specification leaves a decision
+product specification (`docs/SeaYou_Product_Specification.md`) remains the source of truth; where the specification leaves a decision
 open (D01–D13) the code uses a clearly labelled, configurable placeholder and does not pretend the
 decision has been made.
 
@@ -69,7 +69,7 @@ Rules live in `services/` and are tested directly against an in-memory database
   targets and are never used as through-passages by the planner.
 - `letters` — immutable text, character count, original font, disclosure version.
 - `bottles` — sender/recipient/letter refs, **snapshots** of names and shores taken at release,
-  `state` (full v0.2 enum), optimistic `version`, `moderation_status`, timestamps, `loss_reason`,
+  `state` (`at_sea`, `delivered`, `opened`, `lost`, `cancelled`), optimistic `version`, `moderation_status`, timestamps, `loss_reason`,
   frozen `aging_profile`, and the persisted outcome (`outcome_at`, `outcome_progress`, chart/geo
   position) once the sea ends a journey.
 - `bottle_outcome_views` — per (user, bottle): when a terminal marker was first seen inside the
@@ -171,65 +171,70 @@ is additive: `bottles.risk_policy_version`, `bottles.public_deadline_at`,
 `bottles.public_expired_at`, `public_openings.session_expires_at`, `public_openings.closed_at`
 and the new `risk_decisions` table (one row per bottle per storm night, unique on both).
 
-- **Policy v3** (`RISK_POLICY`, `RISK_POLICY_VERSION = 3` in `packages/shared/src/weather.ts`):
-  each night (19:00→07:00, the existing day/night convention, in the sender's own time zone —
-  see *One night rule* below) every at-sea bottle has, independently, a 25 % chance
-  of a storm of 40–100 minutes; calm nights carry no risk. A storm night yields at most one
-  **risk decision**, taken at the midpoint of the storm window (a stable moment after the storm
-  has become visible). The decision is *eligible*
-  only if the bottle is still at sea at that moment and its planned progress is below 80 %; only
-  the first five eligible decisions of a journey carry risk (cap 1 − 0.99⁵ ≈ 4.9 %). An eligible
-  decision loses the bottle with probability 1 %; conditional on loss it is adrift with 75 % and
-  sunk with 25 %. The 80 % cutoff is internal protection and appears in no user-facing copy;
-  storms may still be shown after the cap or the cutoff — they are cosmetic then. Same-harbour
-  journeys never sail and have no exposure.
-- **Determinism.** Every draw is `hashSeed(policyVersion, 'risk', bottleId, nightKey)` →
-  `draw(seed, i)`; the storm window, decision time, loss and reason are functions of the bottle
-  id, the night and the policy version alone. Retries, restarts, clock jumps, selection, the sea
-  viewer and refreshes cannot reroll anything, and a new policy version reshuffles nothing for
-  bottles stamped with an older one.
-- **One night rule** (policy v3, 2026-09-19). A bottle's night is *its sender's night*: 19:00–
-  07:00 in the account's persisted IANA zone (`users.time_zone`, migration
-  `0009_account_time_zone`) — the phase the account's Ocean map is drawn in, whatever water the
-  bottle is on. The zone is first learned from the device and re-sent on every app start and
-  resume (`PUT /api/auth/time-zone`, a no-op when unchanged); `users.time_zone_since` records
-  the journey-clock instant the current zone took effect, and nights are only ever walked from
-  that instant on (`journeyNights` in `services/risk.ts`, the one place a night is chosen, for
-  the worker and the map alike). So a zone change moves the nights ahead and never the ones
-  behind: past `risk_decisions` rows stand, no decision is taken for a night that began under
-  the old zone, and no loss can appear retroactively. Daylight saving is simply the zone's own:
-  a 13-hour or 11-hour night on a clock-change date is the same night on the map and for the
-  worker. An account no device has spoken for yet has **no nights** — no storms and no risk —
-  until its first sync. Bottles share the account's phase but keep independent storms (the
-  draws are per bottle id). Journey timing is untouched by any of this: duration and arrival
-  are fixed by the route and elapsed server time, and public expiry stays 72 elapsed hours.
-- **Visibility is the same rule.** `apps/web/src/lib/oceanWeather.ts` shows a storm iff the
-  server's window covers the instant, and the map's palette, the Bottle at Sea lighting and My
-  Shore's own cosmetic weather all read the phase from the same account zone
-  (`state/weather.tsx`: the account's zone, the last known one while offline, the device's own
-  before any account). Every window lies inside a night of that zone, so **a daytime map never
-  holds a bottle in a risk-bearing storm**; no second clock gates the glyph.
-- **Legacy journeys.** Two earlier rules shipped on this branch and are removed: v1 counted
-  nights in a server-configured zone (`MIB_TIME_ZONE`, gone), v2 at the bottle's own meridian
-  (mean solar time, gone). Journeys stamped 1 or 2 keep their stamp and every decision row they
-  have (`risk_decisions.policy_version` records the version each decision was taken under);
-  from activation on they walk the account nights like everyone else, from the sender's
-  `time_zone_since`. Nothing is rerolled and nothing is hidden: until the sender's device has
-  reported a zone they have no nights, and afterwards only nights that begin after that moment.
+- **Risk policy v4: one map clock, account storms** (`RISK_POLICY_VERSION = 4`,
+  `packages/shared/src/weather.ts`; server in `services/weather.ts` and `services/risk.ts`;
+  migrations `0016_account_storms` and `0017_account_zone_backfill`).
+  - *The map clock.* Each account has one authoritative IANA zone: the latest valid device zone
+    the server accepted (`PUT /api/auth/time-zone`, validated before it spends the four-a-day
+    change budget), before any the chosen harbour's nautical zone (`Etc/GMT±N` from its
+    longitude), else UTC. Every accepted change is a row of `account_zone_changes` with the
+    journey-clock instant it took effect (`users.time_zone`/`time_zone_since` mirror the latest
+    device report). The zone in force at any past instant is therefore a recorded fact.
+    `GET /api/ocean/weather` returns the zone, its source, the phase, tonight's visible storm and
+    the last roll; every device of the account draws that answer (`state/weather.tsx`), so a
+    phone and a desktop never disagree, and the reporting device redraws as soon as the server
+    accepts its change.
+  - *Rolls.* A roll happens only when the map *enters* a night: at 19:00 in the zone in force,
+    when an accepted zone change turns a daytime map to night, or when the clock starts at night
+    (v4's activation, recorded once in `risk_policy_activations`, or the account's first zone).
+    An entry less than 24 hours after the previous roll gets no roll — so a zone change, a
+    local date boundary, reopening SeaYou or restarting the worker can never add one — and
+    neither does an entry with less than 100 minutes of night left. Each roll is
+    `hashSeed(4, 'account-storm', userId, rolledAt)`: a 25 % storm, 40–100 minutes, placed wholly
+    between the roll and the morning of that night, decision at its midpoint. Rolls are written to
+    `weather_rolls` (unique on account and instant) the first time they are needed — by the
+    worker for accounts with journeys at risk, by the weather endpoint, before a zone change —
+    and only up to "now", from history already recorded, so computing them early, late or twice
+    writes the same rows. One late entry (a clock that starts mid-night, an eastward zone change,
+    a spring-forward night) costs at most that night: the next dusk ≥ 24 hours later rolls at
+    19:00 again.
+  - *Decisions.* At the midpoint (`decideDueStorms`, one transaction per storm) every at-sea,
+    versioned bottle of the account that had set out by then and is not due ashore by then gets
+    its own decision from `bottleRiskDraws(bottleId, rolledAt)`, under the unchanged rules:
+    eligible only below 80 % progress, before arrival and within the first five eligible
+    decisions of the journey (any policy's decisions count); 1 % loss, adrift 75 % / sunk 25 %,
+    committed through `commitLossIn` so arrival and loss still race on the optimistic
+    `at_sea → X` transition. The rows (`risk_decisions.night_key` = the roll id, unique per
+    bottle) and `weather_rolls.decided_at` commit together; a retry, a restart or a second
+    worker decides nothing twice, and a worker catching up after downtime writes the same rows
+    as one that never stopped.
+  - *Zone changes.* Before a change takes effect, storms whose midpoint has already passed on
+    server time are decided under the clock they happened in. If the new zone turns the map to
+    day while a storm's midpoint is still ahead, the roll is marked cancelled (`cancelled_at`,
+    `cancel_reason = 'daytime'`): the storm disappears, no decision is taken and the roll stays
+    consumed. A night-to-night change whose morning comes before the midpoint is cancelled the
+    same way when the worker reaches the midpoint (`firstDaytime`). Nothing already decided is
+    touched; release, route, duration, arrival, notifications, deadlines and rate limits never
+    read the zone.
+  - *Display.* One storm per account: the Ocean screen draws it once over the map
+    (`.map-storm`), only while it lasts and only at night; bottles at sea show they are in it,
+    and My Shore shows the same weather. `SentBottleDto.storms` carries the account storm's
+    visible windows for a bottle at sea (clipped at the first daytime moment).
+- **Earlier policies.** v1 counted nights in a server zone, v2 at the bottle's meridian, v3 gave
+  every bottle its own 25 % storm on each of its sender's nights. Their `risk_decisions` rows,
+  stamps and outcomes are kept exactly as recorded. From v4's activation, every journey still at
+  sea with any non-null stamp is decided by its account's storms; its earlier eligible decisions
+  count toward the five. v3 decisions not yet taken when v4 activated are never taken — that
+  schedule no longer exists on any map, so no hidden decision can happen under a calm or
+  daytime map. Bottles with a null stamp are never put at risk. No transition tool is needed:
+  nothing is rewritten or backfilled except the device-zone history (0017, additive).
 - **Worker.** `runJourneyTick` runs `processRiskDecisions → arrivals → expirePublicListings`.
-  For each at-sea bottle with a non-null `risk_policy_version` it walks the account nights that
-  began after release (and after the zone's start) up to now, skips storms whose decision is
-  still in the future, and inserts one `risk_decisions` row per night inside a transaction (the unique key
-  makes a concurrent tick a no-op); a losing decision calls `commitLoss(id, reason, decisionAt)`
-  — the same transactional service as before, so arrival and loss still race on the optimistic
-  `at_sea → X` transition, the reservation is released once and the sender is told once. Decisions
-  that fell due while nothing was running are taken deterministically on the next tick, at their
-  original decision time (progress and arrival are evaluated at that time, not at catch-up).
-- **Activation.** `MIB_RISK_POLICY_VERSION` (default `3`) is stamped on each bottle at release;
-  `0` stamps `null`. Bottles released before this migration have `risk_policy_version = NULL`
-  and are never put at risk, however long they sail; nothing is backfilled, and no schedule that
-  has already been given out is recomputed. The client no longer computes bottle storms:
-  `SentBottleSummaryDto.storms` carries the server's windows for the nights around now.
+  Risk first rolls every account that has a versioned journey at sea, then takes every due
+  midpoint in order; a tick with nothing new costs a constant handful of statements per
+  account.
+- **Activation.** `MIB_RISK_POLICY_VERSION` (default `4`; `0` disables) is stamped on each bottle
+  at release. Bottles released before automatic outcomes existed have `NULL` and never sail
+  into risk.
 - **72-hour public listing.** `commitLoss(…, 'adrift')` sets `public_deadline_at = outcome_at +
   72 h`. `listPublicOcean` and `openPublicBottle` enforce the deadline themselves (`>` now to
   list, `409 listing_expired` at or after it), so the rule holds even if no worker runs;
@@ -262,6 +267,27 @@ and the new `risk_decisions` table (one row per bottle per storm night, unique o
   (`received_arrived`, `sent_arrived`) are produced exactly as for any arrival, and the
   idempotency key replays the same delivered bottle. No sea journey, storm risk, reminder or
   separate opening rule exists for it, and no notification about the recipient opening it.
+
+## Product decisions: capacity, notifications, blocks, letters and time zone
+
+- **Shore capacity** is 100 bottles per recipient account (`MIB_SHORE_CAPACITY`), counted as
+  `capacity_reservations` in state `held` for that recipient — travelling plus delivered-unread —
+  inside the release transaction, so concurrent releases cannot overfill it. A full shore
+  refuses with `shore_full` and creates nothing. `users.shore_full_since` marks a full episode:
+  set with one `shore_full` notification, cleared when `releaseCapacityOnce` frees a slot.
+- **Notifications** are user history and are never pruned; `notificationPage` pages them with a
+  `createdAt.rowid` cursor and returns the unread count. `services/housekeeping.ts` prunes only
+  operational data (worker retry state older than 90 days).
+- **Blocks and unblocks.** `listBlocked` shows only blocks the caller placed. `unblockUser`
+  removes the block and any friendship row, restoring nothing. A finder's block of an anonymous
+  writer stores `blocks.found_bottle_id` and is listed and undone by that bottle only.
+- **Direction controls.** `validateLetterText` rejects U+202A–U+202E and U+2066–U+2069 on client
+  and server (`letter_direction_controls`); other invisible characters used by real RTL and
+  emoji text stay allowed.
+- **Time zone.** The web app reports a validated IANA zone after sign-in, on start, on return
+  to the foreground and when it changes (`packages/shared/src/timezone.ts`). The server's
+  authoritative zone is the account's map clock for day, night and storms (risk policy v4,
+  above); journey duration, arrival and every deadline ignore it.
 
 ## Notifications inbox and the My Shore badge
 
@@ -309,10 +335,12 @@ and the new `risk_decisions` table (one row per bottle per storm night, unique o
   plus a required confirmation, rate-limited per address, reusing `login` and the same deletion
   service as SeaYou.
 - **Deletion.** `services/deletion.ts` is one transaction and is idempotent. It revokes sessions,
-  clears identifiers, drops friendships, blocks, notifications and idempotency records, cancels
-  in-flight letters (releasing the harbour reservation, recording a `cancelled` event and
-  clearing the text), keeps delivered letters with their recipient under the name
-  "Deleted account", and leaves moderation evidence to `services/retention.ts`. The `users` row
+  clears identifiers and preferences, drops friendships, blocks, notifications, acceptances and
+  idempotency records, cancels in-flight letters (releasing each reservation once and recording
+  a `cancelled` event), erases the text of every letter the account wrote unless its case has an
+  active hold, hides deleted authors' letters from recipients (`bottles.ts` `deletedSenders`),
+  shows the account as "Deleted user" in other people's Sent history, and leaves moderation
+  evidence to `services/retention.ts`. The `users` row
   survives anonymised with `deleted_at` set, because letters other people hold reference it.
   `login` and `resolveSession` already refuse a non-active account, so the status change alone
   ends access.
@@ -343,16 +371,37 @@ and the new `risk_decisions` table (one row per bottle per storm night, unique o
   it produces, never the count. `severity = 'critical'` bans on its own: `decideCaseCritical`
   takes a required `AuthUser`, so the review worker (which passes `null`) has no path to it, and
   it records the administrator, the reason, the classification and the time.
-- **Evidence retention.** `services/retention.ts` redacts a case's content evidence seven days
-  after `finalityOf` says it is final — rejected, waived, or appeal decided — and is enabled by
+- **Evidence retention.** `services/retention.ts` redacts a case's content evidence 30 days
+  after the human decision — the appeal window, anchored at the later of the decision and a
+  reopened window (`violations.appeal_window_starts_at`) — or when a timely appeal is decided,
+  whichever is later. A pending appeal holds it; an unopened notice does not. It is enabled by
   default. `planRetention` is a pure dry run; `applyRetention` re-checks every case inside the
   transaction, so an appeal or hold that arrived since the plan wins. A documented `legal` or
   `child_safety` hold outranks the timer and is the only way past it; releasing it returns the
-  case to the ordinary calculation. Redaction clears the evidence copy and the reporters'
-  explanations only: the decision, the violation and the audit trail outlive them, because an
+  case to the ordinary calculation. Redaction clears the evidence copy, the reporters'
+  explanations and the AI translation, reason and uncertainty only: the decision, the violation and the audit trail outlive them, because an
   upheld violation does.
-- **Audit.** `moderation_audit` is append-only and written inside the transaction of the action
-  it describes, so there is no path that changes what a person may do without leaving a row —
+- **Finality and the three decisions.** An administrator rejects, upholds an ordinary
+  violation, or confirms a critical child-safety violation; each needs a written reason, and
+  none can be revoked or reopened (there is no route for it). Escalating an unappealed ordinary
+  violation to critical restarts its 30-day appeal window once (`appeal_reopened` audit row).
+  Appeals close 30 days after the decision on the real clock (`appealDeadline`).
+- **Automated review recommends only.** `services/ai-review.ts` stores a verdict, reasoning,
+  uncertainty, translation and a `childSafety` flag; a flag sets `moderation_cases.urgent_at`
+  once, which sorts the case first in `listCases`. Cases are listed before the model answers.
+  `MIB_AI_AUTO_DECIDE=true` is a configuration error.
+- **Restricted accounts.** `services/restriction.ts`: when a suspension or ban takes effect,
+  bottles travelling to the account are cancelled with capacity released once and the sender
+  told only "Delivery unavailable"; `commitArrival` refuses delivery to a restricted recipient;
+  restricted accounts vanish from friend lists and requests while friendships stay stored; the
+  notification inbox is closed to them (`requireGoodStanding`). Standing is derived from the
+  violations and the real clock, so a suspension ends by itself.
+- **Audit.** `moderation_audit` is append-only through every application route, but it lives
+  in the same SQLite file as everything else and is **not tamper-evident** on its own: someone
+  with write access to the database file could alter it. Production must also export each
+  moderation event to an external append-only or immutable log (a deployment dependency; see
+  `docs/DEPLOYMENT.md`). Each row is written inside the transaction of the action it describes,
+  so there is no path that changes what a person may do without leaving a row —
   and the trail survives the evidence it describes being redacted.
 - **No age data.** Nothing in the schema, the API or the interface collects or asserts an age;
   a test walks every production source file to keep it that way.
