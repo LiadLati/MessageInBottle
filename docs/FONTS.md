@@ -12,10 +12,19 @@ version 5.3.0), which is also what the package's `license` field declares.
 | Italianno | `@fontsource/italianno` | Letter face: Calligraphy | `apps/web/src/components/LetterPaper.tsx` | SIL Open Font License 1.1 | 2009 The Italianno Project Authors |
 | Special Elite | `@fontsource/special-elite` | Letter face: Typewriter | `apps/web/src/components/LetterPaper.tsx` | Apache License 2.0 | 2010 Brian J. Bonislawsky DBA Astigmatic (AOETI) (stated in the package README) |
 | Lora | `@fontsource/lora` | Letter face: Printed; script fallback | `apps/web/src/components/LetterPaper.tsx` | SIL Open Font License 1.1, Reserved Font Name "Lora" | 2011 The Lora Project Authors |
+| Dancing Script | `@fontsource/dancing-script` | Letter face: Flowing script (`script`) | `apps/web/src/components/LetterPaper.tsx` | SIL Open Font License 1.1, Reserved Font Name "Dancing Script" | 2016 The Dancing Script Project Authors |
+| Patrick Hand | `@fontsource/patrick-hand` | Letter face: Neat hand (`neat_hand`) | `apps/web/src/components/LetterPaper.tsx` | SIL Open Font License 1.1 | 2010-2012 Patrick Wagesreiter |
+| Libre Baskerville | `@fontsource/libre-baskerville` | Letter face: Classic (`classic`) | `apps/web/src/components/LetterPaper.tsx` | SIL Open Font License 1.1 | 2012 The Libre Baskerville Project Authors |
+| Nunito | `@fontsource/nunito` | Letter face: Rounded (`rounded`) | `apps/web/src/components/LetterPaper.tsx` | SIL Open Font License 1.1 | 2014 The Nunito Project Authors |
 | Instrument Sans | `@fontsource/instrument-sans` (400, 500, 600) | Interface text and Readable Print | `apps/web/src/main.tsx` | SIL Open Font License 1.1 | 2022 The Instrument Sans Project Authors |
 | EB Garamond | `@fontsource/eb-garamond` (400, 400 italic, 500) | Interface display text | `apps/web/src/main.tsx` | SIL Open Font License 1.1 | 2017 The EB Garamond Project Authors |
 
-Letter faces are mapped to these families in `packages/shared/src/fonts.ts`.
+Letter faces are mapped to these families in `packages/shared/src/fonts.ts`. The first four
+identifiers (`handwriting`, `calligraphy`, `typewriter`, `print`) are the original set and never
+change. The four above them in this table were added in manual review round 2 (packages version
+5.3.0, licences read from each package's `LICENSE`). Every face is served from the app's own
+build output: the Fontsource CSS references only relative `./files/*.woff2`, and no external font
+service is contacted.
 
 ## Not bundled
 
@@ -27,10 +36,11 @@ these, and none is recorded here.
 
 ## Obligations when distributing
 
-- **OFL 1.1** (Caveat, Italianno, Lora, Instrument Sans, EB Garamond): the fonts may be bundled
+- **OFL 1.1** (Caveat, Italianno, Lora, Dancing Script, Patrick Hand, Libre Baskerville, Nunito,
+  Instrument Sans, EB Garamond): the fonts may be bundled
   and redistributed with the app; the copyright notice and licence must accompany the font
   software when it is redistributed on its own, the fonts may not be sold by themselves, and a
-  modified version may not use a Reserved Font Name (here, "Lora").
+  modified version may not use a Reserved Font Name (here, "Lora" and "Dancing Script").
 - **Apache 2.0** (Special Elite): redistribution must include a copy of the licence and keep the
   copyright notice.
 

@@ -744,9 +744,6 @@ button.avatar {
   cursor: pointer;
   color: var(--foam-white);
 }
-.font-select-option .t-meta {
-  grid-column: 1;
-}
 .font-select-option .active,
 .font-select-option.active {
   background: rgba(143, 211, 204, 0.14);
@@ -756,7 +753,6 @@ button.avatar {
 }
 .font-select-option > svg {
   grid-column: 2;
-  grid-row: 1 / span 2;
 }
 
 .list {

@@ -211,8 +211,8 @@ export function FontSelect({ label, options, value, onChange }: Props) {
               onMouseEnter={() => setActive(i)}
               onClick={() => choose(i)}
             >
+              {/* The face's own name, drawn in that face, is the whole sample. */}
               <span style={sample(o)}>{o.label}</span>
-              <span className="t-meta">Dear friend, the tide was gentle</span>
               {o.id === value ? <Icon name="check" size={14} /> : null}
             </li>
           ))}
