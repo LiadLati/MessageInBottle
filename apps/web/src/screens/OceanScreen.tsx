@@ -421,10 +421,11 @@ export function OceanScreen({
           paused={viewing !== null}
           fitKey={fitKey}
         />
-        {/* One storm for the whole map: the account's weather, not a storm per bottle. */}
+        {/* The account's one storm is drawn as the cloud above each affected bottle (the map's
+            markers) and said in words here. Nothing is laid over the map itself: it stays clear
+            and readable (manual review round 1, follow-up). */}
         {mapStorm && !isPublic ? (
           <div className="map-storm" role="status" aria-live="polite">
-            <span className="map-storm-sky" aria-hidden />
             <span className="map-storm-label">
               <Icon name="storm" size={14} />
               {stormUntil

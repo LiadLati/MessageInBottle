@@ -2849,22 +2849,13 @@ button.avatar {
   }
 }
 
-/* The account's one storm (risk policy v4): a single weather band over the whole map, never a
-   storm per bottle. Presentation only; the label says it in words. */
+/* The account's one storm (risk policy v4). The map shows it only as the cloud above each
+   affected bottle; this layer carries the storm message and nothing that covers the map. */
 .map-storm {
   position: absolute;
   inset: 0;
   z-index: 2;
   pointer-events: none;
-}
-.map-storm-sky {
-  position: absolute;
-  inset: 0;
-  background:
-    radial-gradient(120% 60% at 50% 0%, rgba(20, 28, 44, 0.6), transparent 70%),
-    linear-gradient(rgba(10, 16, 28, 0.18), rgba(10, 16, 28, 0.18)),
-    repeating-linear-gradient(105deg, rgba(200, 220, 240, 0.13) 0 2px, transparent 2px 14px);
-  animation: map-storm-rain 1.4s linear infinite;
 }
 .map-storm-label {
   position: absolute;
@@ -2881,23 +2872,4 @@ button.avatar {
   color: #f0ddae;
   font-size: 13px;
   text-align: center;
-}
-@keyframes map-storm-rain {
-  from {
-    background-position:
-      0 0,
-      0 0,
-      0 0;
-  }
-  to {
-    background-position:
-      0 0,
-      0 0,
-      -28px 96px;
-  }
-}
-@media (prefers-reduced-motion: reduce) {
-  .map-storm-sky {
-    animation: none;
-  }
 }
