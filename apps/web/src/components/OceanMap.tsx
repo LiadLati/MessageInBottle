@@ -18,10 +18,11 @@ import maplibreWorkerUrl from 'maplibre-gl/dist/maplibre-gl-worker.mjs?worker&ur
 // The SDK's stylesheet travels with this lazy chunk, so sign-in never fetches map assets.
 import 'maplibre-gl/dist/maplibre-gl.css';
 import type { Feature } from 'geojson';
-import type { GeoPoint } from '@mib/shared';
+import type { GeoPoint, LandTest } from '@mib/shared';
 import { prefersReducedMotion } from '../lib/format.js';
 import { isWebGLAvailable } from '../lib/webgl.js';
 import { sidePaneLayout } from '../lib/layout.js';
+import { drawnRoute, loadMapLand } from '../lib/routeDrawing.js';
 import type { BottleWeather } from '../lib/oceanWeather.js';
 import {
   assertMapStylePolicy,
@@ -311,6 +312,20 @@ export function OceanMap({
   // Ids already reported as seen this mount: the first sighting is the one that counts.
   const seenRef = useRef(new Set<string>());
   const [loaded, setLoaded] = useState(false);
+  // The land test that lets drawn routes round their corners without touching land. Built
+  // from the map's own GeoJSON land; with vector tiles there is no file to read, so routes keep
+  // the tiny blind-safe rounding.
+  const [land, setLand] = useState<LandTest | null>(null);
+  useEffect(() => {
+    if (!loaded || import.meta.env.VITE_MIB_MAP_TILES_URL) return;
+    let live = true;
+    void loadMapLand(LAND_URL).then((t) => {
+      if (live) setLand(t);
+    });
+    return () => {
+      live = false;
+    };
+  }, [loaded]);
   const [unsupported] = useState(() => !isWebGLAvailable());
   // The palette in force right now, so an interrupted tween resumes from where it is and the
   // map is never rebuilt.
@@ -497,6 +512,11 @@ export function OceanMap({
     const ordered = [...hs].sort(
       (a, b) => (a.kind === 'destination' ? 1 : 0) - (b.kind === 'destination' ? 1 : 0),
     );
+    // Where the bottles are on screen: a label should not sit on top of one.
+    const bottles = [...markersRef.current.values()].map((bm) => map.project(bm.getLngLat()));
+    const coversBottle = (x: number, top: number, w: number, h: number) =>
+      bottles.some((b) => Math.abs(b.x - x) < w / 2 + 20 && top < b.y + 20 && top + h > b.y - 58);
+    const withDestination = hs.some((h) => h.kind === 'destination');
     for (const h of ordered) {
       keep.add(h.id);
       let m = harborMarkersRef.current.get(h.id);
@@ -504,12 +524,16 @@ export function OceanMap({
         const el = document.createElement('div');
         el.className = 'map-harbor';
         el.innerHTML =
-          '<span class="dot"></span><span class="label"><img class="icon" alt="" src="/markers/harbor-anchor.svg"><span class="name"></span></span>';
+          '<span class="dot"></span><span class="label"><img class="icon" alt="" src="/markers/harbor-anchor.svg"><span class="role"></span><span class="name"></span></span>';
         m = new Marker({ element: el, anchor: 'top' }).setLngLat([h.geo.lng, h.geo.lat]).addTo(map);
         harborMarkersRef.current.set(h.id, m);
       }
+      m.setLngLat([h.geo.lng, h.geo.lat]);
       const el = m.getElement();
       el.querySelector('.name')!.textContent = h.name;
+      // Origin and destination are told apart in words, not only by colour.
+      el.querySelector('.role')!.textContent =
+        h.kind === 'destination' ? 'To' : h.kind === 'own' && withDestination ? 'From' : '';
       el.dataset.kind = h.kind;
       el.setAttribute(
         'aria-label',
@@ -519,7 +543,8 @@ export function OceanMap({
             ? `Destination harbour: ${h.name}`
             : `Your harbour and the destination: ${h.name}`,
       );
-      // Overlap: stack this label below any label already placed over the same pixels.
+      // Overlap: stack this label below any label already placed over the same pixels; if it
+      // would then cover a bottle, put it above its harbour point instead.
       const p = map.project([h.geo.lng, h.geo.lat]);
       const w = Math.max(80, el.offsetWidth || 120);
       const hgt = 40;
@@ -529,9 +554,11 @@ export function OceanMap({
         const overlapsY = Math.abs(p.y + dy - box.y) < (hgt + box.h) / 2;
         if (overlapsX && overlapsY) dy = box.y + box.h / 2 + hgt / 2 + 4 - p.y;
       }
-      m.setOffset([0, dy]);
+      const above = dy === 0 && coversBottle(p.x, p.y, w, hgt);
+      el.classList.toggle('above', above);
+      m.setOffset([0, above ? -(el.offsetHeight || 36) + 6 : dy]);
       el.classList.toggle('stacked', dy !== 0);
-      placed.push({ x: p.x, y: p.y + dy, w, h: hgt });
+      placed.push({ x: p.x, y: above ? p.y - hgt : p.y + dy, w, h: hgt });
     }
     for (const [id, m] of harborMarkersRef.current) {
       if (!keep.has(id)) {
@@ -704,7 +731,7 @@ export function OceanMap({
         point = r.fixed;
       } else {
         const progress = interpolatedProgress(r, now);
-        const pts = unwrapAntimeridian(r.points);
+        const pts = drawnRoute(r.points, land);
         const along = geoAlong(pts, progress);
         point = along.point;
         planned.push({ ...lineFeature(r.id, pts), properties: { id: r.id, selected } });
@@ -792,6 +819,7 @@ export function OceanMap({
     layoutHarbors();
     reportSeen();
   }, [
+    land,
     routes,
     anchors,
     harbors,
@@ -825,7 +853,7 @@ export function OceanMap({
       for (const r of routes) {
         if (r.fixed || r.points.length < 2) continue;
         const progress = interpolatedProgress(r, now);
-        const pts = unwrapAntimeridian(r.points);
+        const pts = drawnRoute(r.points, land);
         const { point, index } = geoAlong(pts, progress);
         markersRef.current.get(r.id)?.setLngLat([point.lng, point.lat]);
         if (progress > 0) {
@@ -839,7 +867,7 @@ export function OceanMap({
       if (trailSource) void trailSource.setData({ type: 'FeatureCollection', features: trail });
     }, 1000);
     return () => clearInterval(id);
-  }, [routes, selectedRouteIds, loaded, reduced, paused]);
+  }, [routes, selectedRouteIds, loaded, reduced, paused, land]);
 
   // Day ↔ night: a 600ms per-layer paint tween on the live map. Never setStyle — that reloads
   // sources, drops the DOM markers and blinks the camera. Route colours are excluded by design.

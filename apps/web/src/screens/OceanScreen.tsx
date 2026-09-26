@@ -224,7 +224,13 @@ export function OceanScreen({
   const [viewing, setViewing] = useState<string | null>(null);
   const showList = view.kind === 'clean' && !viewing && (listOpen || !mapDrawable);
   const viewingBottle = viewing ? (list.find((b) => b.id === viewing) ?? null) : null;
-  const focusBottle = current ?? routeBottles[0] ?? null;
+  // The journey whose harbours are named: the selected one, or — on the private map with
+  // nothing selected — the only journey at sea, so its destination is labelled too.
+  const atSea = list.filter((b) => !b.outcome);
+  const focusBottle =
+    current ??
+    routeBottles[0] ??
+    (!isPublic && view.kind === 'clean' && atSea.length === 1 ? atSea[0]! : null);
   const shoreById = useMemo(
     () => new Map((chart.data?.shores ?? []).map((s) => [s.id, s])),
     [chart.data],
@@ -239,9 +245,9 @@ export function OceanScreen({
     return out;
   }, [focusBottle, shoreById]);
 
-  // Harbour labels: the signed-in user's own harbour always; the selected bottle's destination
-  // while it is selected on the private map. The same shore for both is one label. The public
-  // ocean never names a destination.
+  // Harbour labels: the signed-in user's own harbour always; the destination of the journey in
+  // focus on the private map. The same shore for both is one label. The public ocean never
+  // names a destination.
   const ownShoreId = user?.shoreId ?? null;
   const harbors = useMemo<HarborLabel[]>(() => {
     const own = ownShoreId ? shoreById.get(ownShoreId) : null;
