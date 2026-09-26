@@ -1,5 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from 'react';
-import type { AdminPendingCountsDto, PublicBottleDto, SentBottleSummaryDto } from '@mib/shared';
+import {
+  formatClock,
+  formatDateOnly,
+  type AdminPendingCountsDto,
+  type PublicBottleDto,
+  type SentBottleSummaryDto,
+} from '@mib/shared';
 import { ApiError, api } from '../api/client.js';
 import { AdminControl } from '../components/AdminControl.js';
 import { LetterModal } from '../components/LetterModal.js';
@@ -15,7 +21,7 @@ import {
   StatusChip,
 } from '../components/ui.js';
 import { Icon } from '../design/Icon.js';
-import { formatDate, formatDuration, formatTime } from '../lib/format.js';
+import { formatDate, formatDuration } from '../lib/format.js';
 import { useAsync } from '../lib/useAsync.js';
 import { isWebGLAvailable } from '../lib/webgl.js';
 import { oceanWeatherMap, type BottleWeather } from '../lib/oceanWeather.js';
@@ -115,6 +121,23 @@ function onPrivateMap(b: SentBottleSummaryDto): boolean {
   return b.visibility?.acknowledgedAt == null;
 }
 
+// "26 Sep 2026 · 19:54", in the given zone; UTC if the zone cannot be used.
+export function mapClockLabel(ms: number, timeZone: string): string {
+  try {
+    return `${formatDateOnly(ms, timeZone)} · ${formatClock(ms, timeZone)}`;
+  } catch {
+    return `${formatDateOnly(ms, 'UTC')} · ${formatClock(ms, 'UTC')} UTC`;
+  }
+}
+
+function mapClockTime(ms: number, timeZone: string): string {
+  try {
+    return formatClock(ms, timeZone);
+  } catch {
+    return `${formatClock(ms, 'UTC')} UTC`;
+  }
+}
+
 // S1 · Ocean — private journeys over the real world map, and the public ocean beside it.
 const NO_WEATHER: Record<string, BottleWeather> = {};
 
@@ -131,7 +154,7 @@ export function OceanScreen({
   onOpenProfile,
 }: Props) {
   const { user } = useSession();
-  const { phase, oceanStormOverride, storm, stormUntil } = useWeather();
+  const { phase, oceanStormOverride, storm, stormUntil, nowMs, timeZone } = useWeather();
   const [mode, setMode] = useState<OceanMode>(focusPublicId ? 'public' : 'private');
   const bottles = useAsync(() => api.sentBottles(), [], POLL_MS);
   const chart = useAsync(() => api.chart(), []);
@@ -383,19 +406,11 @@ export function OceanScreen({
     refit('all');
   };
 
-  const synced = list[0]?.serverTime ?? null;
+  // Below the title, on both maps: the date and time now, from the shared server clock (in
+  // development, the simulated one), shown in the account's zone. It follows every clock jump
+  // and re-reads at least every half minute (manual review round 1, follow-up item 4).
+  const nowLabel = mapClockLabel(nowMs, timeZone);
   const atSeaCount = list.filter((b) => b.state === 'at_sea').length;
-  const subline = isPublic
-    ? publicOcean.loading && !publicOcean.data
-      ? 'Charting…'
-      : publicList.length === 0
-        ? 'Nothing adrift right now'
-        : `${publicList.length} ${publicList.length === 1 ? 'bottle' : 'bottles'} adrift · tap one`
-    : bottles.loading && !bottles.data
-      ? 'Charting…'
-      : list.length === 0
-        ? 'Nothing at sea'
-        : `${synced ? `Synced ${formatTime(synced)} · ` : ''}${list.length === 1 ? 'tap the bottle' : 'tap a bottle or route'}`;
 
   const loadError = isPublic ? publicOcean.error : (bottles.error ?? chart.error);
 
@@ -429,7 +444,7 @@ export function OceanScreen({
             <span className="map-storm-label">
               <Icon name="storm" size={14} />
               {stormUntil
-                ? `A storm is passing over your sea until ${formatTime(new Date(stormUntil).toISOString())}`
+                ? `A storm is passing over your sea until ${mapClockTime(stormUntil, timeZone)}`
                 : 'A storm is passing over your sea'}
             </span>
           </div>
@@ -442,7 +457,9 @@ export function OceanScreen({
           <h1 className="t-title">
             {isPublic ? 'Public ocean' : atSeaCount > 0 ? 'At sea' : 'Ocean'}
           </h1>
-          <p className="t-meta">{subline}</p>
+          <p className="t-meta map-clock">
+            <time dateTime={new Date(nowMs).toISOString()}>{nowLabel}</time>
+          </p>
         </div>
         <div className="header-actions">
           <button

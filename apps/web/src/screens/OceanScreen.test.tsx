@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -125,5 +125,49 @@ describe('the storm on the Ocean map', () => {
     const { container } = mount();
     await waitFor(() => expect(drawn.weather.at(-1)).toEqual({ btl_sea: 'calm' }));
     expect(container.querySelector('.map-storm')).toBeNull();
+  });
+});
+
+describe('the date and time below the map title', () => {
+  const subtitle = () => document.querySelector('.world-header .map-clock')?.textContent;
+
+  it('shows the server instant in the account zone, in English, even with nothing at sea', async () => {
+    api.sentBottles.mockResolvedValue({ bottles: [] });
+    weather.state.storm = 'calm';
+    mount();
+    await screen.findByRole('heading', { name: 'Ocean' });
+    // 16:54 UTC is 19:54 in Jerusalem in September.
+    expect(subtitle()).toBe('26 Sep 2026 · 19:54');
+    expect(document.body.textContent).not.toMatch(/Nothing at sea/);
+  });
+
+  it('is the same instant in another zone, shown on that zone’s clock', async () => {
+    weather.state.timeZone = 'America/New_York';
+    mount();
+    await waitFor(() => expect(subtitle()).toBe('26 Sep 2026 · 12:54'));
+    weather.state.timeZone = 'Asia/Jerusalem';
+  });
+
+  it('follows the shared clock when it jumps, forward or back to real time', async () => {
+    const view = mount();
+    await waitFor(() => expect(subtitle()).toBe('26 Sep 2026 · 19:54'));
+    weather.state = { ...weather.state, nowMs: Date.parse('2026-10-03T08:05:00.000Z') };
+    view.rerender(
+      <OceanScreen onOpenPassport={vi.fn()} onWrite={vi.fn()} onOpenProfile={vi.fn()} />,
+    );
+    expect(subtitle()).toBe('3 Oct 2026 · 11:05');
+    weather.state = { ...weather.state, nowMs: Date.parse('2026-09-26T16:54:00.000Z') };
+    view.rerender(
+      <OceanScreen onOpenPassport={vi.fn()} onWrite={vi.fn()} onOpenProfile={vi.fn()} />,
+    );
+    expect(subtitle()).toBe('26 Sep 2026 · 19:54');
+  });
+
+  it('is on the public map too, and the public empty-state card stays', async () => {
+    mount();
+    fireEvent.click(await screen.findByRole('button', { name: 'Public' }));
+    await screen.findByRole('heading', { name: 'Public ocean' });
+    expect(subtitle()).toBe('26 Sep 2026 · 19:54');
+    await waitFor(() => expect(screen.getByText('Nothing adrift')).toBeTruthy());
   });
 });

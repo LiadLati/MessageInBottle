@@ -2873,3 +2873,8 @@ button.avatar {
   font-size: 13px;
   text-align: center;
 }
+
+/* The date and time below the map title: secondary, and steady as the minutes change. */
+.world-header .map-clock {
+  font-variant-numeric: tabular-nums;
+}
