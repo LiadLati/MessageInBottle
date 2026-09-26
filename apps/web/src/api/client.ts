@@ -4,6 +4,7 @@ import {
   AccountWeatherSchema,
   AccountPoliciesSchema,
   AccountStandingSchema,
+  AppealResultsSchema,
   AdminAppealSchema,
   AdminCaseDetailSchema,
   AdminCaseSummarySchema,
@@ -246,6 +247,10 @@ export const api = {
       NotificationsPageSchema,
     ),
   markNotificationsRead: () => request<void>('POST', '/notifications/read-all'),
+  // Unread appeal results for the one-time popup; served whatever the account's standing.
+  appealResults: () => request('GET', '/moderation/appeal-results', undefined, AppealResultsSchema),
+  appealResultSeen: (id: string) =>
+    request<void>('POST', `/moderation/appeal-results/${encodeURIComponent(id)}/seen`),
   // The device's zone, reported after sign-in, on start, on resume and when it changes. The
   // server validates it; the latest one it accepts is the account's map clock.
   syncTimeZone: (timeZone: string) =>

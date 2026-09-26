@@ -460,9 +460,8 @@ function CaseBody({ c }: { c: AdminCaseDetailDto }) {
         <div className="glass-panel">
           {c.letter.redactedAt ? (
             <p className="muted">
-              The copy of this letter was removed on{' '}
-              {formatDay(c.letter.redactedAt)} under the evidence retention
-              policy. The decision and its reasoning are kept below.
+              The copy of this letter was removed on {formatDay(c.letter.redactedAt)} under the
+              evidence retention policy. The decision and its reasoning are kept below.
             </p>
           ) : (
             <>

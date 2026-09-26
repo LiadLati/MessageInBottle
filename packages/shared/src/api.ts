@@ -460,6 +460,10 @@ export const NotificationsPageSchema = z.object({
 });
 export type NotificationsPageDto = z.infer<typeof NotificationsPageSchema>;
 
+// Unread appeal results, for the one-time popup. Served whatever the account's standing.
+export const AppealResultsSchema = z.object({ results: z.array(NotificationSchema) });
+export type AppealResultsDto = z.infer<typeof AppealResultsSchema>;
+
 // ---------- dev ----------
 export const DevAdvanceRequestSchema = z.object({
   ms: z

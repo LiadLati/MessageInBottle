@@ -437,6 +437,7 @@ Claude Design should provide screen layouts, storyboards, assets/layers, anchors
 | Unopened interval | Sender | Recheck unopened status at dispatch |
 | Arrival/read receipt | Sender | Arrival: the existing *reached its destination* notice. A notification about whether the recipient opened the letter was considered and rejected (2026-09-19). |
 | Delivery invalidated | Sender | Generic message; do not expose a block |
+| Appeal result | Appellant | One persisted notice for an accepted or a rejected appeal, plus a one-time popup on the next visit or sign-in, also while suspended or banned. Accepted: the violation was withdrawn and standing recalculated. Rejected: the decision stands and is final within SeaYou. The letter is named by its send date, never by its recipient or reporter. Dismissing the popup marks that notice read and deletes nothing. (Decided 2026-09-26, manual review round 1.) |
 
 **Lifetime (product decision 6):** user-visible notifications are never deleted automatically. Each keeps its type, related item, time and read state; marking read only clears the badge, and the history is paginated. Operational data — delivery attempts, retries, worker state, provider errors — may be pruned after 90 days. Cleanup never deletes letters or journeys. A full shore produces one `shore_full` notice per episode.
 

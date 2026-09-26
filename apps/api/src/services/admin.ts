@@ -1,5 +1,5 @@
 import { and, desc, eq, isNull, sql } from 'drizzle-orm';
-import { APPEAL_WINDOW_MS } from '@mib/shared';
+import { APPEAL_WINDOW_MS, formatDateTime } from '@mib/shared';
 import type {
   AdminAppealDto,
   AdminPendingCountsDto,
@@ -446,6 +446,35 @@ export function getAppeal(ctx: AppContext, appealId: string): AdminAppealDto {
   return appealOf(ctx.db, a, ctx.config.retention.afterDecisionMs, ctx.realClock.now());
 }
 
+// The appeal result, as the appellant reads it in the notification and the one-time popup
+// (manual review round 1): what was decided, what it did, and nothing about who reported.
+export function appealResultMessage(
+  outcome: 'accepted' | 'rejected',
+  sentOn: string,
+  standing: 'good' | 'warned' | 'suspended' | 'banned' | null,
+): string {
+  if (outcome === 'rejected') {
+    return `Your appeal about the letter you sent on ${sentOn} was reviewed and rejected. The decision stands. This is final within SeaYou, and it cannot be appealed again.`;
+  }
+  const now =
+    standing === 'good'
+      ? 'Your account is in good standing.'
+      : standing === 'warned'
+        ? 'Another decision still counts against your account.'
+        : standing === 'suspended'
+          ? 'Other decisions still keep your account suspended.'
+          : 'Other decisions still keep your account banned.';
+  return `Your appeal about the letter you sent on ${sentOn} was accepted. The violation was withdrawn, and your account standing was recalculated. ${now}`;
+}
+
+function sentOnLabel(releasedAt: number, zone: string | null): string {
+  try {
+    return formatDateTime(releasedAt, zone ?? 'UTC');
+  } catch {
+    return formatDateTime(releasedAt, 'UTC');
+  }
+}
+
 // Accepting an appeal revokes the violation (it stops counting at once, which is what lifts an
 // unjustified suspension or ban) and restores the letter to reads; rejecting it is final. The
 // appellant is told either way, once.
@@ -483,6 +512,14 @@ export function decideAppeal(
       throw conflict('already_decided', 'This appeal was decided meanwhile.');
     const v = tx.select().from(t.violations).where(eq(t.violations.id, a.violationId)).get()!;
     const bottle = tx.select().from(t.bottles).where(eq(t.bottles.id, v.bottleId)).get()!;
+    // The letter is named by when it was sent, in the appellant's own zone: never by who it was
+    // written to, which for a delivered letter would point at the reporter.
+    const zone = tx
+      .select({ z: t.users.timeZone })
+      .from(t.users)
+      .where(eq(t.users.id, a.userId))
+      .get()?.z;
+    const sentOn = sentOnLabel(bottle.releasedAt, zone ?? null);
     writeAudit(
       tx,
       {
@@ -519,13 +556,7 @@ export function decideAppeal(
         kind: 'moderation_appeal_accepted',
         bottleId: null,
         dedupeKey: `appeal_accepted:${a.id}`,
-        message: `Your appeal about the letter to ${bottle.recipientNameSnapshot} was accepted. The violation was withdrawn${
-          standing.standing === 'good'
-            ? ' and your account is in good standing again.'
-            : standing.standing === 'suspended'
-              ? '.'
-              : ' and your account is no longer suspended or banned for it.'
-        }`,
+        message: appealResultMessage('accepted', sentOn, standing.standing),
         now,
       });
     } else {
@@ -535,7 +566,7 @@ export function decideAppeal(
         kind: 'moderation_appeal_rejected',
         bottleId: null,
         dedupeKey: `appeal_rejected:${a.id}`,
-        message: `Your appeal about the letter to ${bottle.recipientNameSnapshot} was reviewed and rejected. The decision stands and cannot be appealed again.`,
+        message: appealResultMessage('rejected', sentOn, null),
         now,
       });
     }

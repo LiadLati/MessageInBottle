@@ -312,6 +312,14 @@ and the new `risk_decisions` table (one row per bottle per storm night, unique o
   (`GET /api/shore`), refreshed on each visit: it lights only while a bottle is waiting to be
   opened, and clears when that bottle is opened — never by reading the inbox. The top strip
   remains an *arrival* banner and reacts to unread `received_arrived` events only.
+- **Appeal results.** Deciding an appeal writes one `moderation_appeal_accepted` or
+  `moderation_appeal_rejected` notice (dedupe key per appeal). The inbox stays closed to a
+  suspended or banned account (product decision 14), so the result also has its own route:
+  `GET /api/moderation/appeal-results` returns the unread appeal-result notices whatever the
+  standing, and the web shows the oldest as a one-time popup, in the app or over the standing
+  screen. `POST /api/moderation/appeal-results/:id/seen` marks that one notice read, which is
+  the same state opening the inbox writes, so the popup, the badge and the history never
+  disagree, and nothing is deleted.
 
 ## Legal documents, consent, and account deletion
 

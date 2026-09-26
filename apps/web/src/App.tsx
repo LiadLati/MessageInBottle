@@ -8,6 +8,7 @@ import { BlockedUsersDialog } from './components/BlockedUsersDialog.js';
 import { ProfileSheet } from './components/ProfileSheet.js';
 import { useAsync } from './lib/useAsync.js';
 import { useTopSlot } from './lib/useTopSlot.js';
+import { AppealResultNotice } from './components/AppealResultNotice.js';
 import { DecisionNotice } from './components/DecisionNotice.js';
 import { AdminScreen, type AdminSection } from './screens/AdminScreen.js';
 import { StandingScreen } from './screens/StandingScreen.js';
@@ -144,6 +145,14 @@ function Shell() {
     20_000,
   );
   const reloadStanding = standing.reload;
+  // Appeal results not yet seen, for the one-time popup (manual review round 1). Polled like the
+  // inbox, and read whatever the standing, so a suspended or banned account learns the result.
+  const appealResults = useAsync(
+    () => (user ? api.appealResults() : Promise.resolve(null)),
+    [user?.id, epoch],
+    20_000,
+  );
+  const reloadAppealResults = appealResults.reload;
   const [standingOpen, setStandingOpen] = useState(false);
   const [admin, setAdmin] = useState<AdminSection | null>(null);
 
@@ -213,7 +222,12 @@ function Shell() {
   // Opening the inbox is what marks its notifications read; the count follows.
   const openInbox = () => {
     setInboxOpen(true);
-    if (unreadCount > 0) void api.markNotificationsRead().then(() => reloadNotifications());
+    if (unreadCount > 0)
+      void api.markNotificationsRead().then(() => {
+        void reloadNotifications();
+        // Reading the inbox answers an appeal-result popup too: it is the same entry.
+        void reloadAppealResults();
+      });
   };
   const closeInbox = () => setInboxOpen(false);
 
@@ -265,6 +279,17 @@ function Shell() {
   // The decision notice still owed an answer. It is server state, not client state: there is
   // no local "dismissed" flag, because closing or reloading must not resolve it.
   const pendingDecision = standing.data?.pendingDecision ?? null;
+  // One appeal result at a time, after any decision notice still owed an answer.
+  const appealResult = pendingDecision ? null : (appealResults.data?.results[0] ?? null);
+  const appealResultDialog = appealResult ? (
+    <AppealResultNotice
+      key={appealResult.id}
+      result={appealResult}
+      onDismissed={async () => {
+        await Promise.all([reloadAppealResults(), reloadNotifications(), reloadStanding()]);
+      }}
+    />
+  ) : null;
 
   const deleteDialog = (
     <DeleteAccountDialog
@@ -298,6 +323,7 @@ function Shell() {
             onResolved={reloadStanding}
           />
         ) : null}
+        {appealResultDialog}
         {deletingAccount ? deleteDialog : null}
       </main>
     );
@@ -457,6 +483,7 @@ function Shell() {
           onResolved={reloadStanding}
         />
       ) : null}
+      {immersive ? null : appealResultDialog}
       {deletingAccount ? deleteDialog : null}
       {policyDialog}
       {immersive ? null : (

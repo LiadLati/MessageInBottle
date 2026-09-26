@@ -19,12 +19,7 @@ import type { AppContext } from './context.js';
 import { plannedArrivalAt } from '../domain/routing.js';
 import { commitArrivalIfDue, runJourneyTick } from './journey.js';
 import { listNotifications } from './notifications.js';
-import {
-  closeReading,
-  commitLoss,
-  listPublicOcean,
-  openPublicBottle,
-} from './outcomes.js';
+import { closeReading, commitLoss, listPublicOcean, openPublicBottle } from './outcomes.js';
 import { setAccountTimeZone } from './auth.js';
 import { heldReservations, releaseBottle } from './release.js';
 import {

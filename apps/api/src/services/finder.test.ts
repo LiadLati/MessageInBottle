@@ -51,8 +51,7 @@ describe('finding a bottle adrift (product decision 12)', () => {
     openPublicBottle(w.ctx, cy, id);
     closeReading(w.ctx, cy, id);
     expect(
-      w.db.select().from(t.publicOpenings).where(eq(t.publicOpenings.bottleId, id)).get()
-        ?.closedAt,
+      w.db.select().from(t.publicOpenings).where(eq(t.publicOpenings.bottleId, id)).get()?.closedAt,
     ).not.toBeNull();
     expect(() => blockFoundWriter(w.ctx, cy.id, id)).toThrow(AppError);
 
