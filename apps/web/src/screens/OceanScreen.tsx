@@ -1,8 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from 'react';
-import type { PublicBottleDto, SentBottleSummaryDto } from '@mib/shared';
+import {
+  formatClock,
+  formatDateOnly,
+  type AdminPendingCountsDto,
+  type PublicBottleDto,
+  type SentBottleSummaryDto,
+} from '@mib/shared';
 import { ApiError, api } from '../api/client.js';
+import { AdminControl } from '../components/AdminControl.js';
 import { LetterModal } from '../components/LetterModal.js';
-import { ReadingResume } from '../components/ReadingResume.js';
 import { useLetterReader } from '../state/letterReader.js';
 import { OceanMap, SeaViewer } from '../components/lazy.js';
 import type { HarborLabel, MapAnchor, MapRoute, OceanMapHandle } from '../components/OceanMap.js';
@@ -15,7 +21,7 @@ import {
   StatusChip,
 } from '../components/ui.js';
 import { Icon } from '../design/Icon.js';
-import { formatDate, formatDuration, formatTime } from '../lib/format.js';
+import { formatDate, formatDuration } from '../lib/format.js';
 import { useAsync } from '../lib/useAsync.js';
 import { isWebGLAvailable } from '../lib/webgl.js';
 import { oceanWeatherMap, type BottleWeather } from '../lib/oceanWeather.js';
@@ -39,6 +45,8 @@ interface Props {
   onOpenInbox?: () => void;
   // Present only for an admin account: opens the admin menu (Reports, Appeals).
   onOpenAdmin?: ((section: 'reports' | 'appeals') => void) | undefined;
+  // The administrator's undecided reports and appeals, for the badge on the admin control.
+  adminPending?: AdminPendingCountsDto | null;
   onOpenPassport: (id: string) => void;
   onWrite: () => void;
   onOpenProfile: () => void;
@@ -113,7 +121,26 @@ function onPrivateMap(b: SentBottleSummaryDto): boolean {
   return b.visibility?.acknowledgedAt == null;
 }
 
+// "26 Sep 2026 · 19:54", in the given zone; UTC if the zone cannot be used.
+export function mapClockLabel(ms: number, timeZone: string): string {
+  try {
+    return `${formatDateOnly(ms, timeZone)} · ${formatClock(ms, timeZone)}`;
+  } catch {
+    return `${formatDateOnly(ms, 'UTC')} · ${formatClock(ms, 'UTC')} UTC`;
+  }
+}
+
+function mapClockTime(ms: number, timeZone: string): string {
+  try {
+    return formatClock(ms, timeZone);
+  } catch {
+    return `${formatClock(ms, 'UTC')} UTC`;
+  }
+}
+
 // S1 · Ocean — private journeys over the real world map, and the public ocean beside it.
+const NO_WEATHER: Record<string, BottleWeather> = {};
+
 export function OceanScreen({
   focusId = null,
   focusPublicId = null,
@@ -121,12 +148,13 @@ export function OceanScreen({
   unread = 0,
   onOpenInbox,
   onOpenAdmin,
+  adminPending = null,
   onOpenPassport,
   onWrite,
   onOpenProfile,
 }: Props) {
   const { user } = useSession();
-  const { phase, oceanStormOverride, storm, stormUntil } = useWeather();
+  const { phase, oceanStormOverride, storm, stormUntil, nowMs, timeZone } = useWeather();
   const [mode, setMode] = useState<OceanMode>(focusPublicId ? 'public' : 'private');
   const bottles = useAsync(() => api.sentBottles(), [], POLL_MS);
   const chart = useAsync(() => api.chart(), []);
@@ -219,7 +247,13 @@ export function OceanScreen({
   const [viewing, setViewing] = useState<string | null>(null);
   const showList = view.kind === 'clean' && !viewing && (listOpen || !mapDrawable);
   const viewingBottle = viewing ? (list.find((b) => b.id === viewing) ?? null) : null;
-  const focusBottle = current ?? routeBottles[0] ?? null;
+  // The journey whose harbours are named: the selected one, or — on the private map with
+  // nothing selected — the only journey at sea, so its destination is labelled too.
+  const atSea = list.filter((b) => !b.outcome);
+  const focusBottle =
+    current ??
+    routeBottles[0] ??
+    (!isPublic && view.kind === 'clean' && atSea.length === 1 ? atSea[0]! : null);
   const shoreById = useMemo(
     () => new Map((chart.data?.shores ?? []).map((s) => [s.id, s])),
     [chart.data],
@@ -234,9 +268,9 @@ export function OceanScreen({
     return out;
   }, [focusBottle, shoreById]);
 
-  // Harbour labels: the signed-in user's own harbour always; the selected bottle's destination
-  // while it is selected on the private map. The same shore for both is one label. The public
-  // ocean never names a destination.
+  // Harbour labels: the signed-in user's own harbour always; the destination of the journey in
+  // focus on the private map. The same shore for both is one label. The public ocean never
+  // names a destination.
   const ownShoreId = user?.shoreId ?? null;
   const harbors = useMemo<HarborLabel[]>(() => {
     const own = ownShoreId ? shoreById.get(ownShoreId) : null;
@@ -372,19 +406,11 @@ export function OceanScreen({
     refit('all');
   };
 
-  const synced = list[0]?.serverTime ?? null;
+  // Below the title, on both maps: the date and time now, from the shared server clock (in
+  // development, the simulated one), shown in the account's zone. It follows every clock jump
+  // and re-reads at least every half minute (manual review round 1, follow-up item 4).
+  const nowLabel = mapClockLabel(nowMs, timeZone);
   const atSeaCount = list.filter((b) => b.state === 'at_sea').length;
-  const subline = isPublic
-    ? publicOcean.loading && !publicOcean.data
-      ? 'Charting…'
-      : publicList.length === 0
-        ? 'Nothing adrift right now'
-        : `${publicList.length} ${publicList.length === 1 ? 'bottle' : 'bottles'} adrift · tap one`
-    : bottles.loading && !bottles.data
-      ? 'Charting…'
-      : list.length === 0
-        ? 'Nothing at sea'
-        : `${synced ? `Synced ${formatTime(synced)} · ` : ''}${list.length === 1 ? 'tap the bottle' : 'tap a bottle or route'}`;
 
   const loadError = isPublic ? publicOcean.error : (bottles.error ?? chart.error);
 
@@ -404,17 +430,21 @@ export function OceanScreen({
           selectedRouteIds={selectedRouteIds}
           onSelectRoute={selectFromMap}
           phase={phase}
+          // The storm cloud rides above each bottle still at sea while the account's storm is
+          // showing (it is drawn only at night). Never on the public ocean.
+          weather={isPublic ? NO_WEATHER : weather}
           paused={viewing !== null}
           fitKey={fitKey}
         />
-        {/* One storm for the whole map: the account's weather, not a storm per bottle. */}
+        {/* The account's one storm is drawn as the cloud above each affected bottle (the map's
+            markers) and said in words here. Nothing is laid over the map itself: it stays clear
+            and readable (manual review round 1, follow-up). */}
         {mapStorm && !isPublic ? (
           <div className="map-storm" role="status" aria-live="polite">
-            <span className="map-storm-sky" aria-hidden />
             <span className="map-storm-label">
               <Icon name="storm" size={14} />
               {stormUntil
-                ? `A storm is passing over your sea until ${formatTime(new Date(stormUntil).toISOString())}`
+                ? `A storm is passing over your sea until ${mapClockTime(stormUntil, timeZone)}`
                 : 'A storm is passing over your sea'}
             </span>
           </div>
@@ -427,7 +457,9 @@ export function OceanScreen({
           <h1 className="t-title">
             {isPublic ? 'Public ocean' : atSeaCount > 0 ? 'At sea' : 'Ocean'}
           </h1>
-          <p className="t-meta">{subline}</p>
+          <p className="t-meta map-clock">
+            <time dateTime={new Date(nowMs).toISOString()}>{nowLabel}</time>
+          </p>
         </div>
         <div className="header-actions">
           <button
@@ -453,7 +485,7 @@ export function OceanScreen({
               ) : null}
             </button>
           ) : null}
-          {onOpenAdmin ? <AdminControl onOpen={onOpenAdmin} /> : null}
+          {onOpenAdmin ? <AdminControl onOpen={onOpenAdmin} pending={adminPending} /> : null}
           <button
             type="button"
             className="avatar"
@@ -705,16 +737,10 @@ export function OceanScreen({
           // A finder may report the letter during their one reading; the sender re-reading
           // their own may not.
           reportable={reading.letter.bottle.source === 'public'}
-          onClose={reader.dismiss}
+          onClose={reader.close}
           onFinish={reader.finish}
         />
       ) : null}
-      <ReadingResume
-        paused={!reading && reader.paused !== null}
-        ended={!reading && reader.ended}
-        onResume={reader.resume}
-        onForget={reader.forgetEnded}
-      />
       {viewing ? (
         <SeaViewer
           bottle={viewingBottle}
@@ -898,15 +924,15 @@ function PublicCard({
       </div>
       <p className="card-note">
         {bottle.mine
-          ? 'Swept off course in a storm. Its delivery is over; it drifts here for anyone to see.'
+          ? 'Swept off course in a storm. Its delivery is over, and it drifts here for anyone to see.'
           : 'Swept off course in a storm. It drifts here, sealed.'}
       </p>
       {onOpen ? (
         // Said plainly before the action, because it cannot be undone and it is the one thing
         // that changes for everybody else looking at this map.
         <p className="card-note warn">
-          Opening this bottle will remove it from the public map. You can read the letter once, for
-          up to 15 minutes; after that, or once you finish reading, it cannot be opened again.
+          Opening this bottle will remove it from the public map. You can read the letter once: when
+          you finish reading, leave or reload, it cannot be opened again.
         </p>
       ) : null}
       <div className="action-row" style={{ marginTop: 14 }}>
@@ -970,104 +996,5 @@ function UnavailableCard({ why, onClose }: { why: string; onClose: () => void })
             : 'Its letter belongs to whoever found it. The public ocean has other bottles.'}
       </p>
     </div>
-  );
-}
-
-// The admin icon beside the notification icon: drawn only for an admin account (the server
-// refuses every admin request from anyone else). Its menu starts with Reports and Appeals.
-// A menu button that behaves like one (audit A11Y-007): opening focuses the first item, arrow
-// keys move between items, Escape and a click elsewhere close it and return focus.
-function AdminControl({ onOpen }: { onOpen: (section: 'reports' | 'appeals') => void }) {
-  const [open, setOpen] = useState(false);
-  const rootRef = useRef<HTMLSpanElement>(null);
-  const triggerRef = useRef<HTMLButtonElement>(null);
-  const menuRef = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    if (!open) return;
-    menuRef.current?.querySelector<HTMLElement>('[role="menuitem"]')?.focus();
-    const onPointer = (e: PointerEvent) => {
-      if (!rootRef.current?.contains(e.target as Node)) setOpen(false);
-    };
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key !== 'Escape') return;
-      e.preventDefault();
-      setOpen(false);
-      triggerRef.current?.focus();
-    };
-    document.addEventListener('pointerdown', onPointer);
-    document.addEventListener('keydown', onKey);
-    return () => {
-      document.removeEventListener('pointerdown', onPointer);
-      document.removeEventListener('keydown', onKey);
-    };
-  }, [open]);
-  const onMenuKey = (e: React.KeyboardEvent) => {
-    const items = [...(menuRef.current?.querySelectorAll<HTMLElement>('[role="menuitem"]') ?? [])];
-    const at = items.indexOf(document.activeElement as HTMLElement);
-    const next =
-      e.key === 'ArrowDown'
-        ? items[(at + 1) % items.length]
-        : e.key === 'ArrowUp'
-          ? items[(at - 1 + items.length) % items.length]
-          : e.key === 'Home'
-            ? items[0]
-            : e.key === 'End'
-              ? items[items.length - 1]
-              : undefined;
-    if (next) {
-      e.preventDefault();
-      next.focus();
-    } else if (e.key === 'Tab') {
-      setOpen(false);
-    }
-  };
-  const choose = (section: 'reports' | 'appeals') => {
-    setOpen(false);
-    onOpen(section);
-  };
-  return (
-    <span className="admin-control" ref={rootRef}>
-      <button
-        ref={triggerRef}
-        type="button"
-        className="glass-control"
-        aria-label="Admin"
-        aria-haspopup="menu"
-        aria-expanded={open}
-        onClick={() => setOpen((o) => !o)}
-      >
-        <Icon name="shield" size={18} />
-      </button>
-      {open ? (
-        <div
-          ref={menuRef}
-          className="glass-panel admin-menu stack"
-          role="menu"
-          aria-label="Admin"
-          onKeyDown={onMenuKey}
-        >
-          <button
-            type="button"
-            role="menuitem"
-            tabIndex={-1}
-            className="btn-ghost"
-            onClick={() => choose('reports')}
-          >
-            <Icon name="report" size={14} />
-            Reports
-          </button>
-          <button
-            type="button"
-            role="menuitem"
-            tabIndex={-1}
-            className="btn-ghost"
-            onClick={() => choose('appeals')}
-          >
-            <Icon name="archive" size={14} />
-            Appeals
-          </button>
-        </div>
-      ) : null}
-    </span>
   );
 }

@@ -9,7 +9,7 @@ import { deleteAccount } from './deletion.js';
 import { commitArrivalIfDue } from './journey.js';
 import { reportLetter } from './moderation.js';
 import { openBottle } from './bottles.js';
-import { commitLoss, listPublicOcean, openPublicBottle, activeReading } from './outcomes.js';
+import { commitLoss, listPublicOcean, openPublicBottle } from './outcomes.js';
 import { releaseBottle } from './release.js';
 import { THIRTY_DAYS_MS, finalityOf, planRetention, RETENTION_DEFAULT } from './retention.js';
 import { backfillDeletedAccounts } from '../tools/deletion-backfill.js';
@@ -58,10 +58,13 @@ describe('deleting a sender withdraws their lost letters (ARCH-002 / SEC-002)', 
     const id = send(w, 'ada', 'bo');
     lose(w, id, 'adrift');
     openPublicBottle(w.ctx, w.user('cy'), id);
-    expect(activeReading(w.ctx, w.user('cy'))).not.toBeNull();
+    const opening = () =>
+      w.db.select().from(t.publicOpenings).where(eq(t.publicOpenings.bottleId, id)).get()!;
+    expect(opening().closedAt).toBeNull();
 
     deleteAccount(w.ctx, w.user('ada').id);
-    expect(activeReading(w.ctx, w.user('cy'))).toBeNull();
+    expect(opening().closedAt).not.toBeNull();
+    expect(() => openPublicBottle(w.ctx, w.user('cy'), id)).toThrow();
   });
 
   it('clears the text of a sunk letter', () => {

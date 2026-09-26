@@ -6,6 +6,7 @@ import { useSession } from '../state/session.js';
 import { Avatar } from './ui.js';
 import { Icon } from '../design/Icon.js';
 import { restoreFocus, useModalKeys } from '../lib/modal.js';
+import { formatDay } from '../lib/format.js';
 
 interface Props {
   shoreName: string | null;
@@ -34,11 +35,11 @@ function acceptanceLine(p: {
     .at(-1);
   if (!latest) return 'You have not accepted a version of these documents yet.';
   const current = p.documents.every((d) => d.acceptedVersion === d.currentVersion);
-  const when = new Date(latest).toLocaleDateString();
+  const when = formatDay(latest);
   const version = p.documents[0]?.acceptedVersion ?? '';
   return current
     ? `Accepted version ${version} on ${when}.${p.status === 'draft' ? ' The documents are still a working draft.' : ''}`
-    : `You accepted version ${version} on ${when}; a newer version is waiting for you.`;
+    : `You accepted version ${version} on ${when}. A newer version is waiting for you.`;
 }
 
 // The header avatar opens this instead of a permanent "signed in as" row (IA note on S1).

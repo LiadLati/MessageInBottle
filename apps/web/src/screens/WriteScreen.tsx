@@ -225,7 +225,7 @@ export function WriteScreen({ onReleased, onChooseShore, onImmersive }: Props) {
             : validation.reason === 'too_long'
               ? 'Too long: trim a little.'
               : validation.reason === 'too_many_bytes'
-                ? 'Too large to store; shorten it.'
+                ? 'Too large to store. Please shorten it.'
                 : validation.reason === 'direction_controls'
                   ? DIRECTION_CONTROLS_MESSAGE
                   : 'Write something first.'}
@@ -390,7 +390,7 @@ function rejectionCopy(rejection: ReleasePreviewResponse['rejection']): string {
       return 'Your friend has not chosen a shore yet.';
     case 'shore_full':
       // Privacy-safe: says nothing about who sent the bottles or how many are yours.
-      return 'This friend’s shore is full right now. Your letter is kept as a draft; try again later.';
+      return 'This friend’s shore is full right now. Your letter is kept as a draft. Try again later.';
     case 'letter_direction_controls':
       return DIRECTION_CONTROLS_MESSAGE;
     case 'route_unavailable':

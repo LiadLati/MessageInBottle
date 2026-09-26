@@ -57,6 +57,8 @@ export interface WeatherState {
   setPhaseOverride: (v: DayPhase | 'auto') => void;
   setOceanStormOverride: (v: WeatherOverride) => void;
   setShoreStormOverride: (v: WeatherOverride) => void;
+  /** Re-read the server's clock and weather now (after a DEV clock change on this device). */
+  resync: () => Promise<void>;
 }
 
 const WeatherContext = createContext<WeatherState | null>(null);
@@ -240,8 +242,9 @@ export function WeatherProvider({ children }: { children: ReactNode }) {
       setPhaseOverride,
       setOceanStormOverride,
       setShoreStormOverride,
+      resync: refresh,
     };
-  }, [instant, timeZone, current, phaseOverride, oceanStormOverride, shoreStormOverride]);
+  }, [instant, timeZone, current, phaseOverride, oceanStormOverride, shoreStormOverride, refresh]);
 
   return <WeatherContext.Provider value={value}>{children}</WeatherContext.Provider>;
 }

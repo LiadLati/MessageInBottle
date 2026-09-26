@@ -20,6 +20,7 @@ export type AuditAction =
   | 'critical_child_safety'
   | 'appeal_reopened'
   | 'urgent_child_safety_review'
+  | 'urgent_threat_review'
   | 'hold_placed'
   | 'hold_released'
   | 'evidence_redacted';

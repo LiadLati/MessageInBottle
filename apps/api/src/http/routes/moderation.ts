@@ -1,7 +1,6 @@
 import { Hono } from 'hono';
 import { clientAddress } from '../client-address.js';
 import { AppealRequestSchema, ReportRequestSchema, WaiveAppealRequestSchema } from '@mib/shared';
-import { tooManyRequests } from '../../lib/errors.js';
 import { RateLimiter, type RateLimitRule } from '../../lib/rate-limit.js';
 import {
   accountStanding,
@@ -14,6 +13,8 @@ import {
 import type { AppEnv } from '../app.js';
 import { requireAuth } from '../middleware/auth.js';
 import { requireGoodStanding } from '../middleware/admin.js';
+import { markAppealResultSeen, unreadAppealResults } from '../../services/notifications.js';
+import { notFound, tooManyRequests } from '../../lib/errors.js';
 import { jsonBody } from '../validate.js';
 
 // Per-address budgets on top of the per-account ones in the moderation service. The account
@@ -55,6 +56,17 @@ export function moderationRoutes(limiter = new RateLimiter()) {
   r.post('/appeals/waive', jsonBody(WaiveAppealRequestSchema), (c) =>
     c.json(waiveAppeal(c.get('ctx'), c.get('user'), c.req.valid('json').violationId)),
   );
+  // An appeal's result reaches its author as a one-time popup, even while suspended or banned
+  // (manual review round 1). Dismissing it marks that notification read and deletes nothing.
+  r.get('/appeal-results', (c) =>
+    c.json({ results: unreadAppealResults(c.get('ctx'), c.get('user').id) }),
+  );
+  r.post('/appeal-results/:id/seen', (c) => {
+    if (!markAppealResultSeen(c.get('ctx'), c.get('user').id, c.req.param('id'))) {
+      throw notFound('notification');
+    }
+    return c.body(null, 204);
+  });
   r.post('/appeals', jsonBody(AppealRequestSchema), (c) => {
     enforce(`appeal:addr:${clientKey(c)}`, APPEALS_PER_ADDRESS);
     return c.json(submitAppeal(c.get('ctx'), c.get('user'), c.req.valid('json')), 201);

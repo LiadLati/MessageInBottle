@@ -141,6 +141,30 @@ would make a published document false:
 - **Browser storage.** The Privacy Policy lists exactly three things, and
   `apps/web/src/storage.test.ts` walks the source to prove there is no fourth.
 
+## Correction of 2026-09-26 (still version 1.1)
+
+The Terms of Use said a finder's reading "can be resumed for up to 15 minutes if it is
+interrupted". The product decision changed to one reading, once, with no resumable period, and
+the sentence now says so. Version 1.1 has not been published to any real user (there is no
+production deployment yet), so it was corrected in place rather than superseded, as with the
+earlier Privacy Policy correction; once a version has been published, a change like this needs a
+new version. The Privacy Policy and Child Safety Standards made no timing promise about a
+finder's reading and needed no change.
+
+In the same round, sentences joined with a semicolon were split or rejoined with a comma across
+all four documents and the account-deletion page, whose list items now read as sentences. Two
+semicolons remain, each separating the items of a list whose items already contain commas (the
+security records and what remains after deletion, both in the Privacy Policy). The wording also
+now says that a possible threat, not only a possible child-safety issue, is marked urgent for a
+reviewer, matching the review worker. No right, obligation or practice changed.
+
+Also in the same round, the Terms of Use and Community Rules said that unblocking restores no
+friendship. The owner decided that unblocking lifts the block and nothing else: a friendship the
+block only hid is visible again, while no letter comes back and no new friendship is created.
+The two sentences now say so, matching the code. This one does change a practice, so it is
+recorded here explicitly. Like the other corrections, it is made in place because version 1.1 has
+not been published to any real user.
+
 ## Releasing a new version
 
 1. Edit the documents in `packages/shared/src/policies.ts`.

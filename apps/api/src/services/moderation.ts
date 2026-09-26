@@ -1,5 +1,5 @@
 import { and, asc, eq, gte, isNull } from 'drizzle-orm';
-import { APPEAL_WINDOW_MS } from '@mib/shared';
+import { APPEAL_WINDOW_MS, formatDateTime } from '@mib/shared';
 import type {
   AccountStandingDto,
   ReportReason,
@@ -433,7 +433,7 @@ export function waiveAppeal(
     if (appeal)
       throw conflict(
         'already_appealed',
-        'This decision has already been appealed; the appeal cannot be withdrawn here.',
+        'This decision has already been appealed. The appeal cannot be withdrawn here.',
       );
     const first = tx
       .update(t.violations)
@@ -511,7 +511,7 @@ export function submitAppeal(
       throw conflict(
         'already_appealed',
         existing.status === 'rejected'
-          ? 'This decision was appealed and the appeal was rejected; it cannot be appealed again.'
+          ? 'This decision was appealed and the appeal was rejected. It cannot be appealed again.'
           : 'This violation has already been appealed.',
       );
     }
@@ -548,27 +548,22 @@ export function submitAppeal(
 
 // ---------- the sender's notifications ----------
 
-// A person reads "until 30 September 2026, 01:15 CEST" in their own account zone, not an RFC
-// 1123 UTC string (audit FE-022). An account without a usable zone is told the zone is UTC.
+// A person reads "until 30 Sep 2026, 01:15 CEST" in their own account zone, in the one English
+// style every SeaYou date uses (manual review round 1), not an RFC 1123 UTC string (audit FE-022).
+// An account without a usable zone is told the zone is UTC.
 export function suspensionEnd(untilMs: number, timeZone: string | null): string {
-  const format = (zone: string) =>
-    new Intl.DateTimeFormat('en-GB', {
-      dateStyle: 'long',
-      timeStyle: 'short',
-      timeZone: zone,
-    }).format(new Date(untilMs));
   if (timeZone) {
     try {
       const zoneName =
         new Intl.DateTimeFormat('en-GB', { timeZone, timeZoneName: 'short' })
           .formatToParts(new Date(untilMs))
           .find((p) => p.type === 'timeZoneName')?.value ?? timeZone;
-      return `${format(timeZone)} ${zoneName}`;
+      return `${formatDateTime(untilMs, timeZone)} ${zoneName}`;
     } catch {
       /* an unknown zone falls through to UTC */
     }
   }
-  return `${format('UTC')} UTC`;
+  return `${formatDateTime(untilMs, 'UTC')} UTC`;
 }
 
 function accountZone(tx: DbOrTx, userId: string): string | null {

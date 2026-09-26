@@ -191,7 +191,7 @@ Proposed: mutual friend-request approval, exact username or invitation-link disc
 
 Check eligibility at release, rescue, and arrival. A blocked sender must never bypass the block through a stranded bottle or public lookup.
 
-**Unblock — decided (product decision 10):** Settings → Blocked users lists only the blocks a person placed; Unblock asks for confirmation. It permits future interaction and public-ocean encounters, restores no removed, cancelled or hidden letter, restores no friendship (a new request is needed) and reveals nothing about the blocked period. A finder may block the anonymous writer during the one reading; that entry names the bottle, never the writer, and is undone by the bottle.
+**Unblock — decided (product decision 10):** Settings → Blocked users lists only the blocks a person placed; Unblock asks for confirmation. It lifts the block: a friendship or pending request the block only hid is visible again (friends are friends again, with no new request), and interaction and public-ocean encounters are possible again. It restores no removed, cancelled or hidden letter, creates no relationship that did not exist before the block, and reveals nothing about the blocked period. (Amended 2026-09-26: unblocking used to delete the friendship, so a new request was needed.) A finder may block the anonymous writer during the one reading; that entry names the bottle, never the writer, and is undone by the bottle.
 
 **Suspended and banned accounts — decided (product decision 14):** hidden from friend lists and recipient choice (friendships kept); no incoming or outgoing bottles; bottles travelling to them are cancelled once with capacity released and the sender told only “Delivery unavailable”; no arrival notice reaches them. Bottles they sent that are still travelling when the restriction begins are cancelled the same way (their recipients are told nothing), and their adrift bottles still listed unopened leave the public ocean; storm midpoints and arrivals already due are settled first, and letters already delivered or opened stay as they are. Nothing is restored when a suspension ends or an appeal is accepted (amended 2026-09-26, audit ARCH-R-002). A locked standing screen (reason, end time, countdown, ban warning) permits only standing, a timely appeal, Support, deletion and sign-out, and the account restores itself when the suspension ends. A ban shows the same shell with no countdown and no inbox.
 
@@ -246,7 +246,7 @@ Two terminal outcomes are implemented end to end — **adrift** (the bottle is s
 
 **Opening a bottle found adrift (added 2026-09-19).** Any signed-in user who is not the sender may open one bottle they find, after the card has told them that opening removes it from the public map. The opening is a single server-owned, atomic action: it grants that account access to the letter and withdraws the bottle from the public map for everyone, with the bottle id as the primary key of the opening record so exactly one of two simultaneous attempts wins; the loser is told it is no longer adrift and is shown nothing of its content. It is idempotent for the finder. The letter is never exposed by the public map API or its information card — only by the opening itself. A found letter is kept in the finder's own received archive and carries **no sender, origin shore or destination**: sender attribution in public discovery is still open (D03). The journey outcome does not change: the bottle remains lost, the sender keeps their letter, passport and Lost entry and may read their own letter at any time without claiming it, and the intended recipient is never delivered to afterwards. Rescue, re-release, further travel and transfer of ownership remain out of scope.
 
-**One-time reading by the finder (amended 2026-09-19, replaces the finder archive above).** The sender's lost letter appears only in the sender's own Letters → Lost. A finder is told before acting that opening removes the bottle from the public map and that the letter cannot be reopened once closed; opening then atomically withdraws the bottle and opens the letter for one reading. The letter is never added to the finder's Received list or any permanent archive. The reading stays available during the active session and may be recovered after a network interruption, a refresh or closing the reader (server-enforced, 15 minutes from opening, bound to that finder and that opening). Closing the reader, a stray tap outside it or Escape only hides it; an explicit, confirmed “Finish reading” ends access immediately (amended 2026-09-26, audit FE-R-002). The one-time response is not cacheable and the letter text is never kept in durable client storage. Afterwards no finder endpoint, old link or Letters page returns the letter, while the opening event stays in the journey history. The sender's access is unlimited and never claims the bottle or alters its deadline. An opened bottle never reaches the intended recipient. Openings recorded before this rule keep their history but grant no further reads. This is an in-app rule; it makes no claim about screenshots.
+**One-time reading by the finder (amended 2026-09-19, replaces the finder archive above).** The sender's lost letter appears only in the sender's own Letters → Lost. A finder is told before acting that opening removes the bottle from the public map and that the letter cannot be reopened once closed; opening then atomically withdraws the bottle and opens the letter for one reading. The letter is never added to the finder's Received list or any permanent archive. The letter is served once, in the opening response, and never again: there is no resumable window, and a refresh, leaving the app or reopening SeaYou does not restore it (amended 2026-09-26, manual review round 1; replaces the earlier 15-minute recovery). The reading ends only through an explicit, confirmed “Finish reading”: Close, a stray tap outside the reader and Escape ask first rather than ending it. The one-time response is not cacheable and the letter text is never kept in durable client storage. Afterwards no finder endpoint, old link or Letters page returns the letter, while the opening event stays in the journey history. The sender's access is unlimited and never claims the bottle or alters its deadline. An opened bottle never reaches the intended recipient. Openings recorded before this rule keep their history but grant no further reads. This is an in-app rule; it makes no claim about screenshots.
 
 ### 9.3 Automatic storm outcomes — risk policy version 4 (final, supersedes v1–v3)
 
@@ -314,7 +314,7 @@ Safety removal/redaction is distinct from user editing: immutability must not pr
 
 **Direction controls — decided (product decision 11):** a letter containing the invisible direction-control characters U+202A–U+202E or U+2066–U+2069 is refused (not stripped) with a clear message, on the client and authoritatively on the server. Hebrew, Arabic, English, emoji (including joiners), LRM/RLM/ALM, ZWNJ and punctuation are unaffected. Moderation views still reveal any controls in stored letters.
 
-**Finder — decided, final (product decision 12):** one reading session, resumable for 15 minutes; never added to Received, archive or history; no friendship or access to the writer; reporting and blocking stay available during the session.
+**Finder — decided (product decision 12, amended 2026-09-26):** one reading, once — no resumable period; never added to Received, archive or history; no friendship or access to the writer; reporting and blocking stay available while the reading is open; finishing it is explicit and confirmed.
 
 ### 10.2 Visual aging
 
@@ -437,6 +437,7 @@ Claude Design should provide screen layouts, storyboards, assets/layers, anchors
 | Unopened interval | Sender | Recheck unopened status at dispatch |
 | Arrival/read receipt | Sender | Arrival: the existing *reached its destination* notice. A notification about whether the recipient opened the letter was considered and rejected (2026-09-19). |
 | Delivery invalidated | Sender | Generic message; do not expose a block |
+| Appeal result | Appellant | One persisted notice for an accepted or a rejected appeal, plus a one-time popup on the next visit or sign-in, also while suspended or banned. Accepted: the violation was withdrawn and standing recalculated. Rejected: the decision stands and is final within SeaYou. The letter is named by its send date, never by its recipient or reporter. Dismissing the popup marks that notice read and deletes nothing. (Decided 2026-09-26, manual review round 1.) |
 
 **Lifetime (product decision 6):** user-visible notifications are never deleted automatically. Each keeps its type, related item, time and read state; marking read only clears the badge, and the history is paginated. Operational data — delivery attempts, retries, worker state, provider errors — may be pruned after 90 days. Cleanup never deletes letters or journeys. A full shore produces one `shore_full` notice per episode.
 
@@ -499,12 +500,14 @@ a case yields at most one violation. Report and Block are separate actions; bloc
 correspondence in both directions and also prevents the two accounts encountering each other
 through public-ocean interactions.
 
-A locally run model reviews each case and returns a validated accept / reject / uncertain with
-its reasoning, a translation beside the original, and, when unsure, why. It sees only reported
+A locally run model reviews each case and labels the letter (violation / no violation /
+uncertain), which is shown as a recommendation to uphold or reject the report; a "no violation"
+that is not confident, states a doubt, or concerns a letter that reads as a threat is shown as
+uncertain instead (decided 2026-09-26). It gives its reasoning, a translation beside the original, and, when unsure, why. It sees only reported
 letters and holds no database or administrative power: its verdict is a recommendation and it
 never decides, sanctions or bans (`MIB_AI_AUTO_DECIDE` was removed; `true` stops the API). If it
-flags a possible child-safety issue the case is marked urgent and listed first with the
-recommendation, reasoning, uncertainty and translation; a case is visible to administrators
+flags a possible child-safety issue, or the letter may contain a credible threat, the case is
+marked urgent and listed first with the recommendation, reasoning, uncertainty and translation; a case is visible to administrators
 before the model answers. It has no path at all to the critical child-safety action. If
 an external provider is ever used, the Privacy Policy and the store Data Safety declaration are
 updated before any report content is sent to it.

@@ -1,17 +1,18 @@
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, render, renderHook, screen } from '@testing-library/react';
+import { StrictMode } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { OpenedLetterDto } from '@mib/shared';
 import type * as ClientModule from '../api/client.js';
 
-// Audit FE-R-001 and FE-R-002, at the component level: the report form lives in a panel that
-// scrolls inside the reader with its actions pinned, and a finder's one-time reading ends only
-// on an explicit, confirmed "Finish reading" — never on a backdrop tap or Escape.
+// A finder's one reading, at the component level (product decision 12, amended 2026-09-26): the
+// letter is served once and can never be reopened, so it ends only through an explicit, confirmed
+// "Finish reading" — Close, a stray backdrop tap and Escape all ask first. There is no resume.
+// Also audit FE-R-001: the report form lives in a panel that scrolls inside the reader.
 
 const api = vi.hoisted(() => ({
   reportLetter: vi.fn(),
   blockFoundWriter: vi.fn(),
-  activeReading: vi.fn(),
   closeReading: vi.fn(),
 }));
 vi.mock('../api/client.js', async (actual) => ({
@@ -19,9 +20,7 @@ vi.mock('../api/client.js', async (actual) => ({
   api,
 }));
 
-import { StrictMode } from 'react';
 import { focusableIn } from '../lib/focusTrap.js';
-import { ReadingResume } from './ReadingResume.js';
 import { useLetterReader } from '../state/letterReader.js';
 import { LetterModal } from './LetterModal.js';
 
@@ -39,15 +38,11 @@ const found = (id = 'btl_found'): OpenedLetterDto => ({
   },
   letter: { text: 'Dear stranger, the tide was kind today.', font: 'print', characters: 39 },
   aging: { yellowing: 0.2, wear: 0.1, tears: [], stains: [] },
-  readingExpiresAt: '2026-09-22T10:15:00.000Z',
 });
 
 beforeEach(() => {
-  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
-  // Ten minutes into the found letter's fifteen-minute reading.
-  vi.setSystemTime(Date.parse('2026-09-22T10:05:00.000Z'));
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
   api.closeReading.mockResolvedValue(undefined);
-  api.activeReading.mockResolvedValue({ reading: null });
 });
 afterEach(() => {
   cleanup();
@@ -71,62 +66,71 @@ function reader(props: Partial<Parameters<typeof LetterModal>[0]> = {}) {
   );
   // Closing animates, then calls back.
   const settle = () => act(() => void vi.advanceTimersByTime(400));
-  return { onClose, onFinish, settle, dialog: screen.getByRole('dialog') };
+  const confirmation = () => screen.queryByRole('group', { name: 'Finish reading' });
+  return { onClose, onFinish, settle, confirmation, dialog: screen.getByRole('dialog') };
 }
 
-describe('a one-time reading is not ended by accident (FE-R-002)', () => {
-  it('a backdrop tap only dismisses the reader', () => {
-    const { onClose, onFinish, settle } = reader();
-    fireEvent.click(document.querySelector('.letter-modal-backdrop')!);
-    settle();
-    expect(onClose).toHaveBeenCalledTimes(1);
-    expect(onFinish).not.toHaveBeenCalled();
-  });
+describe('a one-time reading is never ended by accident', () => {
+  for (const [how, act_] of [
+    [
+      'a stray backdrop tap',
+      () => fireEvent.click(document.querySelector('.letter-modal-backdrop')!),
+    ],
+    ['Escape', () => fireEvent.keyDown(document, { key: 'Escape' })],
+    ['the Close button', () => fireEvent.click(screen.getByRole('button', { name: /^Close/ }))],
+  ] as const) {
+    it(`${how} asks to finish instead of closing`, () => {
+      const { onClose, onFinish, settle, confirmation } = reader();
+      act_();
+      settle();
+      expect(confirmation()).not.toBeNull();
+      expect(screen.getByRole('dialog')).toBeTruthy();
+      expect(onClose).not.toHaveBeenCalled();
+      expect(onFinish).not.toHaveBeenCalled();
+    });
+  }
 
-  it('Escape only dismisses the reader', () => {
-    const { onClose, onFinish, settle } = reader();
-    fireEvent.keyDown(document, { key: 'Escape' });
-    settle();
-    expect(onClose).toHaveBeenCalledTimes(1);
-    expect(onFinish).not.toHaveBeenCalled();
-  });
-
-  it('"Finish reading" asks first; "Keep reading" leaves the reading open and returns focus', () => {
-    const { onClose, onFinish, settle } = reader();
-    const finishButton = screen.getByRole('button', { name: 'Finish reading' });
-    fireEvent.click(finishButton);
-    const group = screen.getByRole('group', { name: 'Finish reading' });
-    expect(group.textContent).toMatch(/closes for good/);
+  it('cancelling the warning keeps the letter open and returns focus', () => {
+    const { onClose, onFinish, settle, confirmation } = reader();
+    fireEvent.click(screen.getByRole('button', { name: 'Finish reading' }));
+    expect(confirmation()?.textContent).toMatch(/closes for good/);
     const keep = screen.getByRole('button', { name: 'Keep reading' });
     expect(document.activeElement).toBe(keep);
     fireEvent.click(keep);
     settle();
-    expect(screen.queryByRole('group', { name: 'Finish reading' })).toBeNull();
+    expect(confirmation()).toBeNull();
     expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Finish reading' }));
     expect(onClose).not.toHaveBeenCalled();
     expect(onFinish).not.toHaveBeenCalled();
   });
 
-  it('Escape during the confirmation cancels the confirmation, not the reading', () => {
-    const { onClose, onFinish, settle } = reader();
+  it('Escape during the warning cancels the warning, not the reading', () => {
+    const { onClose, onFinish, settle, confirmation } = reader();
     fireEvent.click(screen.getByRole('button', { name: 'Finish reading' }));
     fireEvent.keyDown(document, { key: 'Escape' });
     settle();
-    expect(screen.queryByRole('group', { name: 'Finish reading' })).toBeNull();
+    expect(confirmation()).toBeNull();
     expect(onClose).not.toHaveBeenCalled();
     expect(onFinish).not.toHaveBeenCalled();
   });
 
-  it('confirming ends the reading', () => {
-    const { onClose, onFinish, settle } = reader();
-    fireEvent.click(screen.getByRole('button', { name: 'Finish reading' }));
-    const group = screen.getByRole('group', { name: 'Finish reading' });
+  it('explicitly confirming finishes the reading', () => {
+    const { onClose, onFinish, settle, confirmation } = reader();
+    fireEvent.keyDown(document, { key: 'Escape' });
     fireEvent.click(
-      [...group.querySelectorAll('button')].find((b) => b.textContent === 'Finish reading')!,
+      [...confirmation()!.querySelectorAll('button')].find(
+        (b) => b.textContent === 'Finish reading',
+      )!,
     );
     settle();
     expect(onFinish).toHaveBeenCalledTimes(1);
     expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it('says plainly that the reading cannot be reopened, and promises no resume', () => {
+    const { dialog } = reader();
+    expect(dialog.textContent).toMatch(/cannot be opened again/);
+    expect(dialog.textContent).not.toMatch(/15 minutes|return to it/i);
   });
 
   it('never names the writer of a found letter', () => {
@@ -135,135 +139,63 @@ describe('a one-time reading is not ended by accident (FE-R-002)', () => {
     expect(dialog.textContent).not.toMatch(/From /);
   });
 
-  it('offers no finish control on an ordinary letter', () => {
-    reader({ oneTime: false, reportable: false });
+  it('closes an ordinary letter at once, with no finish control', () => {
+    const { onClose, settle } = reader({ oneTime: false, reportable: false });
     expect(screen.queryByRole('button', { name: 'Finish reading' })).toBeNull();
+    fireEvent.keyDown(document, { key: 'Escape' });
+    settle();
+    expect(onClose).toHaveBeenCalledTimes(1);
   });
 });
 
-describe('the reader state over the Ocean (FE-R-002)', () => {
-  const setup = async () => {
+describe('the reader state over the Ocean: one reading, no resume', () => {
+  const opened = () => {
     const hook = renderHook(() => useLetterReader());
-    await act(async () => {});
     act(() => hook.result.current.show({ letter: found(), justOpened: true }));
     return hook;
   };
 
-  it('dismissing sends nothing to the server and offers the letter back', async () => {
-    const { result } = await setup();
-    act(() => result.current.dismiss());
-    expect(result.current.reading).toBeNull();
-    expect(result.current.paused?.bottle.id).toBe('btl_found');
-    expect(api.closeReading).not.toHaveBeenCalled();
-  });
-
-  it('returning within the window resumes the same reading from the server', async () => {
-    const { result } = await setup();
-    act(() => result.current.dismiss());
-    api.activeReading.mockResolvedValue({ reading: found() });
-    act(() => result.current.resume());
-    await act(async () => {});
-    expect(result.current.reading?.letter.bottle.id).toBe('btl_found');
-    expect(result.current.paused).toBeNull();
-    expect(api.closeReading).not.toHaveBeenCalled();
-  });
-
-  it('after the window has run out, says the reading has ended', async () => {
-    const { result } = await setup();
-    act(() => result.current.dismiss());
-    api.activeReading.mockResolvedValue({ reading: null });
-    act(() => result.current.resume());
-    await act(async () => {});
-    expect(result.current.reading).toBeNull();
-    expect(result.current.ended).toBe(true);
-  });
-
-  it('a confirmed finish ends the reading on the server at once', async () => {
-    const { result } = await setup();
+  it('a confirmed finish ends the reading on the server, once, even in a StrictMode build', () => {
+    const { result } = renderHook(() => useLetterReader(), { wrapper: StrictMode });
+    act(() => result.current.show({ letter: found(), justOpened: true }));
     act(() => result.current.finish());
-    expect(api.closeReading).toHaveBeenCalledWith('btl_found');
     expect(result.current.reading).toBeNull();
-    expect(result.current.paused).toBeNull();
+    expect(api.closeReading).toHaveBeenCalledTimes(1);
+    expect(api.closeReading).toHaveBeenCalledWith('btl_found');
   });
 
-  it('a reload brings an open reading straight back', async () => {
-    api.activeReading.mockResolvedValue({ reading: found() });
-    const { result } = renderHook(() => useLetterReader());
-    await act(async () => {});
-    expect(result.current.reading?.letter.bottle.id).toBe('btl_found');
-    expect(api.closeReading).not.toHaveBeenCalled();
+  it('offers nothing to return to once the reader is gone', () => {
+    const { result } = opened();
+    act(() => result.current.finish());
+    expect(Object.keys(result.current).sort()).toEqual(['close', 'finish', 'reading', 'show']);
   });
 
-  it('the sender re-reading their own letter leaves nothing to resume', async () => {
-    const { result } = renderHook(() => useLetterReader());
-    await act(async () => {});
+  it('leaving the Ocean with a found letter open ends the reading', () => {
+    const { unmount } = opened();
+    unmount();
+    expect(api.closeReading).toHaveBeenCalledWith('btl_found');
+  });
+
+  it('asks the browser to warn before a reload while a found letter is open', () => {
+    const { result } = opened();
+    const e = new Event('beforeunload', { cancelable: true });
+    window.dispatchEvent(e);
+    expect(e.defaultPrevented).toBe(true);
+    act(() => result.current.finish());
+    const after = new Event('beforeunload', { cancelable: true });
+    window.dispatchEvent(after);
+    expect(after.defaultPrevented).toBe(false);
+  });
+
+  it('the sender re-reading their own letter closes plainly and tells the server nothing', () => {
+    const { result, unmount } = renderHook(() => useLetterReader());
     const own = found('btl_own');
     own.bottle.source = 'shore';
     act(() => result.current.show({ letter: own, justOpened: false }));
-    act(() => result.current.dismiss());
-    expect(result.current.paused).toBeNull();
-    act(() => result.current.finish());
+    act(() => result.current.close());
+    act(() => result.current.show({ letter: own, justOpened: false }));
+    unmount();
     expect(api.closeReading).not.toHaveBeenCalled();
-  });
-});
-
-describe('review follow-ups (FE-R-002)', () => {
-  it('a confirmed finish sends exactly one close, even in a development (StrictMode) build', async () => {
-    const { result } = renderHook(() => useLetterReader(), { wrapper: StrictMode });
-    await act(async () => {});
-    act(() => result.current.show({ letter: found(), justOpened: true }));
-    act(() => result.current.finish());
-    expect(api.closeReading).toHaveBeenCalledTimes(1);
-  });
-
-  it('the offer to return lapses when the reading window ends', async () => {
-    const { result } = renderHook(() => useLetterReader());
-    await act(async () => {});
-    act(() => result.current.show({ letter: found(), justOpened: true }));
-    act(() => result.current.dismiss());
-    expect(result.current.paused).not.toBeNull();
-    // The device thinks the window is over; the server confirms there is no reading any more.
-    api.activeReading.mockResolvedValue({ reading: null });
-    act(() => void vi.advanceTimersByTime(10 * 60 * 1000 + 1));
-    await act(async () => {});
-    expect(result.current.paused).toBeNull();
-    expect(result.current.ended).toBe(true);
-    expect(api.closeReading).not.toHaveBeenCalled();
-  });
-
-  it('a device clock running fast never ends an offer the server still holds', async () => {
-    // The device is an hour ahead of the server: by its clock the window closed long ago.
-    vi.setSystemTime(Date.parse('2026-09-22T11:05:00.000Z'));
-    const { result } = renderHook(() => useLetterReader());
-    await act(async () => {});
-    act(() => result.current.show({ letter: found(), justOpened: true }));
-    api.activeReading.mockResolvedValue({ reading: found() });
-    act(() => result.current.dismiss());
-    act(() => void vi.advanceTimersByTime(0));
-    await act(async () => {});
-    expect(result.current.paused).not.toBeNull();
-    expect(result.current.ended).toBe(false);
-    // Asked again later, and only the server's "no reading" ends it.
-    api.activeReading.mockResolvedValue({ reading: null });
-    act(() => void vi.advanceTimersByTime(30_000));
-    await act(async () => {});
-    expect(result.current.ended).toBe(true);
-  });
-
-  it('the prompt is a live region that is always present, and its Return button takes focus', () => {
-    const onResume = vi.fn();
-    const { rerender } = render(
-      <ReadingResume paused={false} ended={false} onResume={onResume} onForget={vi.fn()} />,
-    );
-    const live = screen.getByRole('status');
-    expect(live.textContent).toBe('');
-    rerender(<ReadingResume paused ended={false} onResume={onResume} onForget={vi.fn()} />);
-    expect(screen.getByRole('status')).toBe(live);
-    expect(live.textContent).toMatch(/still open/);
-    const back = screen.getByRole('button', { name: 'Return to the letter' });
-    expect(document.activeElement).toBe(back);
-    fireEvent.click(back);
-    expect(onResume).toHaveBeenCalledTimes(1);
   });
 });
 

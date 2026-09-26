@@ -8,3 +8,5 @@ export * from './weather.js';
 export * from './policies.js';
 export * from './support.js';
 export * from './timezone.js';
+export * from './dates.js';
+export * from './route-smoothing.js';

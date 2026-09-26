@@ -4,6 +4,7 @@ import {
   DevAdvanceRequestSchema,
   DevArriveRequestSchema,
   DevLoseRequestSchema,
+  DevResetClockRequestSchema,
   type DevStatus,
 } from '@mib/shared';
 import * as t from '../../db/schema.js';
@@ -26,8 +27,9 @@ import { jsonBody } from '../validate.js';
 //   • every route behind it, the outbox included, requires a signed-in account with the
 //     `developer` role *and* dev mode (requireDeveloper), so an anonymous caller gets 401, a
 //     member or an administrator 403, and a developer gets 403 on /api/admin;
-//   • each control still only ever touches the caller's own bottles, and time only ever moves
-//     forward.
+//   • each control still only ever touches the caller's own bottles, and time only moves
+//     forward — except "Return to real time", which puts the shared clock back to the real one
+//     and moves nothing else.
 export function devRoutes() {
   const r = new Hono<AppEnv>();
 
@@ -66,6 +68,18 @@ export function devRoutes() {
     ctx.clock.advance(c.req.valid('json').ms);
     const tick = runJourneyTick(ctx);
     return c.json({ ...status(ctx), tick });
+  });
+
+  // "Return to real time": the shared simulated clock goes back to the server's real time for
+  // every account (it is one clock). It changes the offset and nothing else — no journey,
+  // arrival, loss, storm roll, notification or other settled event is reversed, re-run or
+  // deleted, even when its timestamp is now ahead of the clock; journeys released from here on
+  // start at real time. The body must carry the explicit confirmation.
+  r.post('/reset-clock', jsonBody(DevResetClockRequestSchema), (c) => {
+    const ctx = c.get('ctx');
+    if (!(ctx.clock instanceof DevClock)) throw badRequest('dev_only', 'dev clock is not enabled');
+    ctx.clock.resetToRealTime();
+    return c.json(status(ctx));
   });
 
   // Advances the clock to exactly the planned arrival of one of the caller's bottles and runs

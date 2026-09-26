@@ -157,7 +157,7 @@ describe('the published documents', () => {
     expect(terms).toMatch(/without choosing does not give up anything/i);
     expect(terms).toMatch(/can be appealed once, in the 30 days after the decision/i);
     expect(terms).toMatch(/appeal period has expired, and it is final/i);
-    expect(terms).toMatch(/cannot reopen or reverse it; only your appeal can change it/i);
+    expect(terms).toMatch(/cannot reopen or reverse it\. Only your appeal can change it/i);
     expect(terms).toMatch(/never a decision, sanction or ban/i);
     expect(terms).toMatch(/A suspension ends automatically/i);
     expect(terms).toMatch(/told only that delivery is unavailable/i);
@@ -216,9 +216,12 @@ describe('the published documents', () => {
     expect(terms).toMatch(/harbour you are already at arrives immediately/i);
     expect(terms).toMatch(/adrift in the public ocean/i);
     expect(terms).toMatch(/72 hours/);
-    expect(terms).toMatch(/one reading session/i);
-    expect(terms).toMatch(/15 minutes/);
-    // Product decision 12: one resumable reading, nothing permanent, report and block available.
+    // Product decision 12 (amended 2026-09-26): one reading, once, nothing resumable or permanent,
+    // report and block available while reading.
+    expect(terms).toMatch(/gets one reading, once/i);
+    expect(terms).toMatch(/cannot be reopened, and it is not restored after leaving or reloading/i);
+    for (const doc of POLICY_DOCUMENTS)
+      expect(textOf(doc)).not.toMatch(/15 minutes|resum(e|ed|able)/i);
     expect(terms).toMatch(/never added to their received letters, archive or history/i);
     expect(terms).toMatch(/creates no friendship and no way to contact the writer/i);
     expect(terms).toMatch(/report the letter, or block its writer/i);
@@ -237,10 +240,13 @@ describe('the published documents', () => {
       expect(body).toMatch(/public-ocean/i);
     }
     expect(textOf(TERMS_OF_USE)).toMatch(/cannot reach anything already read, copied/i);
-    // Product decision 10: unblocking restores nothing and reveals nothing.
+    // Product decision 10, amended 2026-09-26: unblocking lifts the block (friends are friends
+    // again), restores no letter, creates no new friendship and reveals nothing.
     for (const body of [textOf(TERMS_OF_USE), textOf(COMMUNITY_RULES)]) {
       expect(body).toMatch(/Settings → Blocked users/);
-      expect(body).toMatch(/no friendship|does not restore a friendship/i);
+      expect(body).toMatch(/friends again/i);
+      expect(body).toMatch(/creates no friendship that did not exist before/i);
+      expect(body).not.toMatch(/does not restore a friendship|and no friendship/i);
       expect(body).toMatch(/reveals nothing/i);
     }
   });
@@ -264,7 +270,7 @@ describe('the published documents', () => {
   it('describe notifications, time zone and deletion as implemented (decisions 6, 7, 9)', () => {
     const privacy = textOf(PRIVACY_POLICY);
     expect(privacy).toMatch(
-      /never deleted automatically; marking them read only clears the badge/i,
+      /never deleted automatically\. Marking them read only clears the badge/i,
     );
     expect(privacy).toMatch(/kept for up to 90 days/i);
     expect(privacy).toMatch(/no location permission and no GPS/i);
@@ -415,5 +421,23 @@ describe('the published documents', () => {
       expect(PolicyAcceptanceRequestSchema.safeParse(rest).success).toBe(false);
     }
     expect(PolicyAcceptanceRequestSchema.safeParse({ ...ok, versions: {} }).success).toBe(false);
+  });
+});
+
+// Manual review round 1, item 7: sentences joined with a semicolon read like generated code.
+// The published text keeps a semicolon only where formal English needs one: separating the
+// items of a list whose items already contain commas.
+describe('semicolons in the published documents', () => {
+  it('appear only between the comma-laden items of a list', () => {
+    const withSemicolons = PUBLISHED_DOCUMENTS.flatMap((d) =>
+      textOf(d)
+        .split(/(?<=[.!?])\s+/)
+        .filter((sentence) => sentence.includes(';'))
+        .map((sentence) => sentence.slice(0, 60)),
+    );
+    expect(withSemicolons).toEqual([
+      'Security and account-control records: a hashed form of your ',
+      'What remains is a minimal record that the account existed, w',
+    ]);
   });
 });

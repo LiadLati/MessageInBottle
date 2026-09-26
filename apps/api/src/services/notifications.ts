@@ -1,4 +1,4 @@
-import { and, desc, eq, isNull, lt, or, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, isNull, lt, or, sql } from 'drizzle-orm';
 import {
   NOTIFICATIONS_PAGE_SIZE,
   type NotificationDto,
@@ -141,4 +141,60 @@ export function markAllRead(ctx: AppContext, userId: string): void {
     .set({ readAt: ctx.clock.now() })
     .where(and(eq(t.notifications.userId, userId), isNull(t.notifications.readAt)))
     .run();
+}
+
+// ---------- appeal results (manual review round 1) ----------
+
+const APPEAL_RESULT_KINDS = ['moderation_appeal_accepted', 'moderation_appeal_rejected'] as const;
+
+// Appeal results the person has not read yet: the one-time popup shows these, on this visit or
+// the next sign-in, and — unlike the inbox — also while the account is suspended or banned,
+// because an appeal result is often exactly what a restricted person is waiting for. It is the
+// same notification row as in the history, so the badge and the popup can never disagree.
+export function unreadAppealResults(ctx: AppContext, userId: string): NotificationDto[] {
+  return ctx.db
+    .select()
+    .from(t.notifications)
+    .where(
+      and(
+        eq(t.notifications.userId, userId),
+        isNull(t.notifications.readAt),
+        inArray(t.notifications.kind, [...APPEAL_RESULT_KINDS]),
+      ),
+    )
+    .orderBy(asc(t.notifications.createdAt))
+    .all()
+    .map((n) => ({
+      id: n.id,
+      type: n.type as NotificationDto['type'],
+      kind: n.kind as NotificationKind,
+      bottleId: n.bottleId,
+      message: n.message,
+      createdAt: new Date(n.createdAt).toISOString(),
+      readAt: null,
+    }));
+}
+
+// Dismissing the popup marks that one notification read — exactly what opening the inbox does
+// to it — and deletes nothing: the entry stays in the history. Only the caller's own appeal
+// results can be marked this way; anything else is not found.
+export function markAppealResultSeen(ctx: AppContext, userId: string, id: string): boolean {
+  const row = ctx.db
+    .select({ id: t.notifications.id })
+    .from(t.notifications)
+    .where(
+      and(
+        eq(t.notifications.id, id),
+        eq(t.notifications.userId, userId),
+        inArray(t.notifications.kind, [...APPEAL_RESULT_KINDS]),
+      ),
+    )
+    .get();
+  if (!row) return false;
+  ctx.db
+    .update(t.notifications)
+    .set({ readAt: ctx.clock.now() })
+    .where(and(eq(t.notifications.id, id), isNull(t.notifications.readAt)))
+    .run();
+  return true;
 }

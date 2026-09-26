@@ -338,8 +338,8 @@ function PassportView({ id, onBack }: { id: string; onBack: () => void }) {
             {b.outcome ? (
               <p className="t-meta">
                 {b.outcome.reason === 'sunk'
-                  ? `It went down in a storm on the way to ${b.recipient.displayName}. The letter never arrived; it is kept here.`
-                  : `It was swept off course in a storm on the way to ${b.recipient.displayName} and now drifts in the public ocean. The letter never arrived; it is kept here.`}
+                  ? `It went down in a storm on the way to ${b.recipient.displayName}. The letter never arrived. It is kept here.`
+                  : `It was swept off course in a storm on the way to ${b.recipient.displayName} and now drifts in the public ocean. The letter never arrived. It is kept here.`}
               </p>
             ) : null}
             {b.state === 'delivered' ? (

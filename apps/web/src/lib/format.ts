@@ -1,3 +1,5 @@
+import { formatClock, formatDateOnly, formatDateTime, sameDay } from '@mib/shared';
+
 export function formatDuration(ms: number): string {
   const totalMinutes = Math.floor(ms / 60_000);
   const days = Math.floor(totalMinutes / (60 * 24));
@@ -8,26 +10,22 @@ export function formatDuration(ms: number): string {
   return `${minutes}m`;
 }
 
+// Every user-facing date goes through the shared English formatter ("26 Oct 2026, 17:35"),
+// never the browser's language (manual review round 1). The device's zone picks the wall clock.
 export function formatDate(iso: string): string {
-  return new Date(iso).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
+  return formatDateTime(iso);
+}
+
+export function formatDay(iso: string): string {
+  return formatDateOnly(iso);
 }
 
 export function formatTime(iso: string): string {
-  return new Date(iso).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+  return formatClock(iso);
 }
 
 export function formatDayTime(iso: string): string {
-  const d = new Date(iso);
-  const today = new Date();
-  const sameDay = d.toDateString() === today.toDateString();
-  return sameDay
-    ? `today, ${formatTime(iso)}`
-    : d.toLocaleString(undefined, {
-        day: 'numeric',
-        month: 'short',
-        hour: 'numeric',
-        minute: '2-digit',
-      });
+  return sameDay(iso, Date.now()) ? `today, ${formatClock(iso)}` : formatDateTime(iso);
 }
 
 export function initials(name: string): string {

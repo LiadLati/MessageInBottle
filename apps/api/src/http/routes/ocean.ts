@@ -1,10 +1,5 @@
 import { Hono } from 'hono';
-import {
-  activeReading,
-  closeReading,
-  listPublicOcean,
-  openPublicBottle,
-} from '../../services/outcomes.js';
+import { closeReading, listPublicOcean, openPublicBottle } from '../../services/outcomes.js';
 import { blockFoundWriter } from '../../services/friends.js';
 import { accountWeather } from '../../services/weather.js';
 import type { AppEnv } from '../app.js';
@@ -29,19 +24,14 @@ export function oceanRoutes() {
       serverTime: new Date(ctx.clock.now()).toISOString(),
     });
   });
-  // One atomic action: it grants the finder access to the letter and removes the bottle from the
-  // public map for everyone. Idempotent for the finder, 409 for anyone who arrives second.
+  // One atomic action: it serves the finder the letter, once, and removes the bottle from the
+  // public map for everyone. A second open is a 409, for the finder and for everyone else.
   r.post('/public/:id/open', (c) => {
     // A one-time reading: never cached anywhere between the server and the finder's screen.
     c.header('Cache-Control', 'no-store');
     return c.json(openPublicBottle(c.get('ctx'), c.get('user'), c.req.param('id')));
   });
-  // The finder's still-open reading, for a refresh or a dropped connection (server-bounded).
-  r.get('/reading', (c) => {
-    c.header('Cache-Control', 'no-store');
-    return c.json({ reading: activeReading(c.get('ctx'), c.get('user')) });
-  });
-  // Closing the reader ends the finder's access immediately.
+  // Finishing the one reading.
   r.post('/public/:id/close', (c) => {
     closeReading(c.get('ctx'), c.get('user'), c.req.param('id'));
     return c.body(null, 204);

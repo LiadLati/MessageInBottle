@@ -7,6 +7,8 @@ import { seedChart, seedLegacyChart, seedUsers } from '../seed.js';
 import { loadSeaGraph } from './sea-graph.js';
 import { GLOBAL_SHORES } from './shores.js';
 import coverage from './data/coverage.json' with { type: 'json' };
+import { readFileSync } from 'node:fs';
+import { landTestFrom, smoothRoute } from '@mib/shared';
 import { pathGeoPoints, planRoute } from '../../domain/routing.js';
 import {
   CoastIndex,
@@ -205,6 +207,66 @@ function assertWaterOnly(graph: ReturnType<typeof loadActiveGraph>, nodeIds: str
   }
 }
 
+// Manual review round 1, item 8: the map draws a smoothed version of each route. Smoothing may
+// only ever round a corner; it must never put the drawn line on land the route itself does not
+// already touch (a harbour inlet, or a strait narrower than the mask). Every land sample on the
+// smoothed line must lie within reach of a land sample on the waypoint polyline.
+const SAMPLE_KM = 3;
+function landSamples(points: Array<{ lng: number; lat: number }>) {
+  const out: Array<{ lng: number; lat: number }> = [];
+  for (let i = 1; i < points.length; i++) {
+    const a = points[i - 1]!;
+    const b = points[i]!;
+    const steps = Math.max(1, Math.ceil(haversineKm(a.lng, a.lat, b.lng, b.lat) / SAMPLE_KM));
+    for (let s = 0; s <= steps; s++) {
+      const lng = a.lng + ((b.lng - a.lng) * s) / steps;
+      const lat = a.lat + ((b.lat - a.lat) * s) / steps;
+      if (mask.isLand(lng, lat)) out.push({ lng, lat });
+    }
+  }
+  return out;
+}
+function unwrap(points: Array<{ lng: number; lat: number }>) {
+  let offset = 0;
+  return points.map((p, i) => {
+    if (i > 0) {
+      const d = p.lng + offset - (points[i - 1]!.lng + offsetBefore);
+      if (d > 180) offset -= 360;
+      else if (d < -180) offset += 360;
+    }
+    offsetBefore = offset;
+    return { lng: p.lng + offset, lat: p.lat };
+  });
+}
+let offsetBefore = 0;
+// The land test the web map uses, built from the very file it draws.
+const mapLand = landTestFrom(
+  JSON.parse(
+    readFileSync(new URL('../../../../web/public/map/land-50m.geojson', import.meta.url), 'utf8'),
+  ) as Parameters<typeof landTestFrom>[0],
+);
+const cornerStats = { sharp: 0, rounded: 0 };
+function smoothingAddsNoLand(points: Array<{ lng: number; lat: number }>): string[] {
+  offsetBefore = 0;
+  const raw = unwrap(points);
+  const rawLand = landSamples(raw);
+  const drawn = smoothRoute(raw, mapLand);
+  const kept = new Set(drawn.map((p) => `${p.lng},${p.lat}`));
+  for (let i = 2; i < raw.length - 2; i++) {
+    const [a, v, b] = [raw[i - 1]!, raw[i]!, raw[i + 1]!];
+    const cross = (v.lng - a.lng) * (b.lat - v.lat) - (v.lat - a.lat) * (b.lng - v.lng);
+    if (Math.abs(cross) < 1e-9) continue;
+    cornerStats.sharp++;
+    if (!kept.has(`${v.lng},${v.lat}`)) cornerStats.rounded++;
+  }
+  const problems: string[] = [];
+  for (const p of landSamples(drawn)) {
+    const near = rawLand.some((q) => haversineKm(p.lng, p.lat, q.lng, q.lat) <= 40);
+    if (!near) problems.push(`${p.lng.toFixed(2)},${p.lat.toFixed(2)}`);
+  }
+  return problems;
+}
+
 describe('world sea routes', () => {
   const w = createTestWorld();
   const graph = loadActiveGraph(w.db);
@@ -231,6 +293,29 @@ describe('world sea routes', () => {
     if (via) expect(path.nodeIds.some((id) => id.startsWith(via))).toBe(true);
     expect(path.totalLength).toBeGreaterThan(10);
   });
+
+  it('draws smoothed routes that never cut across land the route does not already touch', () => {
+    // Every catalogue shore is used at least once: a deterministic spread of pairs across the
+    // whole world graph, including straits, canals and the antimeridian.
+    const ids = GLOBAL_SHORES.map((s) => s.id);
+    const failures: string[] = [];
+    let checked = 0;
+    for (let i = 0; i < ids.length; i++) {
+      const from = ids[i]!;
+      const to = ids[(i * 37 + 101) % ids.length]!;
+      if (from === to) continue;
+      const path = planRoute(graph, from, to);
+      if (!path) continue;
+      checked++;
+      const bad = smoothingAddsNoLand(pathGeoPoints(graph, path.nodeIds)!);
+      if (bad.length) failures.push(`${from} -> ${to}: ${bad.slice(0, 3).join(' ')}`);
+    }
+    expect(checked).toBeGreaterThan(ids.length * 0.9);
+    expect(failures).toEqual([]);
+    // And it does round the corners: about two in three get a curve (69% when written); the
+    // rest are too close to land for any cut and are drawn as they are.
+    expect(cornerStats.rounded / cornerStats.sharp).toBeGreaterThan(0.6);
+  }, 120_000);
 
   it('crosses the antimeridian on Pacific routes instead of going the long way round', () => {
     const path = plan('shore_nz_auckland', 'shore_pf_papeete');

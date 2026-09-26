@@ -4,6 +4,8 @@ import {
   AccountWeatherSchema,
   AccountPoliciesSchema,
   AccountStandingSchema,
+  DEV_CLOCK_RESET_CONFIRMATION,
+  AppealResultsSchema,
   AdminAppealSchema,
   AdminCaseDetailSchema,
   AdminCaseSummarySchema,
@@ -28,6 +30,7 @@ import {
   type LetterFont,
   type PolicyAcceptanceRequest,
   type ReportReason,
+  AdminPendingCountsSchema,
 } from '@mib/shared';
 
 export class ApiError extends Error {
@@ -133,7 +136,6 @@ const Ok = z.object({ ok: z.boolean() });
 const BottlesList = z.object({ bottles: z.array(SentBottleSummarySchema) });
 const OneBottle = z.object({ bottle: SentBottleSchema });
 const Visibility = z.object({ visibility: OutcomeVisibilitySchema });
-const Reading = z.object({ reading: OpenedLetterSchema.nullable() });
 const Cases = z.object({ cases: z.array(AdminCaseSummarySchema) });
 const OneCase = z.object({ case: AdminCaseDetailSchema });
 const DecidedCase = z.object({ case: AdminCaseDetailSchema, changed: z.boolean() });
@@ -208,8 +210,7 @@ export const api = {
   // public map for everyone. 409 `already_opened` means somebody else was first.
   openPublicBottle: (id: string) =>
     request('POST', `/ocean/public/${id}/open`, undefined, OpenedLetterSchema),
-  // The finder's still-open one-time reading (recovers a refresh); ending it is immediate.
-  activeReading: () => request('GET', '/ocean/reading', undefined, Reading),
+  // Finishing the finder's one reading (the letter is never served again anyway).
   closeReading: (id: string) => request<void>('POST', `/ocean/public/${id}/close`),
   // Blocks the writer from inside the finder's reading; the writer's identity never comes back.
   blockFoundWriter: (id: string) => request<void>('POST', `/ocean/public/${id}/block`),
@@ -247,6 +248,10 @@ export const api = {
       NotificationsPageSchema,
     ),
   markNotificationsRead: () => request<void>('POST', '/notifications/read-all'),
+  // Unread appeal results for the one-time popup; served whatever the account's standing.
+  appealResults: () => request('GET', '/moderation/appeal-results', undefined, AppealResultsSchema),
+  appealResultSeen: (id: string) =>
+    request<void>('POST', `/moderation/appeal-results/${encodeURIComponent(id)}/seen`),
   // The device's zone, reported after sign-in, on start, on resume and when it changes. The
   // server validates it; the latest one it accepts is the account's map clock.
   syncTimeZone: (timeZone: string) =>
@@ -303,12 +308,18 @@ export const api = {
     request('POST', `/admin/reports/${id}/hold`, { reason, note }, OneCase),
   adminReleaseHold: (id: string) =>
     request('POST', `/admin/reports/${id}/hold/release`, undefined, OneCase),
+  // The moderation badge: undecided work this administrator can act on.
+  adminPendingCounts: () =>
+    request('GET', '/admin/pending-counts', undefined, AdminPendingCountsSchema),
   adminAppeals: (status: 'pending' | 'accepted' | 'rejected' | 'all') =>
     request('GET', `/admin/appeals?status=${status}`, undefined, Appeals),
   adminDecideAppeal: (id: string, outcome: 'accept' | 'reject', reason: string) =>
     request('POST', `/admin/appeals/${id}/${outcome}`, { reason }, DecidedAppeal),
   devStatus: () => request('GET', '/dev/status', undefined, DevStatusSchema),
   devAdvance: (ms: number) => request('POST', '/dev/advance', { ms }, DevStatusSchema),
+  // Returns the one shared DEV clock to real time; the server requires the confirmation.
+  devResetClock: () =>
+    request('POST', '/dev/reset-clock', { confirm: DEV_CLOCK_RESET_CONFIRMATION }, DevStatusSchema),
   devArrive: (bottleId: string) => request('POST', '/dev/arrive', { bottleId }, DevStatusSchema),
   devLose: (bottleId: string, reason: 'adrift' | 'sunk') =>
     request('POST', '/dev/lose', { bottleId, reason }, DevStatusSchema),

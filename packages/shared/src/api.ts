@@ -383,9 +383,6 @@ export const OpenedLetterSchema = z.object({
   bottle: ReceivedLetterSchema,
   letter: z.object({ text: z.string(), font: LetterFontSchema, characters: z.number().int() }),
   aging: AgingProfileSchema,
-  // A finder's one-time reading: when the server stops serving it again (null for any other
-  // reader — recipients and senders keep their letters).
-  readingExpiresAt: z.string().nullable().optional(),
 });
 export type OpenedLetterDto = z.infer<typeof OpenedLetterSchema>;
 
@@ -463,6 +460,10 @@ export const NotificationsPageSchema = z.object({
 });
 export type NotificationsPageDto = z.infer<typeof NotificationsPageSchema>;
 
+// Unread appeal results, for the one-time popup. Served whatever the account's standing.
+export const AppealResultsSchema = z.object({ results: z.array(NotificationSchema) });
+export type AppealResultsDto = z.infer<typeof AppealResultsSchema>;
+
 // ---------- dev ----------
 export const DevAdvanceRequestSchema = z.object({
   ms: z
@@ -472,6 +473,14 @@ export const DevAdvanceRequestSchema = z.object({
     .max(1000 * 60 * 60 * 24 * 365),
 });
 export const DevArriveRequestSchema = z.object({ bottleId: IdSchema });
+// Development-only: return the one shared simulated clock to real time. The request must carry
+// this exact confirmation, because the clock is every account's in the development environment.
+export const DEV_CLOCK_RESET_CONFIRMATION = 'return-to-real-time';
+export const DEV_CLOCK_RESET_PROMPT =
+  'Return the shared test clock to real time? This changes the clock for every account in this development environment. Events that already happened will not be reversed.';
+export const DevResetClockRequestSchema = z.object({
+  confirm: z.literal(DEV_CLOCK_RESET_CONFIRMATION),
+});
 // Development-only outcome control: ends one of the caller's own at-sea journeys now, through the
 // same server path an automatic hazard engine would use once its policy values are approved.
 export const DevLoseRequestSchema = z.object({
@@ -536,8 +545,27 @@ export const AI_VERDICTS = ['accept', 'reject', 'uncertain'] as const;
 export const AiVerdictSchema = z.enum(AI_VERDICTS);
 export type AiVerdict = z.infer<typeof AiVerdictSchema>;
 
-// What the local model returns, validated before anything reads it. The model never decides
-// anything itself: the backend validates this and performs every state change.
+// What the local model is asked to return (manual review round 1, item 6). It labels the
+// *letter*, not the report: "accept"/"reject" asked about the report was easy to invert ("reject"
+// the letter), and an explicit threat came back as "reject". The backend maps the label to the
+// stored verdict and escalates anything doubtful to a person; the model never decides anything.
+export const AI_LABELS = ['violation', 'no_violation', 'uncertain'] as const;
+export const AiModelAnswerSchema = z.object({
+  label: z.enum(AI_LABELS),
+  reason: z.string().trim().min(1).max(600),
+  uncertainty: z.string().trim().max(600).nullable().optional(),
+  language: z.string().trim().max(40).nullable().optional(),
+  translation: z.string().trim().max(4000).nullable().optional(),
+  confidence: z.number().min(0).max(1).nullable().optional(),
+  // A threat to harm a person. It only escalates the case to an urgent human review.
+  threat: z.boolean().nullable().optional(),
+  childSafety: z.boolean().nullable().optional(),
+});
+export type AiModelAnswer = z.infer<typeof AiModelAnswerSchema>;
+
+// The validated, normalised recommendation the backend stores (verdict about the report).
+// The model never decides anything itself: the backend validates this and performs every state
+// change.
 export const AiReviewOutputSchema = z.object({
   verdict: AiVerdictSchema,
   reason: z.string().trim().min(1).max(600),
@@ -550,6 +578,7 @@ export const AiReviewOutputSchema = z.object({
   // A possible child-safety issue. It only moves the case to the top of the human queue as an
   // urgent review; it never decides, sanctions or bans anything (product decision 2).
   childSafety: z.boolean().nullable().optional(),
+  threat: z.boolean().nullable().optional(),
 });
 export type AiReviewOutput = z.infer<typeof AiReviewOutputSchema>;
 
@@ -602,8 +631,10 @@ export type LetterReportDto = z.infer<typeof LetterReportSchema>;
 export const AdminCaseSummarySchema = z.object({
   id: IdSchema,
   status: CaseStatusSchema,
-  // Urgent child-safety review: listed first in the administrator's queue.
+  // Urgent review, listed first in the administrator's queue: a possible child-safety issue or
+  // a possible credible threat, as flagged for a person to decide.
   urgentAt: z.string().nullable(),
+  urgentReason: z.enum(['child_safety', 'threat']).nullable(),
   bottleId: IdSchema,
   context: z.enum(['shore', 'public']),
   sender: PersonSchema,
@@ -696,6 +727,16 @@ export const AuditEntrySchema = z.object({
   createdAt: z.string(),
 });
 export type AuditEntryDto = z.infer<typeof AuditEntrySchema>;
+
+// The administrator's actionable work, for the moderation badge: undecided cases (one per case,
+// however many reports it merges) and undecided appeals, leaving out anything this administrator
+// is a party to and so cannot decide.
+export const AdminPendingCountsSchema = z.object({
+  reports: z.number().int().nonnegative(),
+  appeals: z.number().int().nonnegative(),
+  total: z.number().int().nonnegative(),
+});
+export type AdminPendingCountsDto = z.infer<typeof AdminPendingCountsSchema>;
 
 export const AdminAppealSchema = z.object({
   id: IdSchema,

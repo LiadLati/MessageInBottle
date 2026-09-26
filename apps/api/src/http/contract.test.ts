@@ -156,12 +156,6 @@ describe('API responses match the shared schemas', () => {
     await call(vis, 'POST', `/bottles/sent/${lost}/acknowledge`, ada.token);
     await call(PublicOceanResponseSchema, 'GET', '/ocean/public', cy.token);
     await call(OpenedLetterSchema, 'POST', `/ocean/public/${lost}/open`, cy.token);
-    await call(
-      z.object({ reading: OpenedLetterSchema.nullable() }),
-      'GET',
-      '/ocean/reading',
-      cy.token,
-    );
 
     // Moderation: report, admin console, decision, the sender's notice, appeal, admin appeals
     const report = await call(ReportResponseSchema, 'POST', '/moderation/reports', bo.token, {

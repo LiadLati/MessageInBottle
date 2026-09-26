@@ -11,14 +11,18 @@ interface Props {
   onChanged?: (() => Promise<void>) | undefined;
 }
 
+const FRIENDS_POLL_MS = 20_000;
+
 // S9a · Friends and requests. Capacity is surfaced before writing; blocked people never form a list.
 export function FriendsScreen({ onChanged }: Props) {
-  const friends = useAsync(() => api.friends(), []);
+  // Polled like the rest of the app, so a block, an unblock or an accepted request made on the
+  // other account shows here on the next cycle instead of only after leaving the screen.
+  const friends = useAsync(() => api.friends(), [], FRIENDS_POLL_MS);
   const [username, setUsername] = useState('');
   const [error, setError] = useState<Error | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
-  // Blocking is destructive and, for now, permanent: it gets the same real dialog as every
-  // other irreversible action, never a browser confirm() (audit FE-016).
+  // Blocking cuts off correspondence at once and cancels bottles on their way: it gets the same
+  // real dialog as every other consequential action, never a browser confirm() (audit FE-016).
   const [blocking, setBlocking] = useState<FriendDto | null>(null);
   const [blockBusy, setBlockBusy] = useState(false);
   const [blockError, setBlockError] = useState<Error | null>(null);
@@ -190,7 +194,7 @@ export function FriendsScreen({ onChanged }: Props) {
       {blocking ? (
         <ConfirmDialog
           title={`Block ${blocking.displayName}?`}
-          body={`${blocking.displayName} will no longer be your friend and will not be able to send you bottles, and you will not be able to send them any. You can unblock them later from Settings → Blocked users, but that will not restore the friendship or any letter.`}
+          body={`While ${blocking.displayName} is blocked, you will not see each other as friends, they cannot send you bottles and you cannot send them any. You can unblock them later from Settings → Blocked users. That makes you friends again, but it does not bring back any letter cancelled or hidden in the meantime.`}
           confirmLabel="Block"
           destructive
           busy={blockBusy}

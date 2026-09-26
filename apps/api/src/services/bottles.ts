@@ -394,7 +394,7 @@ export function readOpenedLetter(
 ): OpenedLetterDto {
   const bottle = ctx.db.select().from(t.bottles).where(eq(t.bottles.id, bottleId)).get();
   if (!bottle || bottle.moderationStatus !== 'clear') throw notFound('letter');
-  // A finder's one-time reading is served by activeReading only, never from here.
+  // A finder's one-time reading is served once, by openPublicBottle, and never from here.
   if (bottle.recipientId !== user.id || bottle.state !== 'opened') throw notFound('letter');
   if (hiddenByReporter(ctx.db, user.id, bottle.id)) throw notFound('letter');
   if (senderDeleted(ctx.db, bottle.senderId)) throw notFound('letter');

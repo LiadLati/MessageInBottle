@@ -63,7 +63,7 @@ export function assertVersionsCurrent(input: PolicyAcceptanceRequest): void {
   const current = currentPolicyVersions();
   const stale = POLICY_IDS.filter((id) => input.versions[id] !== current[id]);
   if (stale.length)
-    throw conflict('policy_version_stale', 'the documents have changed; please read them again', {
+    throw conflict('policy_version_stale', 'The documents have changed. Please read them again.', {
       current,
     });
 }

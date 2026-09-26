@@ -146,7 +146,7 @@ export function StandingScreen({ standing, onBack, onDeleteAccount, onSuspension
           ) : standing.standing === 'warned' ? (
             <p className="secondary">
               A letter of yours was reported and removed after review. A second accepted violation
-              suspends the account for seven days; a third bans it permanently.
+              suspends the account for seven days, and a third bans it permanently.
             </p>
           ) : (
             <p className="secondary">No violations are in force on this account.</p>

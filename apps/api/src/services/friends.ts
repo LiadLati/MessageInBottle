@@ -191,7 +191,8 @@ export function blockUser(ctx: AppContext, blockerId: string, username: string):
 }
 
 // A finder blocking the anonymous writer of the bottle they are reading (product decision 12).
-// Only during their own open reading session; the writer's identity is never returned, and the
+// Only while their one reading is open (not yet finished); the writer's identity is never
+// returned, and the
 // block works like any other from then on (no bottles either way, no public-ocean encounters).
 export function blockFoundWriter(ctx: AppContext, finderId: string, bottleId: string): void {
   const now = ctx.clock.now();
@@ -201,12 +202,7 @@ export function blockFoundWriter(ctx: AppContext, finderId: string, bottleId: st
     .innerJoin(t.bottles, eq(t.bottles.id, t.publicOpenings.bottleId))
     .where(and(eq(t.publicOpenings.bottleId, bottleId), eq(t.publicOpenings.openedById, finderId)))
     .get();
-  if (
-    !row ||
-    row.opening.closedAt !== null ||
-    (row.opening.sessionExpiresAt ?? 0) <= now ||
-    row.senderId === finderId
-  ) {
+  if (!row || row.opening.closedAt !== null || row.senderId === finderId) {
     throw notFound('reading');
   }
   ctx.db
@@ -258,10 +254,12 @@ export function listBlocked(ctx: AppContext, blockerId: string): BlockedUsersRes
   };
 }
 
-// Unblocking permits future contact under the ordinary rules, and nothing more: it removes this
-// person's block and any friendship or pending request left over between the pair, so being
-// friends again takes a new request. Nothing cancelled, removed or hidden while the block stood
-// comes back, and nothing about that time is shown. The other person's own block, if any, stays.
+// Unblocking lifts this person's block and nothing else (manual review round 1, follow-up). A
+// block never touches the pair's friendship or pending request, it only hides them, so once no
+// block stands in either direction they are exactly what they were before: friends see and can
+// write to each other again, a pending request is pending again, and a pair with no relationship
+// still has none. Letters cancelled, removed or hidden while the block stood do not come back,
+// and nothing about that time is shown. The other person's own block, if any, stays.
 export function unblockUser(ctx: AppContext, blockerId: string, username: string): void {
   const target = ctx.db
     .select({ id: t.users.id })
@@ -295,9 +293,5 @@ function removeBlock(ctx: AppContext, blockerId: string, blockedId: string, whic
       .where(and(eq(t.blocks.blockerId, blockerId), eq(t.blocks.blockedId, blockedId), which))
       .run().changes;
     if (removed === 0) throw notFound('block');
-    const [low, high] = canonicalPair(blockerId, blockedId);
-    tx.delete(t.friendships)
-      .where(and(eq(t.friendships.userLowId, low), eq(t.friendships.userHighId, high)))
-      .run();
   });
 }

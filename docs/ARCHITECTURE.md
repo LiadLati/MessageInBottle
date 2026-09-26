@@ -14,11 +14,11 @@ decision has been made.
 | API                 | Hono on Node (`@hono/node-server`)                    | Small, typed, standards-based `fetch` handlers that are trivially testable in-process (`app.request`) and portable to other runtimes if hosting changes.                          |
 | Validation          | zod v4 schemas in `@mib/shared`                       | Shared DTOs, request validation at the HTTP boundary, and runtime parsing of stored JSON (aging profile).                                                                        |
 | Database            | SQLite via `better-sqlite3` + Drizzle ORM             | Zero-service local persistence with real transactions and migrations. Synchronous transactions make the release/arrival/open commits naturally serial. Drizzle keeps a move to PostgreSQL a driver + migration change. |
-| Time                | Server `Clock` abstraction (`SystemClock` / `DevClock`) | Spec §11 invariant 7: only server time drives travel. Dev mode persists a forward-only offset so journeys can be advanced deterministically and survive restarts.               |
+| Time                | Server `Clock` abstraction (`SystemClock` / `DevClock`) | Spec §11 invariant 7: only server time drives travel. Dev mode persists one shared offset so journeys can be advanced deterministically and survive restarts. It moves forward, except that a developer can confirm "Return to real time" (`POST /api/dev/reset-clock`), which sets the offset to zero for every account and changes nothing else: settled arrivals, losses, notifications and storm rolls stay settled even when their timestamps are ahead of the clock, and a bottle released in the simulated future stays at sea until real time reaches it.               |
 | Worker              | In-process interval calling `runJourneyTick`          | Arrival is a pure function of persisted plan + server time, so a missed or repeated tick is harmless. Can be moved to a separate process without code changes.                   |
 | Auth                | Username + password (+ e-mail for recovery) accounts in the `users` table (salted scrypt hash), opaque hashed session tokens, single-use hashed reset tokens in `password_resets`, provider-neutral mail adapter | No identity provider or e-mail is required for the product; scrypt is in Node's standard library (no dependency), the hash string is self-describing so parameters can be raised later. Sessions are bearer tokens hashed at rest with a TTL; sign-out revokes one token. Sign-in and registration are rate limited in-process. Seed accounts exist only in dev mode. |
 | Geography           | Global shore catalogue (`apps/api/src/db/geo/shores.ts`, ~390 real harbours keyed to Natural Earth geometries) plus the six original fictional shores; versioned sea-route graph, version 2 generated offline (`apps/api/src/tools/geo/build-world.ts`) | Spec §6 (amended 2026-09-14). The graph is a 1° water grid checked against a 0.05° land mask, authored straits/canals and per-shore connectors; lengths are great-circle km (50 km per chart unit ≈ v1 pace). Graphs are immutable and cached per version in memory; route plans record their graph version, so version 1 rows and every released bottle's snapshot stay untouched. Shores carry the dataset's country attribution server-side only (validation, coverage, routing) and expose their sea to clients; country names never reach the UI. Users are never located. |
-| World map           | MapLibre GL JS with day and night land + borders styles; bundled Natural Earth 50m land polygons and admin-0 boundary lines (via `world-atlas` 2.0.2, ISC; data public domain) | Open source, no credentials, offline. The style has a sea background, land fill, coastline and thin border lines only; `assertMapStylePolicy` rejects symbol/label layers and any border drawn as more than a line. Routes are unwrapped across the antimeridian client-side. Day↔night and calm↔storm are per-layer `setPaintProperty` tweens on the live map — never `setStyle`, which would reload sources, drop the markers and blink the camera. The only weather element on the map is the per-bottle marker glyph; there are no storm regions, fog patches, map-wide rain, or any circle drawn around a bottle marker (selection reads as a size change, and the only ring is the keyboard focus one). A licensed vector source can be supplied via `VITE_MIB_MAP_*`. |
+| World map           | MapLibre GL JS with day and night land + borders styles; bundled Natural Earth 50m land polygons and admin-0 boundary lines (via `world-atlas` 2.0.2, ISC; data public domain) | Open source, no credentials, offline. The style has a sea background, land fill, coastline and thin border lines only; `assertMapStylePolicy` rejects symbol/label layers and any border drawn as more than a line. Routes are unwrapped across the antimeridian client-side and drawn with rounded corners (`smoothRoute` in `@mib/shared`, manual review round 1): each corner of the one-degree waypoint chain takes the largest curve whose every point keeps about 5 km from land in a 0.05° raster of the map's own land file, a smaller one otherwise, and none where no curve fits; harbour-approach corners get only a tiny blind-safe cut. It is rendering only — the marker rides the drawn line, while progress, route, duration, storms and risk stay the server's — and `db/geo/geo.test.ts` checks it across the shore catalogue against the independent build-time land mask. Private views label the origin ("From") and the destination ("To", a hollow ring) of the journey in focus; the public ocean names no harbour. Day↔night and calm↔storm are per-layer `setPaintProperty` tweens on the live map — never `setStyle`, which would reload sources, drop the markers and blink the camera. The only weather element on the map is the storm-cloud glyph above each bottle at sea while the account's storm lasts at night (restored in manual review round 1), with the storm stated in words; there is no map-wide rain or stripe overlay, no storm regions, no fog patches, and no circle drawn around a bottle marker (selection reads as a size change, and the only ring is the keyboard focus one). A licensed vector source can be supplied via `VITE_MIB_MAP_*`. |
 | Time of day & weather | Deterministic, versioned schedule in `packages/shared/src/weather.ts`; presentation in `apps/web/src/state/weather.tsx`, `lib/oceanWeather.ts`, `lib/shoreWeather.ts`; the sea viewer in `components/SeaViewer.tsx` over `ShoreScene` `mode="sea"` | **Cosmetic only** (spec §9.1): never touches a route, duration, arrival or risk. Day/night comes from the local hour in the browser's IANA zone (07:00–19:00, configurable, midnight-wrapping supported). Ocean weather belongs to **each bottle** (night-only, at-sea only): two bottles on one route may differ, the marker carries a small storm glyph, the card says `In a storm`, and `View at sea` opens a lazy-loaded three.js view of that bottle as a modal over the still-mounted, paused map — so Back to map restores camera, zoom and selection by construction. My Shore runs an independent schedule keyed on the user. No storage and no migration: the same bottle/user id, schedule version and time window always reproduce the same weather, so a refresh, a re-selection or a server restart cannot reroll it. The module is shaped so it can move behind an API endpoint unchanged. |
 | Clocks              | `ctx.clock` (journey; the dev clock in development) and `ctx.realClock` (always `SystemClock`) | Sessions, session expiry and password-reset tokens use `realClock`, so advancing the development clock lands bottles and moves weather but can never expire a session. Rate limiting was already on real time. |
 | 3D shore & release  | three.js scene ported from the design handoff's `shore3d.js`, driven from React | Real geometry, refractive glass bottle, displaced water, textured sand/foam/clouds from the handoff. The parent owns the nine-beat release timeline (`seek(t)`), so UI beats and the request lifecycle stay in sync. |
@@ -142,14 +142,15 @@ narrow.
   insert itself elects the single winner of a race), freeze the aging profile, append an
   `opened` event with `{scope:'public'}`, and notify the sender once — never naming the finder
   (spec D03). The bottle leaves the public list for everyone (`listPublicOcean` excludes any
-  bottle with an opening) and the finder reads the letter in the ordinary reader. It is
-  idempotent for the finder and a `409 already_opened` with no content for anyone else; the
+  bottle with an opening) and the finder reads the letter in the ordinary reader. A second open
+  is `409 reading_closed` for the finder and `409 already_opened` for anyone else, with no
+  content either way; the
   sender is refused (`400 own_bottle`), blocked pairs and non-adrift bottles get `404`.
   **The journey outcome is untouched**: the bottle stays `lost`, so the sender keeps letter,
   passport and Lost entry, and the intended recipient is never delivered to — no arrival path
   acts on a bottle that is not `at_sea`. Nothing else is granted: no rescue, re-release, further
   travel or transfer of ownership.
-- **Reading afterwards.** The finder gets one reading session (see *Journey rules* below);
+- **Reading afterwards.** The finder gets one reading, once (see *Journey rules* below);
   nothing is archived for them and `GET /api/shore/received` lists shore deliveries only. The
   sender reads their own letter with `GET /api/bottles/sent/:id/letter`, a pure read they may
   repeat at will: it never claims the bottle, never removes it from the map and never touches
@@ -251,18 +252,17 @@ and the new `risk_decisions` table (one row per bottle per storm night, unique o
   and expiry refuses a bottle with an opening). Adrift bottles from before the migration have
   no deadline; `activatePublicListings` at API boot gives each of them 72 h from that moment
   (idempotent, journey clock), and logs how many it activated.
-- **One-time reading.** The opening row gets `session_expires_at = now + 15 min`. While the
-  session is open the finder can recover the same reading after a refresh or a dropped
-  connection through `GET /api/ocean/reading` or by re-posting the open; `POST
-  /api/ocean/public/:id/close` sets `closed_at` and ends access at once, and a stale session is
-  refused the same way (`409 reading_closed`, no content). The finder is never given a shore or
-  received entry, `GET /api/shore/received` is shore deliveries only and
-  `GET /api/shore/bottles/:id/letter` is recipient-only. The one-time responses are
-  `Cache-Control: no-store`; the client keeps the letter in React state only (no localStorage,
-  sessionStorage or other durable storage). Openings recorded before this change keep their
-  rows and events; with both session columns `NULL` they grant no further reads — the finder
-  archive entries they used to produce simply disappear from the Received list. The sender's
-  own reads stay unlimited.
+- **One-time reading.** The letter is served once, in the `POST /api/ocean/public/:id/open`
+  response, and never again: a second open is `409 reading_closed` with no content, and no
+  endpoint returns it later (the 15-minute `GET /api/ocean/reading` recovery was removed on
+  2026-09-26). `POST /api/ocean/public/:id/close` records the explicit, confirmed finish in
+  `closed_at`, after which the finder can no longer block the writer from it; leaving the Ocean
+  also finishes it, and the browser is asked to warn before a reload while it is open.
+  `session_expires_at` is kept for older rows only and is always `NULL` now (no migration). The
+  finder is never given a shore or received entry, `GET /api/shore/received` is shore
+  deliveries only and `GET /api/shore/bottles/:id/letter` is recipient-only. The one-time
+  response is `Cache-Control: no-store`; the client keeps the letter in React state only (no
+  localStorage, sessionStorage or other durable storage). The sender's own reads stay unlimited.
 - **Same harbour.** When origin and destination shore are the same, `releaseBottle` stamps
   `risk_policy_version = NULL`, plans the route snapshot with `plannedDurationMs = 0` and calls
   `commitArrival` inside the release transaction: the bottle is `delivered` at `releasedAt`, the
@@ -282,7 +282,11 @@ and the new `risk_decisions` table (one row per bottle per storm night, unique o
   `createdAt.rowid` cursor and returns the unread count. `services/housekeeping.ts` prunes only
   operational data (worker retry state older than 90 days).
 - **Blocks and unblocks.** `listBlocked` shows only blocks the caller placed. `unblockUser`
-  removes the block and any friendship row, restoring nothing. A finder's block of an anonymous
+  removes the caller's block and nothing else. A block never touches the pair's friendship or
+  pending request, it only hides them (`isBlockedEitherWay` in the friends list, at release and
+  at arrival), so once no block stands either way the pair are what they were before. Until
+  2026-09-26 unblocking also deleted the friendship row, which is why an unblocked pair could not
+  see or write to each other. A finder's block of an anonymous
   writer stores `blocks.found_bottle_id` and is listed and undone by that bottle only.
 - **Direction controls.** `validateLetterText` rejects U+202A–U+202E and U+2066–U+2069 on client
   and server (`letter_direction_controls`); other invisible characters used by real RTL and
@@ -312,6 +316,14 @@ and the new `risk_decisions` table (one row per bottle per storm night, unique o
   (`GET /api/shore`), refreshed on each visit: it lights only while a bottle is waiting to be
   opened, and clears when that bottle is opened — never by reading the inbox. The top strip
   remains an *arrival* banner and reacts to unread `received_arrived` events only.
+- **Appeal results.** Deciding an appeal writes one `moderation_appeal_accepted` or
+  `moderation_appeal_rejected` notice (dedupe key per appeal). The inbox stays closed to a
+  suspended or banned account (product decision 14), so the result also has its own route:
+  `GET /api/moderation/appeal-results` returns the unread appeal-result notices whatever the
+  standing, and the web shows the oldest as a one-time popup, in the app or over the standing
+  screen. `POST /api/moderation/appeal-results/:id/seen` marks that one notice read, which is
+  the same state opening the inbox writes, so the popup, the badge and the history never
+  disagree, and nothing is deleted.
 
 ## Legal documents, consent, and account deletion
 
@@ -398,10 +410,17 @@ and the new `risk_decisions` table (one row per bottle per storm night, unique o
   none can be revoked or reopened (there is no route for it). Escalating an unappealed ordinary
   violation to critical restarts its 30-day appeal window once (`appeal_reopened` audit row).
   Appeals close 30 days after the decision on the real clock (`appealDeadline`).
-- **Automated review recommends only.** `services/ai-review.ts` stores a verdict, reasoning,
-  uncertainty, translation and a `childSafety` flag; a flag sets `moderation_cases.urgent_at`
-  once, which sorts the case first in `listCases`. Cases are listed before the model answers.
-  `MIB_AI_AUTO_DECIDE=true` is a configuration error.
+- **Automated review recommends only.** The model labels the *letter* (`violation`,
+  `no_violation` or `uncertain`, plus `threat` and `childSafety` flags); `parseReviewOutput`
+  maps that to the stored verdict about the report. The earlier accept/reject-the-report
+  answer was easy to invert, and a well-formed "reject" was trusted whatever it said (manual
+  review round 1). A clearance now stands only if it is confident (≥ 0.8), states no doubt,
+  flags nothing, and the letter trips no deterministic English threat backstop
+  (`looksLikeExplicitThreat`); otherwise it is stored as `uncertain` with the reason. A child
+  safety flag or a possible threat sets `moderation_cases.urgent_at` once, sorting the case
+  first in `listCases`, with an `urgent_child_safety_review` or `urgent_threat_review` audit
+  row; the admin DTO derives `urgentReason` from `ai_child_safety`. Cases are listed before the
+  model answers. `MIB_AI_AUTO_DECIDE=true` is a configuration error.
 - **Restricted accounts.** `services/restriction.ts`: when a suspension or ban takes effect,
   bottles travelling to the account are cancelled with capacity released once and the sender
   told only "Delivery unavailable"; `commitArrival` refuses delivery to a restricted recipient;

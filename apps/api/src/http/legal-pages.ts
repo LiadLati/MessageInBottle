@@ -157,15 +157,15 @@ ${doc.blocks.map(renderBlock).join('\n')}`,
 const WHAT_HAPPENS = `<h2>What deleting your account does</h2>
 <p>Deletion is immediate and cannot be undone. When you confirm:</p>
 <ul>
-<li>every signed-in session ends at once, and the account can no longer sign in;</li>
-<li>your username, display name, email address, password, reset links, chosen harbour, time zone and preferences are removed;</li>
-<li>your friendships, friend requests, blocks and notifications are removed, so the account leaves other people's lists and no longer appears anywhere in SeaYou;</li>
-<li>the letters you received are removed from your shore and archive, and any letter you had not yet sent is removed;</li>
-<li>the text of every letter you wrote is erased — including letters already delivered — and letters still at sea or adrift in the public ocean are cancelled, so nobody can find or open them afterwards.</li>
+<li>Every signed-in session ends at once, and the account can no longer sign in.</li>
+<li>Your username, display name, email address, password, reset links, chosen harbour, time zone and preferences are removed.</li>
+<li>Your friendships, friend requests, blocks and notifications are removed, so the account leaves other people's lists and no longer appears anywhere in SeaYou.</li>
+<li>The letters you received are removed from your shore and archive, and any letter you had not yet sent is removed.</li>
+<li>The text of every letter you wrote is erased — including letters already delivered — and letters still at sea or adrift in the public ocean are cancelled, so nobody can find or open them afterwards.</li>
 </ul>
 <h2>What remains for a limited time, and why</h2>
 <ul>
-<li>Letters other people wrote to you stay in their own Sent history, which belongs to them; you are shown there as “Deleted user”.</li>
+<li>Letters other people wrote to you stay in their own Sent history, which belongs to them. You are shown there as “Deleted user”.</li>
 <li>A minimal record that the account existed remains, with no personal details, together with minimal anonymous audit records.</li>
 <li>If one of your letters was reported, its evidence copy is kept for the rest of its 30-day retention period, until an appeal filed in time is decided, or while a documented legal or child-safety hold requires it, and is then removed. It is not used for anything else.</li>
 <li>Backups may still hold information for a limited recovery period before they are overwritten.</li>

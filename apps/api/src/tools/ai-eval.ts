@@ -1,15 +1,15 @@
 // Runs the evaluation set through the configured model and prints what it answers, so its
-// behaviour on Hebrew, Arabic, Russian, mixed scripts, slang, irony and adversarial text can
-// be judged BEFORE MIB_AI_AUTO_DECIDE is ever switched on. Nothing here touches the database.
+// behaviour on Hebrew, Arabic, Russian, mixed scripts, slang, irony, threats and adversarial text
+// can be judged. The model only ever recommends to an administrator (product decision 2): there
+// is no automatic-decision mode to enable. Nothing here touches the database.
 //
 //   pnpm --filter @mib/api ai:eval                 one pass over every sample
 //   pnpm --filter @mib/api ai:eval -- --repeat 3   three passes, to see whether it is stable
 //   pnpm --filter @mib/api ai:eval -- --json       machine-readable output
 //
 // A passing run is necessary, not sufficient. It says the model did not get these particular
-// letters dangerously wrong; it does not say the model is fit to suspend people's accounts
-// without a human. Read the reasoning it gives, add letters from your own community, and treat
-// enabling automatic decisions as a deliberate decision rather than the result of a green tick.
+// letters dangerously wrong; it does not make its recommendations reliable. Read the reasoning
+// it gives and add letters from your own community.
 import { loadEnvFiles } from '../lib/env.js';
 import { loadConfig } from '../config.js';
 import { createOllamaReviewer, parseReviewOutput } from '../services/ai-review.js';
@@ -49,7 +49,7 @@ async function ask(sample: AiEvalSample): Promise<Answer> {
       reasons: sample.reasons,
       explanations: sample.explanations ?? [],
     });
-    const parsed = parseReviewOutput(raw);
+    const parsed = parseReviewOutput(raw, sample.text);
     if (!parsed) return { ...blank, error: `unparseable: ${String(raw).slice(0, 200)}` };
     return {
       verdict: parsed.verdict,

@@ -13,6 +13,7 @@ import {
   getCase,
   listAppeals,
   listCases,
+  pendingCounts,
   placeHold,
   releaseHold,
 } from '../../services/admin.js';
@@ -42,6 +43,11 @@ function requireReason(reason: string | null | undefined, what: string): string 
 export function adminRoutes() {
   const r = new Hono<AppEnv>();
   r.use('*', requireAuth, requireAdmin, requireGoodStanding);
+  // The moderation badge: actionable, undecided work only. Never cached: it changes as cases arrive.
+  r.get('/pending-counts', (c) => {
+    c.header('Cache-Control', 'no-store');
+    return c.json(pendingCounts(c.get('ctx'), c.get('user')));
+  });
   r.get('/reports', (c) =>
     c.json({ cases: listCases(c.get('ctx'), statusOf(c.req.query('status'))) }),
   );

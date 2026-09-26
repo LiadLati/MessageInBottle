@@ -6,6 +6,7 @@ import {
   type AdminCaseDetailDto,
   type AdminCaseSummaryDto,
   type ReportReason,
+  type AdminPendingCountsDto,
 } from '@mib/shared';
 import { api } from '../api/client.js';
 import { ConfirmDialog } from '../components/ConfirmDialog.js';
@@ -13,7 +14,7 @@ import { TabList, tabId } from '../components/Tabs.js';
 import { LetterPaper } from '../components/LetterPaper.js';
 import { REPORT_REASON_LABELS } from '../components/ReportSheet.js';
 import { Avatar, BackButton, DeckScreen, ErrorNote, Skeleton } from '../components/ui.js';
-import { formatDate, formatDayTime } from '../lib/format.js';
+import { formatDate, formatDay, formatDayTime } from '../lib/format.js';
 import { useAsync } from '../lib/useAsync.js';
 
 export type AdminSection = 'reports' | 'appeals';
@@ -26,14 +27,18 @@ const STATUS_LABELS: Record<Status, string> = {
 
 interface Props {
   section: AdminSection;
+  // Undecided work, shown on each section tab; re-read by the app after every decision.
+  pending?: AdminPendingCountsDto | null;
   onSection: (s: AdminSection) => void;
+  // Called after a decision, so the moderation badge follows at once.
+  onChanged?: () => void;
   onBack: () => void;
 }
 
 // The admin console (spec §16 · moderation console): reports as cases, and appeals. Every list
 // and every action here is answered by the server only for an admin account; the screen adds
 // the explicit confirmation before each decision and records the reason with it.
-export function AdminScreen({ section, onSection, onBack }: Props) {
+export function AdminScreen({ section, pending = null, onSection, onChanged, onBack }: Props) {
   const [status, setStatus] = useState<Status>('pending');
   const [selected, setSelected] = useState<string | null>(null);
   const tabs = (
@@ -47,7 +52,11 @@ export function AdminScreen({ section, onSection, onBack }: Props) {
           onSection(s);
           setSelected(null);
         }}
-        labelOf={(s) => (s === 'reports' ? 'Reports' : 'Appeals')}
+        labelOf={(s) => {
+          const n = s === 'reports' ? pending?.reports : pending?.appeals;
+          const name = s === 'reports' ? 'Reports' : 'Appeals';
+          return n ? `${name} (${n} waiting)` : name;
+        }}
         controls={ADMIN_PANEL}
       />
       <TabList
@@ -70,6 +79,7 @@ export function AdminScreen({ section, onSection, onBack }: Props) {
       tabs={tabs}
       selected={selected}
       onSelect={setSelected}
+      onDecided={onChanged}
       onBack={onBack}
     />
   ) : (
@@ -78,6 +88,7 @@ export function AdminScreen({ section, onSection, onBack }: Props) {
       tabs={tabs}
       selected={selected}
       onSelect={setSelected}
+      onDecided={onChanged}
       onBack={onBack}
     />
   );
@@ -93,12 +104,14 @@ function ReportsSection({
   tabs,
   selected,
   onSelect,
+  onDecided,
   onBack,
 }: {
   status: Status;
   tabs: ReactNode;
   selected: string | null;
   onSelect: (id: string | null) => void;
+  onDecided?: (() => void) | undefined;
   onBack: () => void;
 }) {
   const list = useAsync(() => api.adminCases(status), [status], 15_000);
@@ -109,6 +122,7 @@ function ReportsSection({
         id={selected}
         onBack={() => onSelect(null)}
         onChanged={async () => {
+          onDecided?.();
           await list.reload();
         }}
       />
@@ -158,7 +172,7 @@ function ReportsSection({
                     </span>
                     {c.urgentAt ? (
                       <span style={{ display: 'block', marginTop: 6 }}>
-                        <UrgentChip />
+                        <UrgentChip reason={c.urgentReason} />
                       </span>
                     ) : null}
                   </span>
@@ -176,17 +190,21 @@ function ReportsSection({
 
 // A possible child-safety issue flagged by the model. It only moves the case up the queue:
 // nothing is decided, sanctioned or banned until an administrator does it.
-function UrgentChip() {
-  return <span className="status-chip status-lost">Urgent · possible child safety</span>;
+function UrgentChip({ reason }: { reason: 'child_safety' | 'threat' | null }) {
+  return (
+    <span className="status-chip status-lost">
+      {reason === 'threat' ? 'Urgent · possible threat' : 'Urgent · possible child safety'}
+    </span>
+  );
 }
 
 function AiChip({ ai }: { ai: AdminCaseSummaryDto['ai'] }) {
   const label =
     ai.status === 'done'
       ? ai.verdict === 'accept'
-        ? 'AI: accept report'
+        ? 'AI: violation'
         : ai.verdict === 'reject'
-          ? 'AI: reject report'
+          ? 'AI: no violation'
           : 'AI: uncertain'
       : ai.status === 'running'
         ? 'AI: reviewing'
@@ -313,7 +331,7 @@ function CaseView({
               : `The case will be closed with no violation. ${c.sender.displayName} will not be told anything. ${FINAL}`
           }
           confirmLabel={confirm === 'accept' ? 'Uphold violation' : 'Reject report'}
-          reasonLabel="Why (mandatory; recorded with the decision)"
+          reasonLabel="Why (required, recorded with the decision)"
           requireReason
           destructive={confirm === 'accept'}
           busy={busy}
@@ -333,7 +351,7 @@ function CaseView({
               : `${c.sender.displayName} is shown the decision and may appeal it once, within 30 days.`
           } ${FINAL}`}
           confirmLabel="Ban permanently"
-          reasonLabel="Why (mandatory; recorded with your name and the time)"
+          reasonLabel="Why (required, recorded with your name and the time)"
           requireReason
           acknowledge="I have reviewed this case myself and confirm it is a critical child-safety violation."
           destructive
@@ -372,7 +390,7 @@ function CaseView({
 
 // Decision 1: one administrator, no second approval and no way to reopen or reverse.
 const FINAL =
-  'This decision is final: you cannot reopen or reverse it; only the sender’s appeal can change it.';
+  'This decision is final. You cannot reopen or reverse it, and only the sender’s appeal can change it.';
 
 // What upholding does to the sender's standing, as the server computed it (audit FE-009).
 function consequenceSentence(c: AdminCaseDetailDto): string {
@@ -414,15 +432,17 @@ function CaseBody({ c }: { c: AdminCaseDetailDto }) {
             </div>
           </div>
           <div className="row" style={{ gap: 6, flexWrap: 'wrap' }}>
-            {c.urgentAt ? <UrgentChip /> : null}
+            {c.urgentAt ? <UrgentChip reason={c.urgentReason} /> : null}
             <AiChip ai={c.ai} />
           </div>
         </div>
         {c.urgentAt ? (
           <p className="note amber" role="note">
-            The review model flagged a possible child-safety issue on {formatDayTime(c.urgentAt)},
-            so this case is at the top of the queue. The model only recommends: you decide, and
-            nothing has been sanctioned.
+            {c.urgentReason === 'threat'
+              ? 'The review flagged a possible credible threat'
+              : 'The review model flagged a possible child-safety issue'}{' '}
+            on {formatDayTime(c.urgentAt)}, so this case is at the top of the queue. The model only
+            recommends: you decide, and nothing has been sanctioned.
           </p>
         ) : null}
         {c.decision ? (
@@ -446,9 +466,8 @@ function CaseBody({ c }: { c: AdminCaseDetailDto }) {
         <div className="glass-panel">
           {c.letter.redactedAt ? (
             <p className="muted">
-              The copy of this letter was removed on{' '}
-              {new Date(c.letter.redactedAt).toLocaleDateString()} under the evidence retention
-              policy. The decision and its reasoning are kept below.
+              The copy of this letter was removed on {formatDay(c.letter.redactedAt)} under the
+              evidence retention policy. The decision and its reasoning are kept below.
             </p>
           ) : (
             <>
@@ -496,10 +515,10 @@ function CaseBody({ c }: { c: AdminCaseDetailDto }) {
               <p>
                 <strong>
                   {c.ai.verdict === 'accept'
-                    ? 'Accept the report'
+                    ? 'The letter breaks the rules: uphold the report'
                     : c.ai.verdict === 'reject'
-                      ? 'Reject the report'
-                      : 'Uncertain — a person must decide'}
+                      ? 'No violation found: reject the report'
+                      : 'Uncertain: a person must decide'}
                 </strong>
                 {c.ai.model ? <span className="t-meta"> · {c.ai.model}</span> : null}
               </p>
@@ -530,7 +549,7 @@ function CaseBody({ c }: { c: AdminCaseDetailDto }) {
             <p className="secondary">
               {c.ai.status === 'running'
                 ? 'The model is reviewing this case.'
-                : 'Waiting for the local model. The case stays in the queue until it answers; decide it yourself if you prefer.'}
+                : 'Waiting for the local model. The case stays in the queue until it answers. You can decide it yourself if you prefer.'}
               {c.ai.lastError ? ` Last attempt: ${c.ai.lastError}.` : ''}
               {c.ai.attempts > 0 ? ` ${c.ai.attempts} attempt(s).` : ''}
             </p>
@@ -548,12 +567,14 @@ function AppealsSection({
   tabs,
   selected,
   onSelect,
+  onDecided,
   onBack,
 }: {
   status: Status;
   tabs: ReactNode;
   selected: string | null;
   onSelect: (id: string | null) => void;
+  onDecided?: (() => void) | undefined;
   onBack: () => void;
 }) {
   const list = useAsync(() => api.adminAppeals(status), [status], 15_000);
@@ -565,6 +586,7 @@ function AppealsSection({
         appeal={current}
         onBack={() => onSelect(null)}
         onChanged={async () => {
+          onDecided?.();
           await list.reload();
           onSelect(null);
         }}
@@ -706,7 +728,7 @@ function AppealView({
                 } This is final.`
           }
           confirmLabel={confirm === 'accept' ? 'Accept appeal' : 'Reject appeal'}
-          reasonLabel="Why (mandatory; recorded with the decision)"
+          reasonLabel="Why (required, recorded with the decision)"
           requireReason
           destructive={confirm === 'reject'}
           busy={busy}

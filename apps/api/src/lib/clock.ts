@@ -42,6 +42,15 @@ export class DevClock implements Clock {
     return this.now();
   }
 
+  // "Return to real time" (manual review round 1, follow-up): the shared offset back to zero,
+  // persisted like every advance. It is the only move backwards, and it moves only the clock:
+  // everything already settled in the database stays settled.
+  resetToRealTime(): number {
+    this.offsetMs = 0;
+    this.db.update(devClock).set({ offsetMs: 0 }).where(eq(devClock.id, 1)).run();
+    return this.now();
+  }
+
   advanceTo(targetMs: number): number {
     const delta = targetMs - this.now();
     if (delta > 0) this.advance(delta);

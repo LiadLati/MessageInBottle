@@ -227,7 +227,7 @@ export function requestPasswordReset(ctx: AppContext, email: string): Promise<vo
         '',
         link,
         '',
-        'If it was not you, ignore this message; your password stays as it is.',
+        'If it was not you, ignore this message. Your password stays as it is.',
       ].join('\n'),
     });
   } catch (err) {

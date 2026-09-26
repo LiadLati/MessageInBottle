@@ -78,7 +78,7 @@ export function DecisionNotice({ notice, onResolved }: Props) {
     notice.severity === 'critical'
       ? 'This was classified as a confirmed critical child-safety violation, and your account is permanently banned.'
       : notice.ordinal <= 1
-        ? 'This is a warning. A second upheld violation suspends your account for seven days; a third bans it permanently. Upheld violations stay counted unless an appeal reverses them.'
+        ? 'This is a warning. A second upheld violation suspends your account for seven days, and a third bans it permanently. Upheld violations stay counted unless an appeal reverses them.'
         : notice.ordinal === 2
           ? 'This is your second upheld violation, so your account is suspended for seven days. Serving the suspension does not remove it from the count: a third means a permanent ban.'
           : 'This is your third upheld violation, so your account is permanently banned.';
