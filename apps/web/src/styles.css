@@ -2438,10 +2438,7 @@ button.avatar {
     0 0 0 2px var(--ink-deep),
     0 0 0 7px rgba(143, 211, 204, 0.22);
 }
-/* Placed above its point when below would cover a bottle: the dot stays on the harbour. */
-.map-harbor.above {
-  flex-direction: column-reverse;
-}
+
 .map-harbor[data-kind='both'] .label::after {
   content: ' · destination';
   font-weight: 500;

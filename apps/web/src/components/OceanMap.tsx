@@ -320,7 +320,8 @@ export function OceanMap({
     if (!loaded || import.meta.env.VITE_MIB_MAP_TILES_URL) return;
     let live = true;
     void loadMapLand(LAND_URL).then((t) => {
-      if (live) setLand(t);
+      // A function: store it as the value, not as a state updater.
+      if (live) setLand(() => t);
     });
     return () => {
       live = false;
@@ -543,22 +544,33 @@ export function OceanMap({
             ? `Destination harbour: ${h.name}`
             : `Your harbour and the destination: ${h.name}`,
       );
-      // Overlap: stack this label below any label already placed over the same pixels; if it
-      // would then cover a bottle, put it above its harbour point instead.
+      // Overlap: stack this label below any label already placed over the same pixels. A label
+      // that would cover a bottle (and the storm cloud drawn above it) moves beside it instead,
+      // and every label is kept inside the map's width.
       const p = map.project([h.geo.lng, h.geo.lat]);
       const w = Math.max(80, el.offsetWidth || 120);
       const hgt = 40;
+      const cw = map.getContainer().clientWidth;
       let dy = 0;
       for (const box of placed) {
         const overlapsX = Math.abs(p.x - box.x) < (w + box.w) / 2;
         const overlapsY = Math.abs(p.y + dy - box.y) < (hgt + box.h) / 2;
         if (overlapsX && overlapsY) dy = box.y + box.h / 2 + hgt / 2 + 4 - p.y;
       }
-      const above = dy === 0 && coversBottle(p.x, p.y, w, hgt);
-      el.classList.toggle('above', above);
-      m.setOffset([0, above ? -(el.offsetHeight || 36) + 6 : dy]);
-      el.classList.toggle('stacked', dy !== 0);
-      placed.push({ x: p.x, y: above ? p.y - hgt : p.y + dy, w, h: hgt });
+      let dx = 0;
+      if (coversBottle(p.x, p.y + dy, w, hgt)) {
+        const side = w / 2 + 28;
+        dx = p.x + side + w / 2 <= cw - 8 ? side : -side;
+        dy -= 20;
+      }
+      const left = p.x + dx - w / 2;
+      const right = p.x + dx + w / 2;
+      if (left < 8) dx += 8 - left;
+      else if (right > cw - 8) dx -= right - (cw - 8);
+      m.setOffset([dx, dy]);
+      // Moved off its point: the harbour's own dot is drawn by the map's anchor layer instead.
+      el.classList.toggle('stacked', dy !== 0 || dx !== 0);
+      placed.push({ x: p.x + dx, y: p.y + dy, w, h: hgt });
     }
     for (const [id, m] of harborMarkersRef.current) {
       if (!keep.has(id)) {
