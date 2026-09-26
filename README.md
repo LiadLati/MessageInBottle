@@ -205,7 +205,9 @@ never GPS or coordinates — after sign-in, on start, on return to the foregroun
 changes. The server validates it, and the latest one it accepts becomes the account's
 authoritative map clock on every device (before any, the harbour's zone; else UTC). The Ocean
 map's day and night palette, the sea view's lighting and My Shore all follow that clock, read from
-`GET /api/ocean/weather`, so a phone and a desktop of the same account always agree.
+`GET /api/ocean/weather`, so a phone and a desktop of the same account always agree. The time of
+day is the server's too: each answer's `serverTime`, advanced on the device with a monotonic
+clock, so a device clock that is wrong or changed cannot move the map.
 
 **Storms follow the map.** A daytime map has no storm. When the map enters a night, the account
 rolls once: a deterministic 25 % chance that the night holds one storm of 40–100 minutes,

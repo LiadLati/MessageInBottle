@@ -906,8 +906,8 @@ function PublicCard({
         // Said plainly before the action, because it cannot be undone and it is the one thing
         // that changes for everybody else looking at this map.
         <p className="card-note warn">
-          Opening this bottle will remove it from the public map. You can read the letter once;
-          after you close it, it cannot be opened again.
+          Opening this bottle will remove it from the public map. You can read the letter once, for
+          up to 15 minutes; after that, or once you finish reading, it cannot be opened again.
         </p>
       ) : null}
       <div className="action-row" style={{ marginTop: 14 }}>
