@@ -15,6 +15,7 @@ import {
   type DayPhase,
 } from '@mib/shared';
 import { api } from '../api/client.js';
+import { monotonicNow, sampleOf, serverNow, type ClockSample } from '../lib/serverClock.js';
 import { useSession } from './session.js';
 
 // One clock for the map's day and night and for its storm (risk policy v4, spec §9.3):
@@ -25,8 +26,12 @@ import { useSession } from './session.js';
 //             start, on returning to the foreground and whenever it notices a change — never
 //             GPS, never coordinates — and every device draws the server's answer, so a phone
 //             and a desktop of the same account never disagree;
-//   instant = real time, shifted by the persisted development-clock offset when the API reports
-//             one, so dev time travel moves weather together with journeys;
+//   instant = the server's time: the `serverTime` of the latest weather answer, advanced by
+//             monotonic elapsed time on this device and replaced by every fresh answer (every
+//             poll and every return to the foreground). A wrong or changed device clock cannot
+//             move the map (audit FE-R-003). The server's time already includes the development
+//             clock offset, so dev time travel still moves weather with journeys. Before the
+//             first answer only, the device clock (plus the dev offset) stands in;
 //   phase   = the local hour in that zone against the day window (07:00–19:00);
 //   storm   = the account's one storm, persisted by the server: shown only while it lasts and
 //             only while the map is in night.
@@ -97,7 +102,11 @@ function storeZone(zone: string | null) {
 export function WeatherProvider({ children }: { children: ReactNode }) {
   // Development clock offset, learned once and refreshed with the dev panel's own polling.
   const [offsetMs, setOffsetMs] = useState(0);
-  const [nowMs, setNowMs] = useState(() => Date.now());
+  // Monotonic time, re-read on every tick; with the latest server sample it gives the instant.
+  const [monoNow, setMonoNow] = useState(() => monotonicNow());
+  // The device clock, used only until the server's first answer arrives.
+  const [wallNow, setWallNow] = useState(() => Date.now());
+  const [sample, setSample] = useState<ClockSample | null>(null);
   const [phaseOverride, setPhaseOverride] = useState<DayPhase | 'auto'>('auto');
   const [oceanStormOverride, setOceanStormOverride] = useState<WeatherOverride>('auto');
   const [shoreStormOverride, setShoreStormOverride] = useState<WeatherOverride>('auto');
@@ -114,6 +123,11 @@ export function WeatherProvider({ children }: { children: ReactNode }) {
     return api
       .accountWeather()
       .then((w) => {
+        const fresh = sampleOf(w.serverTime);
+        if (fresh) {
+          setSample(fresh);
+          setMonoNow(fresh.monoMs);
+        }
         setAccount(w);
         storeZone(w.timeZone);
       })
@@ -183,7 +197,10 @@ export function WeatherProvider({ children }: { children: ReactNode }) {
   // Keep the instant fresh while the page is open, and re-read it immediately when a
   // backgrounded tab comes back — a tab restored after midnight must not stay on yesterday.
   useEffect(() => {
-    const tick = () => setNowMs(Date.now());
+    const tick = () => {
+      setMonoNow(monotonicNow());
+      setWallNow(Date.now());
+    };
     const id = setInterval(tick, TICK_MS);
     const onVisible = () => {
       if (!document.hidden) tick();
@@ -199,9 +216,10 @@ export function WeatherProvider({ children }: { children: ReactNode }) {
 
   // A signed-out view keeps nothing of the last account's weather.
   const current = userId ? account : null;
+  const clock = userId ? sample : null;
   // Before the server has answered: the zone last seen for the account, else the device's own.
   const timeZone = current?.timeZone ?? readStoredZone() ?? browserTimeZone() ?? 'UTC';
-  const instant = nowMs + offsetMs;
+  const instant = clock ? serverNow(clock, monoNow) : wallNow + offsetMs;
   const value = useMemo<WeatherState>(() => {
     const natural = phaseAt(instant, timeZone, DAYLIGHT_DEFAULTS);
     const span = current?.storm
