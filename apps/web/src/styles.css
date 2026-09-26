@@ -2117,7 +2117,7 @@ button.avatar {
 .reading-resume {
   position: absolute;
   left: 50%;
-  bottom: calc(var(--nav-height) + var(--nav-safe-bottom) + 12px);
+  top: calc(var(--header-pad-top, 0px) + 150px);
   transform: translateX(-50%);
   z-index: 6;
   display: flex;
@@ -2135,9 +2135,10 @@ button.avatar {
   font-size: 12.5px;
 }
 @media (min-width: 900px), (orientation: landscape) and (max-height: 520px) and (min-width: 560px) {
-  .reading-resume {
-    bottom: 20px;
-    left: calc(var(--rail-width) + (100% - var(--rail-width)) / 2);
+  .world-screen.two-pane .reading-resume {
+    left: calc((100% - var(--pane-width)) / 2);
+    top: calc(var(--header-pad-top, 0px) + 150px);
+    max-width: calc(100% - var(--pane-width) - 32px);
   }
 }
 .hint-pill {
@@ -2741,6 +2742,8 @@ button.avatar {
 }
 .letter-modal-report:has(.report-actions) {
   padding-bottom: 0;
+  /* A focused field scrolls clear of the pinned action row, not under it. */
+  scroll-padding-bottom: 72px;
 }
 .letter-modal-report .report-actions {
   position: sticky;
@@ -2748,6 +2751,34 @@ button.avatar {
   padding: 10px 0 12px;
   background: var(--paper-parchment);
   box-shadow: 0 -10px 12px -10px rgba(43, 33, 22, 0.25);
+}
+/* Very little height (landscape with the keyboard open): the letter gives up its sliver and the
+   actions stop floating, so the field being typed in and Send both stay reachable. */
+@media (max-height: 420px) {
+  .letter-modal-dialog.has-panel .letter-modal-scroll {
+    min-height: 0;
+  }
+}
+@media (max-height: 300px) {
+  /* The whole reader scrolls, top bar included, so the focused field gets every pixel. */
+  .letter-modal-dialog.has-panel {
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
+  .letter-modal-dialog.has-panel .letter-modal-report {
+    flex: none;
+    overflow: visible;
+  }
+  .letter-modal-dialog.has-panel .letter-modal-scroll {
+    display: none;
+  }
+  .letter-modal-report .report-actions {
+    position: static;
+    box-shadow: none;
+  }
+  .letter-modal-report:has(.report-actions) {
+    scroll-padding-bottom: 0;
+  }
 }
 .letter-modal-report .btn-ghost,
 .letter-modal-foot .btn-ghost {

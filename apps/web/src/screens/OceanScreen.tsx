@@ -709,13 +709,12 @@ export function OceanScreen({
           onFinish={reader.finish}
         />
       ) : null}
-      {!reading && (reader.paused || reader.ended) ? (
-        <ReadingResume
-          paused={reader.paused !== null}
-          onResume={reader.resume}
-          onForget={reader.forgetEnded}
-        />
-      ) : null}
+      <ReadingResume
+        paused={!reading && reader.paused !== null}
+        ended={!reading && reader.ended}
+        onResume={reader.resume}
+        onForget={reader.forgetEnded}
+      />
       {viewing ? (
         <SeaViewer
           bottle={viewingBottle}

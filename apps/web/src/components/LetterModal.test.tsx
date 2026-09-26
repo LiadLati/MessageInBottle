@@ -19,7 +19,9 @@ vi.mock('../api/client.js', async (actual) => ({
   api,
 }));
 
+import { StrictMode } from 'react';
 import { focusableIn } from '../lib/focusTrap.js';
+import { ReadingResume } from './ReadingResume.js';
 import { useLetterReader } from '../state/letterReader.js';
 import { LetterModal } from './LetterModal.js';
 
@@ -41,7 +43,9 @@ const found = (id = 'btl_found'): OpenedLetterDto => ({
 });
 
 beforeEach(() => {
-  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
+  // Ten minutes into the found letter's fifteen-minute reading.
+  vi.setSystemTime(Date.parse('2026-09-22T10:05:00.000Z'));
   api.closeReading.mockResolvedValue(undefined);
   api.activeReading.mockResolvedValue({ reading: null });
 });
@@ -200,6 +204,44 @@ describe('the reader state over the Ocean (FE-R-002)', () => {
     expect(result.current.paused).toBeNull();
     act(() => result.current.finish());
     expect(api.closeReading).not.toHaveBeenCalled();
+  });
+});
+
+describe('review follow-ups (FE-R-002)', () => {
+  it('a confirmed finish sends exactly one close, even in a development (StrictMode) build', async () => {
+    const { result } = renderHook(() => useLetterReader(), { wrapper: StrictMode });
+    await act(async () => {});
+    act(() => result.current.show({ letter: found(), justOpened: true }));
+    act(() => result.current.finish());
+    expect(api.closeReading).toHaveBeenCalledTimes(1);
+  });
+
+  it('the offer to return lapses when the reading window ends', async () => {
+    const { result } = renderHook(() => useLetterReader());
+    await act(async () => {});
+    act(() => result.current.show({ letter: found(), justOpened: true }));
+    act(() => result.current.dismiss());
+    expect(result.current.paused).not.toBeNull();
+    act(() => void vi.advanceTimersByTime(10 * 60 * 1000 + 1));
+    expect(result.current.paused).toBeNull();
+    expect(result.current.ended).toBe(true);
+    expect(api.closeReading).not.toHaveBeenCalled();
+  });
+
+  it('the prompt is a live region that is always present, and its Return button takes focus', () => {
+    const onResume = vi.fn();
+    const { rerender } = render(
+      <ReadingResume paused={false} ended={false} onResume={onResume} onForget={vi.fn()} />,
+    );
+    const live = screen.getByRole('status');
+    expect(live.textContent).toBe('');
+    rerender(<ReadingResume paused ended={false} onResume={onResume} onForget={vi.fn()} />);
+    expect(screen.getByRole('status')).toBe(live);
+    expect(live.textContent).toMatch(/still open/);
+    const back = screen.getByRole('button', { name: 'Return to the letter' });
+    expect(document.activeElement).toBe(back);
+    fireEvent.click(back);
+    expect(onResume).toHaveBeenCalledTimes(1);
   });
 });
 

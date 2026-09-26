@@ -338,7 +338,7 @@ and the new `risk_decisions` table (one row per bottle per storm night, unique o
   plus a required confirmation, rate-limited per address, reusing `login` and the same deletion
   service as SeaYou.
 - **Restriction.** Every decision that can change standing runs `applyStandingEffects`
-  (`services/restriction.ts`) in its own transaction. While the account is suspended or banned,
+  (`services/restriction.ts`) inside that decision's transaction. While the account is suspended or banned,
   journeys to it end (D14) and so do its own: storm midpoints and arrivals already due are
   settled first, then every bottle still travelling from it is cancelled (slot released once,
   neutral event) and its unopened adrift listings are withdrawn. Guarded writes make it safe to

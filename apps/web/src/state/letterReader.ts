@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { OpenedLetterDto } from '@mib/shared';
 import { api } from '../api/client.js';
 
@@ -40,23 +40,28 @@ export function useLetterReader() {
     };
   }, []);
 
+  // The reading on screen, read by the callbacks below without side effects inside state updates
+  // (a development build calls updaters twice).
+  const current = useRef<Reading | null>(null);
+  useEffect(() => {
+    current.current = reading;
+  }, [reading]);
+
   const show = useCallback((r: Reading) => {
     setPaused(null);
     setEnded(false);
     setReading(r);
   }, []);
   const dismiss = useCallback(() => {
-    setReading((r) => {
-      setPaused(isFound(r) ? r!.letter : null);
-      return null;
-    });
+    const r = current.current;
+    setReading(null);
+    setPaused(isFound(r) ? r!.letter : null);
   }, []);
   const finish = useCallback(() => {
-    setReading((r) => {
-      if (isFound(r)) void api.closeReading(r!.letter.bottle.id).catch(() => {});
-      return null;
-    });
+    const r = current.current;
+    setReading(null);
     setPaused(null);
+    if (isFound(r)) void api.closeReading(r!.letter.bottle.id).catch(() => {});
   }, []);
   const resume = useCallback(() => {
     setEnded(false);
@@ -70,6 +75,20 @@ export function useLetterReader() {
       .catch(() => {});
   }, []);
   const forgetEnded = useCallback(() => setEnded(false), []);
+
+  // A reading closed for now lapses with its window: the offer to return becomes "ended".
+  const pausedUntil = paused?.readingExpiresAt ? Date.parse(paused.readingExpiresAt) : null;
+  useEffect(() => {
+    if (pausedUntil === null || !Number.isFinite(pausedUntil)) return;
+    const id = window.setTimeout(
+      () => {
+        setPaused(null);
+        setEnded(true);
+      },
+      Math.max(0, pausedUntil - Date.now()),
+    );
+    return () => window.clearTimeout(id);
+  }, [pausedUntil]);
 
   return { reading, paused, ended, show, dismiss, finish, resume, forgetEnded };
 }

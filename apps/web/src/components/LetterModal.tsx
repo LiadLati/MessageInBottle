@@ -117,9 +117,37 @@ export function LetterModal({
   useModalKeys(dialogRef, confirmingFinish ? cancelFinish : close);
   const panelOpen =
     reporting || blockStage === 'confirm' || blockStage === 'busy' || confirmingFinish;
+  // While a panel is open, the reader fits the visual viewport — what an on-screen keyboard
+  // leaves visible — so the field being typed in and Send are never under the keyboard
+  // (FE-R-001). Scoped to the reader: no other screen changes how the keyboard behaves.
+  const rootRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const vv = window.visualViewport;
+    const root = rootRef.current;
+    if (!panelOpen || !vv || !root) return;
+    const fit = () => {
+      root.style.top = `${vv.offsetTop}px`;
+      root.style.height = `${vv.height}px`;
+      root.style.bottom = 'auto';
+      // The keyboard opened (or closed) around a focused field: keep that field in view.
+      const active = document.activeElement;
+      if (active instanceof HTMLElement && root.contains(active))
+        active.scrollIntoView?.({ block: 'nearest' });
+    };
+    fit();
+    vv.addEventListener('resize', fit);
+    vv.addEventListener('scroll', fit);
+    return () => {
+      vv.removeEventListener('resize', fit);
+      vv.removeEventListener('scroll', fit);
+      root.style.top = '';
+      root.style.height = '';
+      root.style.bottom = '';
+    };
+  }, [panelOpen]);
 
   return createPortal(
-    <div className={`letter-modal${closing ? ' closing' : ''}`}>
+    <div ref={rootRef} className={`letter-modal${closing ? ' closing' : ''}`}>
       <div className="letter-modal-backdrop" onClick={close} aria-hidden />
       {justOpened && !closing ? <div className="veil" aria-hidden /> : null}
       <div
@@ -129,11 +157,18 @@ export function LetterModal({
         aria-modal="true"
         aria-labelledby={titleId}
         tabIndex={-1}
+        // With a panel open on a short screen, whatever takes focus is brought into view inside
+        // the reader (clear of the pinned actions), not left under the keyboard.
+        onFocus={
+          panelOpen
+            ? (e) => (e.target as HTMLElement).scrollIntoView?.({ block: 'nearest' })
+            : undefined
+        }
       >
         <div className="letter-modal-top letter-chrome">
           <button type="button" className="btn-ghost" onClick={close}>
             <Icon name="back" size={14} />
-            {oneTime ? 'Close for now' : 'Back to shore'}
+            {oneTime ? 'Close' : 'Back to shore'}
           </button>
           <span id={titleId} className="grow provenance">
             {provenance ??
