@@ -2869,8 +2869,9 @@ button.avatar {
   position: absolute;
   inset: 0;
   background:
-    radial-gradient(120% 60% at 50% 0%, rgba(20, 28, 44, 0.55), transparent 70%),
-    repeating-linear-gradient(105deg, rgba(200, 220, 240, 0.07) 0 2px, transparent 2px 14px);
+    radial-gradient(120% 60% at 50% 0%, rgba(20, 28, 44, 0.6), transparent 70%),
+    linear-gradient(rgba(10, 16, 28, 0.18), rgba(10, 16, 28, 0.18)),
+    repeating-linear-gradient(105deg, rgba(200, 220, 240, 0.13) 0 2px, transparent 2px 14px);
   animation: map-storm-rain 1.4s linear infinite;
 }
 .map-storm-label {
@@ -2893,10 +2894,12 @@ button.avatar {
   from {
     background-position:
       0 0,
+      0 0,
       0 0;
   }
   to {
     background-position:
+      0 0,
       0 0,
       -28px 96px;
   }

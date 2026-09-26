@@ -114,6 +114,8 @@ function onPrivateMap(b: SentBottleSummaryDto): boolean {
 }
 
 // S1 · Ocean — private journeys over the real world map, and the public ocean beside it.
+const NO_WEATHER: Record<string, BottleWeather> = {};
+
 export function OceanScreen({
   focusId = null,
   focusPublicId = null,
@@ -404,6 +406,9 @@ export function OceanScreen({
           selectedRouteIds={selectedRouteIds}
           onSelectRoute={selectFromMap}
           phase={phase}
+          // The storm cloud rides above each bottle still at sea while the account's storm is
+          // showing (it is drawn only at night). Never on the public ocean.
+          weather={isPublic ? NO_WEATHER : weather}
           paused={viewing !== null}
           fitKey={fitKey}
         />
