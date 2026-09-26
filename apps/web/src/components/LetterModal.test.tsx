@@ -222,10 +222,32 @@ describe('review follow-ups (FE-R-002)', () => {
     act(() => result.current.show({ letter: found(), justOpened: true }));
     act(() => result.current.dismiss());
     expect(result.current.paused).not.toBeNull();
+    // The device thinks the window is over; the server confirms there is no reading any more.
+    api.activeReading.mockResolvedValue({ reading: null });
     act(() => void vi.advanceTimersByTime(10 * 60 * 1000 + 1));
+    await act(async () => {});
     expect(result.current.paused).toBeNull();
     expect(result.current.ended).toBe(true);
     expect(api.closeReading).not.toHaveBeenCalled();
+  });
+
+  it('a device clock running fast never ends an offer the server still holds', async () => {
+    // The device is an hour ahead of the server: by its clock the window closed long ago.
+    vi.setSystemTime(Date.parse('2026-09-22T11:05:00.000Z'));
+    const { result } = renderHook(() => useLetterReader());
+    await act(async () => {});
+    act(() => result.current.show({ letter: found(), justOpened: true }));
+    api.activeReading.mockResolvedValue({ reading: found() });
+    act(() => result.current.dismiss());
+    act(() => void vi.advanceTimersByTime(0));
+    await act(async () => {});
+    expect(result.current.paused).not.toBeNull();
+    expect(result.current.ended).toBe(false);
+    // Asked again later, and only the server's "no reading" ends it.
+    api.activeReading.mockResolvedValue({ reading: null });
+    act(() => void vi.advanceTimersByTime(30_000));
+    await act(async () => {});
+    expect(result.current.ended).toBe(true);
   });
 
   it('the prompt is a live region that is always present, and its Return button takes focus', () => {
