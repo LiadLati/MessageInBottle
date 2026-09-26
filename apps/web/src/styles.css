@@ -300,6 +300,14 @@ button:disabled {
 .deck-header .t-title {
   color: var(--foam-white);
 }
+/* A long name wraps inside the heading instead of pushing the actions off the screen. */
+.deck-header > div {
+  min-width: 0;
+  flex: 1 1 12rem;
+}
+.letter-heading {
+  overflow-wrap: anywhere;
+}
 .section-title {
   font-size: 13px;
   font-weight: 500;
@@ -2847,31 +2855,6 @@ button.avatar {
   .zoom-cluster {
     top: calc(var(--header-pad-top) + 64px);
   }
-}
-
-/* The account's one storm (risk policy v4). The map shows it only as the cloud above each
-   affected bottle; this layer carries the storm message and nothing that covers the map. */
-.map-storm {
-  position: absolute;
-  inset: 0;
-  z-index: 2;
-  pointer-events: none;
-}
-.map-storm-label {
-  position: absolute;
-  left: 50%;
-  top: calc(var(--header-pad-top, 0px) + 196px);
-  transform: translateX(-50%);
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  max-width: calc(100vw - 32px);
-  padding: 6px 12px;
-  border-radius: 999px;
-  background: rgba(16, 24, 36, 0.82);
-  color: #f0ddae;
-  font-size: 13px;
-  text-align: center;
 }
 
 /* The date and time below the map title: secondary, and steady as the minutes change. */

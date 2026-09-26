@@ -174,13 +174,14 @@ export function WriteScreen({ onReleased, onChooseShore, onImmersive }: Props) {
   if (step === 'compose') {
     return (
       <DeckScreen
-        title="A letter"
-        subtitle={
-          <>
-            Addressed to{' '}
-            <strong style={{ color: 'var(--foam-white)' }}>{draft.recipient?.displayName}</strong> ·
-            they will not see this journey before it arrives
-          </>
+        // The recipient is named in the heading itself (manual review round 2); that they will
+        // not know a bottle is coming is said where they are chosen.
+        title={
+          draft.recipient ? (
+            <span className="letter-heading">A letter to {draft.recipient.displayName}</span>
+          ) : (
+            'A letter'
+          )
         }
         actions={<BackButton onClick={() => setStep('friend')} label="Change" />}
       >
