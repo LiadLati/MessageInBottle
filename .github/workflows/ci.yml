@@ -27,8 +27,11 @@ jobs:
     env:
       # Nothing here may reach a real service or a real database.
       CI: 'true'
-      ARTEFACT_DIR: ${{ runner.temp }}/seayou-api
     steps:
+      - name: Define artifact directory
+        shell: bash
+        run: echo "ARTEFACT_DIR=$RUNNER_TEMP/seayou-api" >> "$GITHUB_ENV"
+
       - name: Check out
         uses: actions/checkout@v4
 
