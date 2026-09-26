@@ -473,6 +473,14 @@ export const DevAdvanceRequestSchema = z.object({
     .max(1000 * 60 * 60 * 24 * 365),
 });
 export const DevArriveRequestSchema = z.object({ bottleId: IdSchema });
+// Development-only: return the one shared simulated clock to real time. The request must carry
+// this exact confirmation, because the clock is every account's in the development environment.
+export const DEV_CLOCK_RESET_CONFIRMATION = 'return-to-real-time';
+export const DEV_CLOCK_RESET_PROMPT =
+  'Return the shared test clock to real time? This changes the clock for every account in this development environment. Events that already happened will not be reversed.';
+export const DevResetClockRequestSchema = z.object({
+  confirm: z.literal(DEV_CLOCK_RESET_CONFIRMATION),
+});
 // Development-only outcome control: ends one of the caller's own at-sea journeys now, through the
 // same server path an automatic hazard engine would use once its policy values are approved.
 export const DevLoseRequestSchema = z.object({

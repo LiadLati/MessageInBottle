@@ -75,6 +75,9 @@ Walkthrough of the vertical slice:
 4. Sign in as `bo` → My Shore is an empty 3D coast; there is no incoming notification.
 5. As `ada`, open the **Dev clock** pill (top centre) and press "Land bottle to Bo now" (or
    advance the clock in steps). The server moves its simulated clock forward and runs the worker.
+   The clock is one shared clock for every account. "Return to real time" in the same bar
+   (developers only, after a confirmation) puts it back to the real time; nothing that already
+   happened is reversed.
 6. As `bo` (same development password), the bottle rests on the sand and an arrival card appears. "Pick it up" opens the aged
    letter on full-screen parchment with Readable Print. Opening completes the journey.
 7. As `ada`, the passport shows Arrived, Opened, the frozen total duration and the event history.

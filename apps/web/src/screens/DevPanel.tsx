@@ -1,5 +1,7 @@
 import { useState } from 'react';
 import { api } from '../api/client.js';
+import { DEV_CLOCK_RESET_PROMPT } from '@mib/shared';
+import { ConfirmDialog } from '../components/ConfirmDialog.js';
 import { ErrorNote } from '../components/ui.js';
 import { formatDate } from '../lib/format.js';
 import { useAsync } from '../lib/useAsync.js';
@@ -31,6 +33,9 @@ function DevPanelInner({ onChanged, refreshKey }: { onChanged: () => void; refre
   const outbox = useAsync(() => api.devOutbox(), [refreshKey], 15_000);
   const [error, setError] = useState<Error | null>(null);
   const [open, setOpen] = useState(false);
+  const [confirmingReset, setConfirmingReset] = useState(false);
+  const [resetting, setResetting] = useState(false);
+  const { resync } = useWeather();
   const slot = useTopSlot('dev');
   if (status.error || !status.data?.devMode) return null;
 
@@ -38,7 +43,8 @@ function DevPanelInner({ onChanged, refreshKey }: { onChanged: () => void; refre
     setError(null);
     try {
       await fn();
-      await Promise.all([status.reload(), sent.reload()]);
+      // This device learns the new time at once; every other open client on its next poll.
+      await Promise.all([status.reload(), sent.reload(), resync()]);
       onChanged();
     } catch (err) {
       setError(err instanceof Error ? err : new Error(String(err)));
@@ -80,7 +86,32 @@ function DevPanelInner({ onChanged, refreshKey }: { onChanged: () => void; refre
             >
               +1 day
             </button>
+            {/* Back to the server's real time, for every account: it is one shared clock. */}
+            <button
+              type="button"
+              className="chip"
+              disabled={status.data.clockOffsetMs === 0}
+              onClick={() => setConfirmingReset(true)}
+            >
+              Return to real time
+            </button>
           </div>
+          {confirmingReset ? (
+            <ConfirmDialog
+              title="Return to real time"
+              body={DEV_CLOCK_RESET_PROMPT}
+              confirmLabel="Return to real time"
+              busy={resetting}
+              onCancel={() => setConfirmingReset(false)}
+              onConfirm={() => {
+                setResetting(true);
+                void run(() => api.devResetClock()).finally(() => {
+                  setResetting(false);
+                  setConfirmingReset(false);
+                });
+              }}
+            />
+          ) : null}
           {atSea.length > 0 ? (
             <div className="row">
               {atSea.map((b) => (

@@ -4,6 +4,7 @@ import {
   AccountWeatherSchema,
   AccountPoliciesSchema,
   AccountStandingSchema,
+  DEV_CLOCK_RESET_CONFIRMATION,
   AppealResultsSchema,
   AdminAppealSchema,
   AdminCaseDetailSchema,
@@ -316,6 +317,9 @@ export const api = {
     request('POST', `/admin/appeals/${id}/${outcome}`, { reason }, DecidedAppeal),
   devStatus: () => request('GET', '/dev/status', undefined, DevStatusSchema),
   devAdvance: (ms: number) => request('POST', '/dev/advance', { ms }, DevStatusSchema),
+  // Returns the one shared DEV clock to real time; the server requires the confirmation.
+  devResetClock: () =>
+    request('POST', '/dev/reset-clock', { confirm: DEV_CLOCK_RESET_CONFIRMATION }, DevStatusSchema),
   devArrive: (bottleId: string) => request('POST', '/dev/arrive', { bottleId }, DevStatusSchema),
   devLose: (bottleId: string, reason: 'adrift' | 'sunk') =>
     request('POST', '/dev/lose', { bottleId, reason }, DevStatusSchema),
