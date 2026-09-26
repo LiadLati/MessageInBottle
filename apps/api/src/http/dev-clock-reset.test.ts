@@ -31,7 +31,7 @@ async function world(devMode = true) {
     app.request(path, {
       method: 'POST',
       headers: json(token),
-      body: body === undefined ? undefined : JSON.stringify(body),
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
     });
   const reset = (token?: string, confirm: unknown = DEV_CLOCK_RESET_CONFIRMATION) =>
     post('/api/dev/reset-clock', token, { confirm });

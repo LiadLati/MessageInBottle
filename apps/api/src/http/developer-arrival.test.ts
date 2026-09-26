@@ -40,7 +40,7 @@ async function world() {
     app.request(path, {
       method: 'POST',
       headers: json(token),
-      body: body === undefined ? undefined : JSON.stringify(body),
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
     });
   const release = async (key: string) => {
     const res = await post('/api/bottles/release', ada.token, releaseInput(bo.id, key));
