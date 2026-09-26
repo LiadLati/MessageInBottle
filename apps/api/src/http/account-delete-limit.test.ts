@@ -104,6 +104,22 @@ describe('POST /api/account/delete is rate-limited before the password is checke
     expect((await del(app, dee.token, 'wrong password', '192.0.2.51')).status).toBe(401);
   });
 
+  it('an account over its own budget does not spend its shared address’s budget', async () => {
+    const app = createApp(createTestWorld().ctx);
+    const shared = '192.0.2.77';
+    const ada = await loginAs(app, 'ada');
+    // Ada keeps trying long after her own budget is gone, from an address others share.
+    for (let i = 0; i < DELETE_PER_ADDRESS.limit * 2; i++)
+      await del(app, ada.token, 'wrong password', shared);
+    // Her neighbours on that address still have the address budget her refused attempts left.
+    const bo = await loginAs(app, 'bo');
+    const cy = await loginAs(app, 'cy');
+    for (let i = 0; i < DELETE_PER_ADDRESS.limit - DELETE_PER_ACCOUNT.limit; i++)
+      expect((await del(app, i % 2 ? bo.token : cy.token, 'wrong password', shared)).status).toBe(
+        401,
+      );
+  });
+
   it('cannot be bypassed by forging the left-most X-Forwarded-For entry', async () => {
     const w = createTestWorld({ trustProxy: true, trustedProxyHops: 1 });
     const app = createApp(w.ctx);

@@ -27,10 +27,12 @@ export function accountRoutes(limiter = new RateLimiter()) {
   r.post('/delete', jsonBody(DeleteAccountRequestSchema), async (c) => {
     const ctx = c.get('ctx');
     const user = c.get('user');
-    const byAddress = limiter.hit(`account-delete:addr:${clientAddress(c)}`, DELETE_PER_ADDRESS);
-    if (!byAddress.allowed) throw tooManyRequests(byAddress.retryAfterMs);
+    // The account's own budget first: an attempt it refuses costs its neighbours on a shared
+    // address nothing.
     const byAccount = limiter.hit(`account-delete:user:${user.id}`, DELETE_PER_ACCOUNT);
     if (!byAccount.allowed) throw tooManyRequests(byAccount.retryAfterMs);
+    const byAddress = limiter.hit(`account-delete:addr:${clientAddress(c)}`, DELETE_PER_ADDRESS);
+    if (!byAddress.allowed) throw tooManyRequests(byAddress.retryAfterMs);
     await verifyAccountPassword(ctx, user.id, c.req.valid('json').password);
     const summary = deleteAccount(ctx, user.id);
     return c.json({ deletedAt: summary.deletedAt, alreadyDeleted: summary.alreadyDeleted });
