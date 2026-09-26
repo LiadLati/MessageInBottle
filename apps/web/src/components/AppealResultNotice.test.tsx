@@ -49,7 +49,10 @@ describe('the appeal result popup', () => {
     expect(dialog.textContent).toMatch(/violation was withdrawn/);
     expect(dialog.textContent).toMatch(/stays in your notifications/);
     expect(dialog.textContent).toMatch(/Decided \d{1,2} Oct 2026, \d{2}:\d{2}/);
-    await act(async () => void fireEvent.click(screen.getByRole('button', { name: 'OK' })));
+    await act(() => {
+      fireEvent.click(screen.getByRole('button', { name: 'OK' }));
+      return Promise.resolve();
+    });
     expect(api.appealResultSeen).toHaveBeenCalledTimes(1);
     expect(api.appealResultSeen).toHaveBeenCalledWith('ntf_1');
     expect(onDismissed).toHaveBeenCalledTimes(1);
@@ -68,7 +71,10 @@ describe('the appeal result popup', () => {
     );
     const dialog = screen.getByRole('alertdialog', { name: 'Your appeal was rejected' });
     expect(dialog.textContent).toMatch(/final within SeaYou/);
-    await act(async () => void fireEvent.keyDown(document, { key: 'Escape' }));
+    await act(() => {
+      fireEvent.keyDown(document, { key: 'Escape' });
+      return Promise.resolve();
+    });
     expect(api.appealResultSeen).toHaveBeenCalledTimes(1);
     expect(onDismissed).toHaveBeenCalledTimes(1);
   });
