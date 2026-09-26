@@ -43,7 +43,7 @@ export const REJECTION_MESSAGES: Record<ReleaseRejection, string> = {
   recipient_has_no_shore: 'Your friend has not chosen a shore yet.',
   recipient_unavailable: 'Delivery to this friend is unavailable.',
   shore_full:
-    "This friend's shore is full right now. Your letter is kept as a draft; try again later.",
+    "This friend's shore is full right now. Your letter is kept as a draft. Try again later.",
   route_unavailable: 'No connected sea route reaches that shore.',
   invalid_letter: 'The letter is empty or too long.',
   letter_direction_controls: DIRECTION_CONTROLS_MESSAGE,

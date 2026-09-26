@@ -900,7 +900,7 @@ function PublicCard({
       </div>
       <p className="card-note">
         {bottle.mine
-          ? 'Swept off course in a storm. Its delivery is over; it drifts here for anyone to see.'
+          ? 'Swept off course in a storm. Its delivery is over, and it drifts here for anyone to see.'
           : 'Swept off course in a storm. It drifts here, sealed.'}
       </p>
       {onOpen ? (

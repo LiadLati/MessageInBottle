@@ -331,7 +331,7 @@ function CaseView({
               : `The case will be closed with no violation. ${c.sender.displayName} will not be told anything. ${FINAL}`
           }
           confirmLabel={confirm === 'accept' ? 'Uphold violation' : 'Reject report'}
-          reasonLabel="Why (mandatory; recorded with the decision)"
+          reasonLabel="Why (required, recorded with the decision)"
           requireReason
           destructive={confirm === 'accept'}
           busy={busy}
@@ -351,7 +351,7 @@ function CaseView({
               : `${c.sender.displayName} is shown the decision and may appeal it once, within 30 days.`
           } ${FINAL}`}
           confirmLabel="Ban permanently"
-          reasonLabel="Why (mandatory; recorded with your name and the time)"
+          reasonLabel="Why (required, recorded with your name and the time)"
           requireReason
           acknowledge="I have reviewed this case myself and confirm it is a critical child-safety violation."
           destructive
@@ -390,7 +390,7 @@ function CaseView({
 
 // Decision 1: one administrator, no second approval and no way to reopen or reverse.
 const FINAL =
-  'This decision is final: you cannot reopen or reverse it; only the sender’s appeal can change it.';
+  'This decision is final. You cannot reopen or reverse it, and only the sender’s appeal can change it.';
 
 // What upholding does to the sender's standing, as the server computed it (audit FE-009).
 function consequenceSentence(c: AdminCaseDetailDto): string {
@@ -549,7 +549,7 @@ function CaseBody({ c }: { c: AdminCaseDetailDto }) {
             <p className="secondary">
               {c.ai.status === 'running'
                 ? 'The model is reviewing this case.'
-                : 'Waiting for the local model. The case stays in the queue until it answers; decide it yourself if you prefer.'}
+                : 'Waiting for the local model. The case stays in the queue until it answers. You can decide it yourself if you prefer.'}
               {c.ai.lastError ? ` Last attempt: ${c.ai.lastError}.` : ''}
               {c.ai.attempts > 0 ? ` ${c.ai.attempts} attempt(s).` : ''}
             </p>
@@ -728,7 +728,7 @@ function AppealView({
                 } This is final.`
           }
           confirmLabel={confirm === 'accept' ? 'Accept appeal' : 'Reject appeal'}
-          reasonLabel="Why (mandatory; recorded with the decision)"
+          reasonLabel="Why (required, recorded with the decision)"
           requireReason
           destructive={confirm === 'reject'}
           busy={busy}

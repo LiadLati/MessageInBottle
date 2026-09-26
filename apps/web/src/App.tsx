@@ -255,7 +255,7 @@ function Shell() {
       <main className="deck-screen" aria-busy>
         {reconnecting ? (
           <p className="note amber" role="status">
-            Cannot reach the SeaYou server right now. Still signed in; trying again…
+            Cannot reach the SeaYou server right now. Still signed in. Trying again…
           </p>
         ) : null}
       </main>

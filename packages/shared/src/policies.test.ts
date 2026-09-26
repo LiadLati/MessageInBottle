@@ -157,7 +157,7 @@ describe('the published documents', () => {
     expect(terms).toMatch(/without choosing does not give up anything/i);
     expect(terms).toMatch(/can be appealed once, in the 30 days after the decision/i);
     expect(terms).toMatch(/appeal period has expired, and it is final/i);
-    expect(terms).toMatch(/cannot reopen or reverse it; only your appeal can change it/i);
+    expect(terms).toMatch(/cannot reopen or reverse it\. Only your appeal can change it/i);
     expect(terms).toMatch(/never a decision, sanction or ban/i);
     expect(terms).toMatch(/A suspension ends automatically/i);
     expect(terms).toMatch(/told only that delivery is unavailable/i);
@@ -267,7 +267,7 @@ describe('the published documents', () => {
   it('describe notifications, time zone and deletion as implemented (decisions 6, 7, 9)', () => {
     const privacy = textOf(PRIVACY_POLICY);
     expect(privacy).toMatch(
-      /never deleted automatically; marking them read only clears the badge/i,
+      /never deleted automatically\. Marking them read only clears the badge/i,
     );
     expect(privacy).toMatch(/kept for up to 90 days/i);
     expect(privacy).toMatch(/no location permission and no GPS/i);
@@ -418,5 +418,23 @@ describe('the published documents', () => {
       expect(PolicyAcceptanceRequestSchema.safeParse(rest).success).toBe(false);
     }
     expect(PolicyAcceptanceRequestSchema.safeParse({ ...ok, versions: {} }).success).toBe(false);
+  });
+});
+
+// Manual review round 1, item 7: sentences joined with a semicolon read like generated code.
+// The published text keeps a semicolon only where formal English needs one: separating the
+// items of a list whose items already contain commas.
+describe('semicolons in the published documents', () => {
+  it('appear only between the comma-laden items of a list', () => {
+    const withSemicolons = PUBLISHED_DOCUMENTS.flatMap((d) =>
+      textOf(d)
+        .split(/(?<=[.!?])\s+/)
+        .filter((sentence) => sentence.includes(';'))
+        .map((sentence) => sentence.slice(0, 60)),
+    );
+    expect(withSemicolons).toEqual([
+      'Security and account-control records: a hashed form of your ',
+      'What remains is a minimal record that the account existed, w',
+    ]);
   });
 });

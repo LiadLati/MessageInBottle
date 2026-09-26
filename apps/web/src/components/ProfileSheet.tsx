@@ -39,7 +39,7 @@ function acceptanceLine(p: {
   const version = p.documents[0]?.acceptedVersion ?? '';
   return current
     ? `Accepted version ${version} on ${when}.${p.status === 'draft' ? ' The documents are still a working draft.' : ''}`
-    : `You accepted version ${version} on ${when}; a newer version is waiting for you.`;
+    : `You accepted version ${version} on ${when}. A newer version is waiting for you.`;
 }
 
 // The header avatar opens this instead of a permanent "signed in as" row (IA note on S1).

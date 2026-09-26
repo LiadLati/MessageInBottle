@@ -433,7 +433,7 @@ export function waiveAppeal(
     if (appeal)
       throw conflict(
         'already_appealed',
-        'This decision has already been appealed; the appeal cannot be withdrawn here.',
+        'This decision has already been appealed. The appeal cannot be withdrawn here.',
       );
     const first = tx
       .update(t.violations)
@@ -511,7 +511,7 @@ export function submitAppeal(
       throw conflict(
         'already_appealed',
         existing.status === 'rejected'
-          ? 'This decision was appealed and the appeal was rejected; it cannot be appealed again.'
+          ? 'This decision was appealed and the appeal was rejected. It cannot be appealed again.'
           : 'This violation has already been appealed.',
       );
     }

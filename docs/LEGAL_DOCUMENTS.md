@@ -151,6 +151,13 @@ earlier Privacy Policy correction; once a version has been published, a change l
 new version. The Privacy Policy and Child Safety Standards made no timing promise about a
 finder's reading and needed no change.
 
+In the same round, sentences joined with a semicolon were split or rejoined with a comma across
+all four documents and the account-deletion page, whose list items now read as sentences. Two
+semicolons remain, each separating the items of a list whose items already contain commas (the
+security records and what remains after deletion, both in the Privacy Policy). The wording also
+now says that a possible threat, not only a possible child-safety issue, is marked urgent for a
+reviewer, matching the review worker. No right, obligation or practice changed.
+
 ## Releasing a new version
 
 1. Edit the documents in `packages/shared/src/policies.ts`.

@@ -228,7 +228,7 @@ export function openPublicBottle(
     if (isBlockedEitherWay(tx, user.id, bottle.senderId)) throw notFound('bottle');
     // The sender reads their own letter with their own action, which never claims the bottle.
     if (bottle.senderId === user.id) {
-      throw badRequest('own_bottle', 'This is your own bottle; reading it changes nothing.');
+      throw badRequest('own_bottle', 'This is your own bottle, so reading it changes nothing.');
     }
 
     const existing = publicOpeningOf(tx, bottleId);
