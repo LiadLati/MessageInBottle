@@ -190,6 +190,35 @@ Legal documents moved to version 1.1 as a material change, so every account acce
 through the existing re-acceptance gate (`http/policies.test.ts` pins a 1.0 acceptance being
 asked again). See `docs/LEGAL_DOCUMENTS.md`.
 
+## Final release blockers (`fix/final-release-blockers`)
+
+From the pre-production re-audit (`audit/pre-production-rerun`, `docs/audits/pre-production-rerun/`
+on that branch). Only these five were in scope; the audit's other P2/P3 findings are scheduled
+separately.
+
+| ID | Sev | Status | Fix | Regression tests |
+| --- | --- | --- | --- | --- |
+| SEC-R-001 | P1 | Fixed | `POST /api/account/delete` counts attempts per signed-in account (5 / 15 min) and per client address (10 / 15 min, trusted-proxy rules) *before* the password is checked, and answers 429. Each budget belongs to one caller, so exhausting it blocks no one else; the answer never depends on whether the password was right. `http/routes/account.ts` | `http/account-delete-limit.test.ts` (verification only inside the budget; independent budgets; forged left-most `X-Forwarded-For`; a 150-request flood gives no 503 and leaves sign-in, registration, reset and another deletion working), `apps/web/src/components/dialogs.test.tsx` |
+| ARCH-R-002 | P1 | Fixed | When a decision leaves an account suspended or banned (upheld report, critical child-safety decision, appeal decision), `applyStandingEffects` settles what had already happened (due storm midpoints, then due arrivals), then cancels every bottle still travelling from it (slot released once, neutral "delivery unavailable", one sender notice, nothing to the recipient) and withdraws its unopened adrift listings. Delivered or opened letters, and adrift letters a finder opened, are untouched; nothing is restored when the restriction ends. `services/restriction.ts` `endOutboundJourneys` | `services/restricted-sender.test.ts` (warning, suspension, third-violation ban, critical ban, idempotency under retries, expiry, accepted appeal, late-worker arrival and storm races) |
+| FE-R-001 | P2 | Fixed | A panel over a letter (report, block, finish) shrinks and scrolls inside the reader with its action row pinned; the footer is left out while it is open; short-landscape padding respects safe areas; the viewport resizes for the on-screen keyboard. `apps/web/src/components/LetterModal.tsx`, `ReportSheet.tsx`, `styles.css`, `index.html` | `apps/web/src/components/LetterModal.test.tsx`; browser check at 667×375, 740×360, 844×390, 390×844, 1280×800 |
+| FE-R-002 | P2 | Fixed | Backdrop and Escape only hide a finder's reading; the Ocean offers "Return to the letter" while the server still holds it and says when it has ended. Only a confirmed "Finish reading" ends it early. `apps/web/src/state/letterReader.ts`, `components/LetterModal.tsx`, `components/ReadingResume.tsx` | `apps/web/src/components/LetterModal.test.tsx`; browser check (backdrop, Escape, resume, refresh, confirmed finish) |
+| FE-R-003 | P2 | Fixed | The map's day, night and storm run on the server's clock: the latest `serverTime`, advanced with `performance.now()` and replaced by every answer (polls, return to the foreground). `apps/web/src/state/weather.tsx`, `lib/serverClock.ts` | `apps/web/src/state/weather-clock.test.tsx`; browser check (device clock ±12 h, changed while open, foreground resync) |
+
+### Accepted risk: SEC-R-002 (ban evasion by deleting the account)
+
+**Accepted by the owner for the current scale; not a release blocker; not implemented.** A
+permanently banned person can delete their account and register a new one with the same username
+and email.
+
+- The permanent sanction applies to the banned account.
+- Ban evasion remains prohibited by the Community Rules.
+- SeaYou does not retain deleted identifiers (no email or username tombstone, no keyed-hash
+  denylist) solely to prevent re-registration; deletion stays deletion.
+- This may be reconsidered if real abuse occurs.
+
+Nothing else about bans or deletion was weakened. Letters a banned account still had travelling
+end at the ban (ARCH-R-002).
+
 ## Gaps in the remediation plan
 
 `05-remediation-plan.md` assigned no batch to ARCH-008 (P1), FE-004, FE-005, FE-006, FE-008 or

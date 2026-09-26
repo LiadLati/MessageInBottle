@@ -217,7 +217,10 @@ and the new `risk_decisions` table (one row per bottle per storm night, unique o
     touched; release, route, duration, arrival, notifications, deadlines and rate limits never
     read the zone.
   - *Display.* One storm per account: the Ocean screen draws it once over the map
-    (`.map-storm`), only while it lasts and only at night; bottles at sea show they are in it,
+    (`.map-storm`), only while it lasts and only at night — judged on the server's clock: the
+    web takes each answer's `serverTime` and advances it with `performance.now()`, so a wrong or
+    changed device clock cannot move day, night or a storm (`apps/web/src/lib/serverClock.ts`,
+    audit FE-R-003); bottles at sea show they are in it,
     and My Shore shows the same weather. `SentBottleDto.storms` carries the account storm's
     visible windows for a bottle at sea (clipped at the first daytime moment).
 - **Earlier policies.** v1 counted nights in a server zone, v2 at the bottle's meridian, v3 gave
@@ -334,6 +337,15 @@ and the new `risk_decisions` table (one row per bottle per storm night, unique o
   JavaScript-free, responsive, indexable. `/legal/delete-account` is a form post: credentials
   plus a required confirmation, rate-limited per address, reusing `login` and the same deletion
   service as SeaYou.
+- **Restriction.** Every decision that can change standing runs `applyStandingEffects`
+  (`services/restriction.ts`) inside that decision's transaction. While the account is suspended or banned,
+  journeys to it end (D14) and so do its own: storm midpoints and arrivals already due are
+  settled first, then every bottle still travelling from it is cancelled (slot released once,
+  neutral event) and its unopened adrift listings are withdrawn. Guarded writes make it safe to
+  repeat (audit ARCH-R-002).
+- **Account deletion attempts.** `POST /api/account/delete` is limited per account and per
+  client address before the password check, so it cannot fill the shared password-hashing queue
+  (audit SEC-R-001).
 - **Deletion.** `services/deletion.ts` is one transaction and is idempotent. It revokes sessions,
   clears identifiers and preferences, drops friendships, blocks, notifications, acceptances and
   idempotency records, cancels in-flight letters (releasing each reservation once and recording

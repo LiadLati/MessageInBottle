@@ -49,7 +49,9 @@ export function DeleteAccountDialog({
       setFailure(
         err instanceof ApiError && err.code === 'invalid_password'
           ? 'That password is not correct.'
-          : 'Could not delete the account. Check your connection and try again.',
+          : err instanceof ApiError && err.code === 'rate_limited'
+            ? 'Too many attempts. Wait a few minutes and try again.'
+            : 'Could not delete the account. Check your connection and try again.',
       );
       setBusy(false);
     }

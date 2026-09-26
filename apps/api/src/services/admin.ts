@@ -360,7 +360,7 @@ export function decideCase(
       standing,
       now,
     );
-    applyStandingEffects(tx, c.senderId, now);
+    applyStandingEffects(ctx, tx, c.senderId, now);
     return true;
   });
 }
@@ -513,6 +513,9 @@ export function decideAppeal(
         now,
       });
     }
+    // Whatever the outcome, the standing it leaves applies at once; an accepted appeal restores
+    // no ended journey (ARCH-R-002).
+    applyStandingEffects(ctx, tx, a.userId, now);
     return true;
   });
 }
@@ -685,7 +688,7 @@ export function decideCaseCritical(
       standingOf(tx, c.senderId, now),
       now,
     );
-    applyStandingEffects(tx, c.senderId, now);
+    applyStandingEffects(ctx, tx, c.senderId, now);
   });
   return getCase(ctx, caseId);
 }

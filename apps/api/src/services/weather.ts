@@ -178,7 +178,9 @@ export function ensureRolls(ctx: AppContext, userId: string, now: number): numbe
   return ctx.db.transaction((tx) => ensureRollsIn(ctx, tx, userId, now));
 }
 
-function ensureRollsIn(ctx: AppContext, tx: DbOrTx, userId: string, now: number): number {
+// The same, inside a transaction the caller already holds (a zone change, a harbour change, or
+// a restriction settling what is due before it takes effect).
+export function ensureRollsIn(ctx: AppContext, tx: DbOrTx, userId: string, now: number): number {
   ensureMapClock(ctx, userId, tx);
   const history = zoneHistory(tx, userId);
   const activated = policyActivatedAt(ctx, tx);
