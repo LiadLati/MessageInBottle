@@ -14,7 +14,7 @@ import { TabList, tabId } from '../components/Tabs.js';
 import { LetterPaper } from '../components/LetterPaper.js';
 import { REPORT_REASON_LABELS } from '../components/ReportSheet.js';
 import { Avatar, BackButton, DeckScreen, ErrorNote, Skeleton } from '../components/ui.js';
-import { formatDate, formatDayTime } from '../lib/format.js';
+import { formatDate, formatDay, formatDayTime } from '../lib/format.js';
 import { useAsync } from '../lib/useAsync.js';
 
 export type AdminSection = 'reports' | 'appeals';
@@ -461,7 +461,7 @@ function CaseBody({ c }: { c: AdminCaseDetailDto }) {
           {c.letter.redactedAt ? (
             <p className="muted">
               The copy of this letter was removed on{' '}
-              {new Date(c.letter.redactedAt).toLocaleDateString()} under the evidence retention
+              {formatDay(c.letter.redactedAt)} under the evidence retention
               policy. The decision and its reasoning are kept below.
             </p>
           ) : (
