@@ -1901,6 +1901,17 @@ button.avatar {
   color: var(--paper-ink-muted);
   border-top: 1px solid rgba(90, 76, 51, 0.12);
 }
+.letter-modal-foot .letter-modal-finish {
+  margin-top: 8px;
+}
+/* A panel opened over the letter (report, block, finish reading) takes the room it needs and
+   scrolls inside the dialog when the screen is short (phone landscape, an open keyboard): the
+   letter keeps a sliver, the footer is left out, and the panel's actions stay pinned in view
+   (audit FE-R-001). */
+.letter-modal-dialog.has-panel .letter-modal-scroll {
+  flex: 1 1 0;
+  min-height: 48px;
+}
 @keyframes modal-fade-in {
   from {
     opacity: 0;
@@ -1940,6 +1951,18 @@ button.avatar {
 @media (min-width: 900px), (orientation: landscape) and (max-height: 520px) and (min-width: 560px) {
   .letter-modal {
     padding: 32px 32px 32px calc(var(--rail-width) + 32px);
+  }
+}
+/* Phone landscape: every pixel of height counts, and the notch or home indicator may sit on
+   any side. */
+@media (orientation: landscape) and (max-height: 520px) and (min-width: 560px) {
+  .letter-modal {
+    padding: max(10px, env(safe-area-inset-top, 0px)) max(16px, env(safe-area-inset-right, 0px))
+      max(10px, env(safe-area-inset-bottom, 0px))
+      calc(var(--rail-width) + max(16px, env(safe-area-inset-left, 0px)));
+  }
+  .letter-modal-top {
+    padding: 8px 12px;
   }
 }
 @media (prefers-reduced-motion: reduce) {
@@ -2090,6 +2113,33 @@ button.avatar {
 }
 
 /* ---------- Ocean v2.0: hint pill, card actions, storm chip ---------- */
+/* A finder's one reading, closed for now but still open on the server (FE-R-002). */
+.reading-resume {
+  position: absolute;
+  left: 50%;
+  bottom: calc(var(--nav-height) + var(--nav-safe-bottom) + 12px);
+  transform: translateX(-50%);
+  z-index: 6;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: max-content;
+  max-width: calc(100% - 32px);
+  padding: 8px 8px 8px 16px;
+  border-radius: 999px;
+  background: rgba(6, 20, 30, 0.82);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(215, 231, 228, 0.22);
+  color: #eaf1f0;
+  font-size: 12.5px;
+}
+@media (min-width: 900px), (orientation: landscape) and (max-height: 520px) and (min-width: 560px) {
+  .reading-resume {
+    bottom: 20px;
+    left: calc(var(--rail-width) + (100% - var(--rail-width)) / 2);
+  }
+}
 .hint-pill {
   position: absolute;
   left: 50%;
@@ -2681,8 +2731,27 @@ button.avatar {
 }
 /* The report form lives inside the reader's paper-coloured chrome. */
 .letter-modal-report {
+  flex: 0 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
   padding: 12px 16px;
   border-bottom: 1px solid rgba(90, 76, 51, 0.12);
+  color: var(--paper-ink);
+}
+.letter-modal-report:has(.report-actions) {
+  padding-bottom: 0;
+}
+.letter-modal-report .report-actions {
+  position: sticky;
+  bottom: 0;
+  padding: 10px 0 12px;
+  background: var(--paper-parchment);
+  box-shadow: 0 -10px 12px -10px rgba(43, 33, 22, 0.25);
+}
+.letter-modal-report .btn-ghost,
+.letter-modal-foot .btn-ghost {
+  border-color: rgba(90, 76, 51, 0.35);
   color: var(--paper-ink);
 }
 .letter-modal-report .t-meta,

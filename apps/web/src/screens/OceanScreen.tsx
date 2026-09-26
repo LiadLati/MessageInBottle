@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from 'react';
-import type { OpenedLetterDto, PublicBottleDto, SentBottleSummaryDto } from '@mib/shared';
+import type { PublicBottleDto, SentBottleSummaryDto } from '@mib/shared';
 import { ApiError, api } from '../api/client.js';
 import { LetterModal } from '../components/LetterModal.js';
+import { ReadingResume } from '../components/ReadingResume.js';
+import { useLetterReader } from '../state/letterReader.js';
 import { OceanMap, SeaViewer } from '../components/lazy.js';
 import type { HarborLabel, MapAnchor, MapRoute, OceanMapHandle } from '../components/OceanMap.js';
 import {
@@ -204,13 +206,9 @@ export function OceanScreen({
   const weatherOf = (id: string) => weather[id] ?? 'calm';
   // Reading a letter from the public ocean: the sender re-reading their own (a pure read), or a
   // finder reading the bottle they have just opened. Both use the ordinary letter reader.
-  const [reading, setReading] = useState<{
-    letter: OpenedLetterDto;
-    justOpened: boolean;
-    // Only the sender's own read needs a line of its own; a found letter carries no attribution
-    // and the reader states that itself.
-    provenance?: string;
-  } | null>(null);
+  const reader = useLetterReader();
+  const reading = reader.reading;
+  const setReading = reader.show;
   // Set when this bottle turned out to be gone — someone else opened it first, its 72 hours
   // ran out, or the finder's own one reading is over.
   const [claimedIds, setClaimedIds] = useState<string[]>([]);
@@ -292,28 +290,6 @@ export function OceanScreen({
   }, [leaveRef, acknowledgeSeen]);
 
   const reloadPublic = publicOcean.reload;
-  // A finder's one-time reading survives a refresh or a dropped connection for a short,
-  // server-bounded while: if this account has one open, bring it straight back.
-  useEffect(() => {
-    let alive = true;
-    void api
-      .activeReading()
-      .then((r) => {
-        if (alive && r.reading) setReading({ letter: r.reading, justOpened: true });
-      })
-      .catch(() => {});
-    return () => {
-      alive = false;
-    };
-  }, []);
-  // Closing the reader ends the finder's access at once (the sender's own read is a plain read).
-  const closeReader = () => {
-    const r = reading;
-    setReading(null);
-    if (r && r.letter.bottle.source === 'public') {
-      void api.closeReading(r.letter.bottle.id).catch(() => {});
-    }
-  };
   // The sender's own read: never claims the bottle, never takes it off the map.
   const readOwn = async (id: string) => {
     setPublicError(null);
@@ -729,7 +705,15 @@ export function OceanScreen({
           // A finder may report the letter during their one reading; the sender re-reading
           // their own may not.
           reportable={reading.letter.bottle.source === 'public'}
-          onClose={closeReader}
+          onClose={reader.dismiss}
+          onFinish={reader.finish}
+        />
+      ) : null}
+      {!reading && (reader.paused || reader.ended) ? (
+        <ReadingResume
+          paused={reader.paused !== null}
+          onResume={reader.resume}
+          onForget={reader.forgetEnded}
         />
       ) : null}
       {viewing ? (

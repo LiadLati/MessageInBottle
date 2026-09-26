@@ -92,7 +92,7 @@ export function ReportSheet({ bottleId, onDone, onCancel }: Props) {
         <span>Hide this letter from me right away</span>
       </label>
       <ErrorNote error={error} />
-      <div className="row" style={{ justifyContent: 'flex-end', gap: 8 }}>
+      <div className="row report-actions" style={{ justifyContent: 'flex-end', gap: 8 }}>
         <button type="button" className="btn-ghost" onClick={onCancel} disabled={busy}>
           Cancel
         </button>

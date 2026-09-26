@@ -15,8 +15,11 @@ interface Props {
   // Overrides the provenance line. Used for a letter that carries no attribution — one found
   // adrift, or the sender re-reading their own.
   provenance?: string | undefined;
-  // A finder's one reading of a bottle found adrift: says so, and that closing ends it.
+  // A finder's one reading of a bottle found adrift. Closing it only hides it: the reading stays
+  // open on the server for the rest of its 15 minutes and can be returned to. Only an explicit,
+  // confirmed "Finish reading" ends it early (`onFinish`).
   oneTime?: boolean;
+  onFinish?: (() => void) | undefined;
   // Offered to a reader who holds the letter (its recipient, or the finder reading it once):
   // never to the sender reading their own. After a report that hides the letter, the reader
   // closes and `onHidden` lets the screen behind drop it.
@@ -41,6 +44,7 @@ export function LetterModal({
   reportable = false,
   onHidden,
   onClose,
+  onFinish,
 }: Props) {
   const [readable, setReadable] = useState(false);
   const [closing, setClosing] = useState(false);
@@ -50,8 +54,12 @@ export function LetterModal({
   const [blockStage, setBlockStage] = useState<'idle' | 'confirm' | 'busy' | 'done' | 'failed'>(
     'idle',
   );
+  const [confirmingFinish, setConfirmingFinish] = useState(false);
   const dialogRef = useRef<HTMLDivElement>(null);
+  const finishRef = useRef<HTMLButtonElement>(null);
+  const keepReadingRef = useRef<HTMLButtonElement>(null);
   const titleId = useId();
+  const finishTextId = useId();
   const b = letter.bottle;
 
   // Inert background + focus restore. `inert` is applied to every top-level sibling of the
@@ -73,11 +81,28 @@ export function LetterModal({
     };
   }, []);
 
-  const close = () => {
+  const leave = (then: () => void) => {
     if (closing) return;
     setClosing(true);
-    window.setTimeout(onClose, prefersReducedMotion() ? CLOSE_MS_REDUCED : CLOSE_MS);
+    window.setTimeout(then, prefersReducedMotion() ? CLOSE_MS_REDUCED : CLOSE_MS);
   };
+  // Closes the reader. For a one-time reading this only hides it (FE-R-002): a stray tap on the
+  // backdrop or Escape never ends the reading.
+  const close = () => leave(onClose);
+  const finish = () => leave(onFinish ?? onClose);
+  // Backing out returns focus to "Finish reading", once the footer holding it is back.
+  const refocusFinish = useRef(false);
+  const cancelFinish = () => {
+    refocusFinish.current = true;
+    setConfirmingFinish(false);
+  };
+  useEffect(() => {
+    if (confirmingFinish) keepReadingRef.current?.focus();
+    else if (refocusFinish.current) {
+      refocusFinish.current = false;
+      finishRef.current?.focus();
+    }
+  }, [confirmingFinish]);
   const reportDone = ({ hidden }: { hidden: boolean }) => {
     setReporting(false);
     if (hidden) {
@@ -88,7 +113,10 @@ export function LetterModal({
     }
   };
 
-  useModalKeys(dialogRef, close);
+  // Escape backs out of the finish confirmation first, and otherwise only closes the reader.
+  useModalKeys(dialogRef, confirmingFinish ? cancelFinish : close);
+  const panelOpen =
+    reporting || blockStage === 'confirm' || blockStage === 'busy' || confirmingFinish;
 
   return createPortal(
     <div className={`letter-modal${closing ? ' closing' : ''}`}>
@@ -96,7 +124,7 @@ export function LetterModal({
       {justOpened && !closing ? <div className="veil" aria-hidden /> : null}
       <div
         ref={dialogRef}
-        className="letter-modal-dialog"
+        className={`letter-modal-dialog${panelOpen ? ' has-panel' : ''}`}
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}
@@ -105,7 +133,7 @@ export function LetterModal({
         <div className="letter-modal-top letter-chrome">
           <button type="button" className="btn-ghost" onClick={close}>
             <Icon name="back" size={14} />
-            {oneTime ? 'Close letter' : 'Back to shore'}
+            {oneTime ? 'Close for now' : 'Back to shore'}
           </button>
           <span id={titleId} className="grow provenance">
             {provenance ??
@@ -191,6 +219,32 @@ export function LetterModal({
               : 'Could not block right now. Try again.'}
           </p>
         ) : null}
+        {confirmingFinish ? (
+          <div
+            className="letter-chrome letter-modal-report stack"
+            role="group"
+            aria-label="Finish reading"
+            aria-describedby={finishTextId}
+          >
+            <p id={finishTextId} className="secondary">
+              Finish your one reading now? The letter closes for good: you will not be able to open
+              it again, and nobody else can find it.
+            </p>
+            <div className="row report-actions" style={{ justifyContent: 'flex-end', gap: 8 }}>
+              <button
+                ref={keepReadingRef}
+                type="button"
+                className="btn-ghost"
+                onClick={cancelFinish}
+              >
+                Keep reading
+              </button>
+              <button type="button" className="btn-destructive" onClick={finish}>
+                Finish reading
+              </button>
+            </div>
+          </div>
+        ) : null}
         {reported ? (
           <p className="letter-chrome letter-modal-report t-meta" role="status">
             Thank you. Your report has been sent for review.
@@ -206,14 +260,30 @@ export function LetterModal({
             toolbar="none"
           />
         </div>
-        <p className="letter-modal-foot letter-chrome">
-          {oneTime
-            ? 'This bottle has left the public map. This is your one reading: it is not saved to your letters and gives no contact with the writer. If the page reloads you can return to it for 15 minutes; closing the letter ends it. You can still report or block from here. '
-            : justOpened
-              ? 'Opening ended its journey. '
-              : ''}
-          Fonts and aging change the look only, never the words.
-        </p>
+        {/* Out of the way while a panel needs the room, and out of the Tab order with it. */}
+        {panelOpen ? null : (
+          <p className="letter-modal-foot letter-chrome">
+            {oneTime
+              ? 'This bottle has left the public map. This is your one reading: it is not saved to your letters and gives no contact with the writer. If you close it or the page reloads, you can return to it for 15 minutes from when you opened it. You can still report or block from here. '
+              : justOpened
+                ? 'Opening ended its journey. '
+                : ''}
+            Fonts and aging change the look only, never the words.
+            {oneTime ? (
+              <>
+                {' '}
+                <button
+                  ref={finishRef}
+                  type="button"
+                  className="btn-ghost letter-modal-finish"
+                  onClick={() => setConfirmingFinish(true)}
+                >
+                  Finish reading
+                </button>
+              </>
+            ) : null}
+          </p>
+        )}
       </div>
     </div>,
     document.body,
