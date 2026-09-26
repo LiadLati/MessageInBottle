@@ -15,9 +15,9 @@ interface Props {
   // Overrides the provenance line. Used for a letter that carries no attribution — one found
   // adrift, or the sender re-reading their own.
   provenance?: string | undefined;
-  // A finder's one reading of a bottle found adrift. Closing it only hides it: the reading stays
-  // open on the server for the rest of its 15 minutes and can be returned to. Only an explicit,
-  // confirmed "Finish reading" ends it early (`onFinish`).
+  // A finder's one reading of a bottle found adrift. It is served once and can never be reopened,
+  // so it ends only through an explicit, confirmed "Finish reading" (`onFinish`): Close, a stray
+  // tap on the backdrop and Escape all ask first instead of ending it.
   oneTime?: boolean;
   onFinish?: (() => void) | undefined;
   // Offered to a reader who holds the letter (its recipient, or the finder reading it once):
@@ -86,10 +86,9 @@ export function LetterModal({
     setClosing(true);
     window.setTimeout(then, prefersReducedMotion() ? CLOSE_MS_REDUCED : CLOSE_MS);
   };
-  // Closes the reader. For a one-time reading this only hides it (FE-R-002): a stray tap on the
-  // backdrop or Escape never ends the reading.
-  const close = () => leave(onClose);
+  // Closes the reader. A one-time reading is never closed silently: every way out asks first.
   const finish = () => leave(onFinish ?? onClose);
+  const close = () => (oneTime ? setConfirmingFinish(true) : leave(onClose));
   // Backing out returns focus to "Finish reading", once the footer holding it is back.
   const refocusFinish = useRef(false);
   const cancelFinish = () => {
@@ -107,7 +106,8 @@ export function LetterModal({
     setReporting(false);
     if (hidden) {
       onHidden?.();
-      close();
+      // Hiding a letter ends its reading; nothing is left to confirm.
+      finish();
     } else {
       setReported('kept');
     }
@@ -299,7 +299,7 @@ export function LetterModal({
         {panelOpen ? null : (
           <p className="letter-modal-foot letter-chrome">
             {oneTime
-              ? 'This bottle has left the public map. This is your one reading: it is not saved to your letters and gives no contact with the writer. If you close it or the page reloads, you can return to it for 15 minutes from when you opened it. You can still report or block from here. '
+              ? 'This bottle has left the public map. This is your one reading: it is not saved to your letters, gives no contact with the writer and cannot be opened again once you finish, leave or reload. You can still report or block from here. '
               : justOpened
                 ? 'Opening ended its journey. '
                 : ''}

@@ -126,7 +126,7 @@ describe('route-level coverage (QA-014)', () => {
     );
   });
 
-  it('GET /api/ocean/reading and POST /api/ocean/public/:id/close: the finder’s one-time reading', async () => {
+  it('POST /api/ocean/public/:id/open and /close: the finder’s one reading, served once', async () => {
     const { w, app, ada, cy } = await world();
     const id = releaseBottle(
       w.ctx,
@@ -134,47 +134,28 @@ describe('route-level coverage (QA-014)', () => {
       releaseInput(w.user('bo').id, 'rc-key-000000003'),
     ).bottleId;
     expect(commitLoss(w.ctx, id, 'adrift', w.clock.now()).committed).toBe(true);
-    expect((await app.request('/api/ocean/reading')).status).toBe(401);
+    expect((await app.request(`/api/ocean/public/${id}/open`, post(null))).status).toBe(401);
     expect((await app.request(`/api/ocean/public/${id}/close`, post(null))).status).toBe(401);
+    // There is no resumable reading any more.
+    expect((await app.request('/api/ocean/reading', get(cy.token))).status).toBe(404);
 
-    const none = await app.request('/api/ocean/reading', get(cy.token));
-    expect(none.status).toBe(200);
-    expect(none.headers.get('cache-control')).toBe('no-store');
-    expect(await none.json()).toEqual({ reading: null });
-
-    expect((await app.request(`/api/ocean/public/${id}/open`, post(cy.token))).status).toBe(200);
-    const open = await app.request('/api/ocean/reading', get(cy.token));
+    const open = await app.request(`/api/ocean/public/${id}/open`, post(cy.token));
     expect(open.status).toBe(200);
     expect(open.headers.get('cache-control')).toBe('no-store');
-    const reading = (
-      (await open.json()) as {
-        reading: { bottle: { id: string }; letter: { text: string }; readingExpiresAt: string };
-      }
-    ).reading;
-    expect(reading.bottle.id).toBe(id);
-    expect(reading.letter.text).toBe(SAMPLE_TEXT);
-    expect(Date.parse(reading.readingExpiresAt)).toBeGreaterThan(w.clock.now());
-    // Nobody else holds a reading, the sender included.
-    expect(await (await app.request('/api/ocean/reading', get(ada.token))).json()).toEqual({
-      reading: null,
-    });
+    const letter = (await open.json()) as { bottle: { id: string }; letter: { text: string } };
+    expect(letter.bottle.id).toBe(id);
+    expect(letter.letter.text).toBe(SAMPLE_TEXT);
+    expect(Object.keys(letter)).not.toContain('readingExpiresAt');
+    // A second open — a refresh — serves nothing.
+    const again = await app.request(`/api/ocean/public/${id}/open`, post(cy.token));
+    expect(again.status).toBe(409);
+    expect(await again.text()).not.toContain(SAMPLE_TEXT);
 
-    // Someone else closing it changes nothing.
+    // Someone else "finishing" it changes nothing; the finder finishing it is idempotent.
     expect((await app.request(`/api/ocean/public/${id}/close`, post(ada.token))).status).toBe(204);
-    expect(
-      (
-        (await (await app.request('/api/ocean/reading', get(cy.token))).json()) as {
-          reading: unknown;
-        }
-      ).reading,
-    ).not.toBeNull();
-    // The finder closes it: gone at once, and closing again is a no-op.
     const close = await app.request(`/api/ocean/public/${id}/close`, post(cy.token));
     expect(close.status).toBe(204);
     expect(await close.text()).toBe('');
-    expect(await (await app.request('/api/ocean/reading', get(cy.token))).json()).toEqual({
-      reading: null,
-    });
     expect((await app.request(`/api/ocean/public/${id}/close`, post(cy.token))).status).toBe(204);
   });
 

@@ -386,8 +386,9 @@ export const publicOpenings = sqliteTable(
       .notNull()
       .references(() => users.id),
     openedAt: integer('opened_at').notNull(),
-    // The finder's one reading session: served again only until this moment, and never after
-    // an explicit close. Legacy rows (both null) grant no reread.
+    // Kept for older rows only: the finder's reading used to be resumable until this moment.
+    // Since 2026-09-26 the letter is served once and this is always null (no migration: the
+    // column is simply no longer read). `closed_at` records when the reading was finished.
     sessionExpiresAt: integer('session_expires_at'),
     closedAt: integer('closed_at'),
   },

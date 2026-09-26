@@ -383,9 +383,6 @@ export const OpenedLetterSchema = z.object({
   bottle: ReceivedLetterSchema,
   letter: z.object({ text: z.string(), font: LetterFontSchema, characters: z.number().int() }),
   aging: AgingProfileSchema,
-  // A finder's one-time reading: when the server stops serving it again (null for any other
-  // reader — recipients and senders keep their letters).
-  readingExpiresAt: z.string().nullable().optional(),
 });
 export type OpenedLetterDto = z.infer<typeof OpenedLetterSchema>;
 

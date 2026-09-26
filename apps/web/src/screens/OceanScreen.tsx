@@ -2,7 +2,6 @@ import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } fro
 import type { PublicBottleDto, SentBottleSummaryDto } from '@mib/shared';
 import { ApiError, api } from '../api/client.js';
 import { LetterModal } from '../components/LetterModal.js';
-import { ReadingResume } from '../components/ReadingResume.js';
 import { useLetterReader } from '../state/letterReader.js';
 import { OceanMap, SeaViewer } from '../components/lazy.js';
 import type { HarborLabel, MapAnchor, MapRoute, OceanMapHandle } from '../components/OceanMap.js';
@@ -710,16 +709,10 @@ export function OceanScreen({
           // A finder may report the letter during their one reading; the sender re-reading
           // their own may not.
           reportable={reading.letter.bottle.source === 'public'}
-          onClose={reader.dismiss}
+          onClose={reader.close}
           onFinish={reader.finish}
         />
       ) : null}
-      <ReadingResume
-        paused={!reading && reader.paused !== null}
-        ended={!reading && reader.ended}
-        onResume={reader.resume}
-        onForget={reader.forgetEnded}
-      />
       {viewing ? (
         <SeaViewer
           bottle={viewingBottle}
@@ -910,8 +903,8 @@ function PublicCard({
         // Said plainly before the action, because it cannot be undone and it is the one thing
         // that changes for everybody else looking at this map.
         <p className="card-note warn">
-          Opening this bottle will remove it from the public map. You can read the letter once, for
-          up to 15 minutes; after that, or once you finish reading, it cannot be opened again.
+          Opening this bottle will remove it from the public map. You can read the letter once: when
+          you finish reading, leave or reload, it cannot be opened again.
         </p>
       ) : null}
       <div className="action-row" style={{ marginTop: 14 }}>

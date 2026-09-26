@@ -20,8 +20,6 @@ import { plannedArrivalAt } from '../domain/routing.js';
 import { commitArrivalIfDue, runJourneyTick } from './journey.js';
 import { listNotifications } from './notifications.js';
 import {
-  READING_SESSION_MS,
-  activeReading,
   closeReading,
   commitLoss,
   listPublicOcean,
@@ -443,29 +441,29 @@ describe('one-time reading by the finder', () => {
     commitLoss(w.ctx, id, 'adrift', w.clock.now());
   });
 
-  it('serves the letter during the session, recovers it briefly, and never after closing', () => {
+  it('serves the letter once, in the opening response, and never again', () => {
+    const reopen = () => {
+      try {
+        openPublicBottle(w.ctx, cy(), id);
+      } catch (e) {
+        return e as AppError;
+      }
+      throw new Error('a second opening was served');
+    };
     const opened = openPublicBottle(w.ctx, cy(), id);
-    const until = w.clock.now() + READING_SESSION_MS;
-    expect(opened.readingExpiresAt).toBe(new Date(until).toISOString());
-    // A refresh or a dropped connection: the same reading comes back, bound to the finder.
-    w.clock.advance(60_000);
-    expect(activeReading(w.ctx, cy())?.letter.text).toBe(opened.letter.text);
-    expect(openPublicBottle(w.ctx, cy(), id).letter.text).toBe(opened.letter.text);
-    expect(activeReading(w.ctx, bo())).toBeNull();
+    expect(opened.letter.text).toContain('tide was gentle');
+    expect(Object.keys(opened)).not.toContain('readingExpiresAt');
+    // A second open a moment later — a refresh, a new tab, SeaYou reopened: nothing is served.
+    w.clock.advance(1_000);
+    const err = reopen();
+    expect(err.code).toBe('reading_closed');
+    expect(JSON.stringify(err)).not.toContain('tide was gentle');
     // No archive, no reread through the received endpoint.
     expect(listReceivedLetters(w.ctx, cy())).toEqual([]);
-    // Closing ends it immediately, for good.
+    // Finishing records the end of the reading; it is idempotent and serves nothing either.
     closeReading(w.ctx, cy(), id);
-    expect(activeReading(w.ctx, cy())).toBeNull();
-    let err: unknown;
-    try {
-      openPublicBottle(w.ctx, cy(), id);
-    } catch (e) {
-      err = e;
-    }
-    expect((err as AppError).code).toBe('reading_closed');
-    expect(JSON.stringify(err)).not.toContain('tide was gentle');
-    closeReading(w.ctx, cy(), id); // idempotent
+    closeReading(w.ctx, cy(), id);
+    expect(reopen().code).toBe('reading_closed');
     // The opening itself is kept: still off the map, still "opened" for the sender.
     expect(listPublicOcean(w.ctx, bo())).toEqual([]);
     expect(getSentBottle(w.ctx, ada(), id).publicListing?.status).toBe('opened');
@@ -475,17 +473,16 @@ describe('one-time reading by the finder', () => {
     ).toBe(cy().id);
   });
 
-  it('expires the session on the server without a close', () => {
+  it('records no resumable window, and an older opening that had one grants no reread', () => {
     openPublicBottle(w.ctx, cy(), id);
-    w.clock.advance(READING_SESSION_MS);
-    expect(activeReading(w.ctx, cy())).toBeNull();
-    expect(() => openPublicBottle(w.ctx, cy(), id)).toThrowError(AppError);
-  });
-
-  it('a legacy opening (no session recorded) grants no reread', () => {
-    openPublicBottle(w.ctx, cy(), id);
-    w.db.update(t.publicOpenings).set({ sessionExpiresAt: null, closedAt: null }).run();
-    expect(activeReading(w.ctx, cy())).toBeNull();
+    const row = () =>
+      w.db.select().from(t.publicOpenings).where(eq(t.publicOpenings.bottleId, id)).get()!;
+    expect(row().sessionExpiresAt).toBeNull();
+    // A row written under the old rule, still inside its old 15-minute window.
+    w.db
+      .update(t.publicOpenings)
+      .set({ sessionExpiresAt: w.clock.now() + 15 * 60 * 1000, closedAt: null })
+      .run();
     expect(() => openPublicBottle(w.ctx, cy(), id)).toThrowError(AppError);
     expect(listReceivedLetters(w.ctx, cy())).toEqual([]);
   });

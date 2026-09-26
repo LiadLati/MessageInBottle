@@ -216,9 +216,12 @@ describe('the published documents', () => {
     expect(terms).toMatch(/harbour you are already at arrives immediately/i);
     expect(terms).toMatch(/adrift in the public ocean/i);
     expect(terms).toMatch(/72 hours/);
-    expect(terms).toMatch(/one reading session/i);
-    expect(terms).toMatch(/15 minutes/);
-    // Product decision 12: one resumable reading, nothing permanent, report and block available.
+    // Product decision 12 (amended 2026-09-26): one reading, once, nothing resumable or permanent,
+    // report and block available while reading.
+    expect(terms).toMatch(/gets one reading, once/i);
+    expect(terms).toMatch(/cannot be reopened, and it is not restored after leaving or reloading/i);
+    for (const doc of POLICY_DOCUMENTS)
+      expect(textOf(doc)).not.toMatch(/15 minutes|resum(e|ed|able)/i);
     expect(terms).toMatch(/never added to their received letters, archive or history/i);
     expect(terms).toMatch(/creates no friendship and no way to contact the writer/i);
     expect(terms).toMatch(/report the letter, or block its writer/i);

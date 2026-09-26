@@ -133,7 +133,6 @@ const Ok = z.object({ ok: z.boolean() });
 const BottlesList = z.object({ bottles: z.array(SentBottleSummarySchema) });
 const OneBottle = z.object({ bottle: SentBottleSchema });
 const Visibility = z.object({ visibility: OutcomeVisibilitySchema });
-const Reading = z.object({ reading: OpenedLetterSchema.nullable() });
 const Cases = z.object({ cases: z.array(AdminCaseSummarySchema) });
 const OneCase = z.object({ case: AdminCaseDetailSchema });
 const DecidedCase = z.object({ case: AdminCaseDetailSchema, changed: z.boolean() });
@@ -208,8 +207,7 @@ export const api = {
   // public map for everyone. 409 `already_opened` means somebody else was first.
   openPublicBottle: (id: string) =>
     request('POST', `/ocean/public/${id}/open`, undefined, OpenedLetterSchema),
-  // The finder's still-open one-time reading (recovers a refresh); ending it is immediate.
-  activeReading: () => request('GET', '/ocean/reading', undefined, Reading),
+  // Finishing the finder's one reading (the letter is never served again anyway).
   closeReading: (id: string) => request<void>('POST', `/ocean/public/${id}/close`),
   // Blocks the writer from inside the finder's reading; the writer's identity never comes back.
   blockFoundWriter: (id: string) => request<void>('POST', `/ocean/public/${id}/block`),

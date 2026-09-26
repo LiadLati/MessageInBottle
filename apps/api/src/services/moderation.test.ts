@@ -33,7 +33,7 @@ import {
   suspensionEnd,
 } from './moderation.js';
 import { listNotifications } from './notifications.js';
-import { activeReading, closeReading, devLoseBottle, openPublicBottle } from './outcomes.js';
+import { closeReading, devLoseBottle, openPublicBottle } from './outcomes.js';
 import { releaseBottle } from './release.js';
 import { createTestWorld, releaseInput, type TestWorld } from '../test/harness.js';
 
@@ -149,12 +149,14 @@ describe('reports and cases', () => {
       releaseInput(w.user('bo').id, 'key-0000000005'),
     ).bottleId;
     devLoseBottle(w.ctx, w.user('ada'), id, 'adrift');
+    const opening = () =>
+      w.db.select().from(t.publicOpenings).where(eq(t.publicOpenings.bottleId, id)).get()!;
     openPublicBottle(w.ctx, w.user('dee'), id);
-    expect(activeReading(w.ctx, w.user('dee'))?.bottle.id).toBe(id);
+    expect(opening().closedAt).toBeNull();
     const r = reportLetter(w.ctx, w.user('dee'), { bottleId: id, reason: 'hate', hide: true });
     expect(r.hidden).toBe(true);
     expect(getCase(w.ctx, r.caseId).context).toBe('public');
-    expect(activeReading(w.ctx, w.user('dee'))).toBeNull();
+    expect(opening().closedAt).not.toBeNull();
     // The sender's record is untouched: still lost, still adrift, evidence on the case.
     const b = getSentBottle(w.ctx, w.user('ada'), id);
     expect(b.state).toBe('lost');

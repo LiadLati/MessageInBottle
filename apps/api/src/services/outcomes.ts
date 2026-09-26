@@ -195,10 +195,6 @@ export function listPublicOcean(ctx: AppContext, viewer: AuthUser): PublicBottle
   return out;
 }
 
-// How long a finder may come back to the letter after opening it: a short, server-enforced
-// window for a refresh or a dropped connection, not an archive.
-export const READING_SESSION_MS = 15 * 60 * 1000;
-
 // Opening a bottle found adrift. One server-owned action, one transaction: the opening row is
 // inserted (its primary key is the bottle id, so the insert itself picks the single winner of a
 // race), the aging profile is frozen, the reading is recorded in the journey history and the
@@ -207,8 +203,9 @@ export const READING_SESSION_MS = 15 * 60 * 1000;
 // letter, passport and Lost entry, and the intended recipient is never delivered to — the
 // bottle is still `lost`, which no arrival path will touch.
 //
-// Idempotent for the finder: opening it again is a plain read. For anybody else it is a 409 with
-// no content whatsoever. This change deliberately adds nothing beyond reading: no rescue, no
+// One reading, once (product decision 12, amended 2026-09-26): the letter is served in this
+// response and never again — not on a second open, a refresh or a new session. A second open by
+// the finder is a 409 `reading_closed`; for anybody else it is a 409 with no content whatsoever. This change deliberately adds nothing beyond reading: no rescue, no
 // re-release, no further travel, no transfer of ownership.
 export function openPublicBottle(
   ctx: AppContext,
@@ -239,11 +236,8 @@ export function openPublicBottle(
       if (existing.openedById !== user.id) {
         throw conflict('already_opened', 'Another traveller opened this bottle first.');
       }
-      // The finder's own reading session: recoverable only while it is open and unexpired.
-      if (existing.closedAt !== null || (existing.sessionExpiresAt ?? 0) <= now) {
-        throw conflict('reading_closed', 'You have already read this letter.');
-      }
-      return { bottle, openedAt: existing.openedAt, until: existing.sessionExpiresAt! };
+      // The finder's one reading was served when they opened it; it is never served again.
+      throw conflict('reading_closed', 'You have already read this letter.');
     }
     // Opening and expiry resolve under the same writer: at the deadline the bottle is gone.
     if (
@@ -258,7 +252,8 @@ export function openPublicBottle(
         bottleId,
         openedById: user.id,
         openedAt: now,
-        sessionExpiresAt: now + READING_SESSION_MS,
+        // No resumable window: the letter is served once, in this response.
+        sessionExpiresAt: null,
         closedAt: null,
       })
       .onConflictDoNothing()
@@ -296,42 +291,14 @@ export function openPublicBottle(
     return {
       bottle: tx.select().from(t.bottles).where(eq(t.bottles.id, bottleId)).get()!,
       openedAt: now,
-      until: now + READING_SESSION_MS,
     };
   });
-  return {
-    ...openedLetter(ctx, opened.bottle, 'public', opened.openedAt),
-    readingExpiresAt: new Date(opened.until).toISOString(),
-  };
+  return openedLetter(ctx, opened.bottle, 'public', opened.openedAt);
 }
 
-// The finder's still-open reading, if any — what a refresh or a dropped connection recovers.
-// Bound to the account that opened the bottle; nothing here can start a new reading.
-export function activeReading(ctx: AppContext, user: AuthUser): OpenedLetterDto | null {
-  const now = ctx.clock.now();
-  const row = ctx.db
-    .select({ opening: t.publicOpenings, bottle: t.bottles })
-    .from(t.publicOpenings)
-    .innerJoin(t.bottles, eq(t.bottles.id, t.publicOpenings.bottleId))
-    .where(
-      and(
-        eq(t.publicOpenings.openedById, user.id),
-        isNull(t.publicOpenings.closedAt),
-        gt(t.publicOpenings.sessionExpiresAt, now),
-        eq(t.bottles.moderationStatus, 'clear'),
-      ),
-    )
-    .orderBy(desc(t.publicOpenings.openedAt))
-    .get();
-  if (!row) return null;
-  return {
-    ...openedLetter(ctx, row.bottle, 'public', row.opening.openedAt),
-    readingExpiresAt: new Date(row.opening.sessionExpiresAt!).toISOString(),
-  };
-}
-
-// Closing the reader ends the finder's access at once. Idempotent; the opening row (who, when)
-// is kept for the journey's integrity, only the reading window closes.
+// Finishing the reading. The letter is never served again anyway; this records that the reading
+// ended, after which the finder can no longer block the writer from it. Idempotent; the opening
+// row (who, when) is kept for the journey's integrity.
 export function closeReading(ctx: AppContext, user: AuthUser, bottleId: string): void {
   ctx.db
     .update(t.publicOpenings)

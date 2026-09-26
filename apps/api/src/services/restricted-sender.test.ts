@@ -13,7 +13,7 @@ import type { AuthUser } from './context.js';
 import { canonicalPair } from './friends.js';
 import { activePlan, commitArrivalIfDue, runJourneyTick } from './journey.js';
 import { SUSPENSION_MS, accountStanding, reportLetter, submitAppeal } from './moderation.js';
-import { activeReading, devLoseBottle, listPublicOcean, openPublicBottle } from './outcomes.js';
+import { devLoseBottle, listPublicOcean, openPublicBottle } from './outcomes.js';
 import { heldForRecipient, releaseBottle } from './release.js';
 import { applyStandingEffects } from './restriction.js';
 import { T0, createTestWorld, releaseInput, type TestWorld } from '../test/harness.js';
@@ -135,7 +135,11 @@ function expectEnded(w: TestWorld, o: ReturnType<typeof outgoing>) {
   expect(bottle(w, o.opened).state).toBe('opened');
   expect(readOpenedLetter(w.ctx, w.user('cy'), o.opened).letter.text.length).toBeGreaterThan(0);
   expect(bottle(w, o.adriftFound).publicExpiredAt).toBeNull();
-  expect(activeReading(w.ctx, w.user('cy'))?.bottle.id).toBe(o.adriftFound);
+  // The finder's reading of it is not ended by the restriction (it is still open to finish).
+  expect(
+    w.db.select().from(t.publicOpenings).where(eq(t.publicOpenings.bottleId, o.adriftFound)).get()
+      ?.closedAt,
+  ).toBeNull();
 }
 
 describe('a restricted sender’s letters stop travelling (ARCH-R-002)', () => {

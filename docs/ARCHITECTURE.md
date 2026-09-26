@@ -142,14 +142,15 @@ narrow.
   insert itself elects the single winner of a race), freeze the aging profile, append an
   `opened` event with `{scope:'public'}`, and notify the sender once — never naming the finder
   (spec D03). The bottle leaves the public list for everyone (`listPublicOcean` excludes any
-  bottle with an opening) and the finder reads the letter in the ordinary reader. It is
-  idempotent for the finder and a `409 already_opened` with no content for anyone else; the
+  bottle with an opening) and the finder reads the letter in the ordinary reader. A second open
+  is `409 reading_closed` for the finder and `409 already_opened` for anyone else, with no
+  content either way; the
   sender is refused (`400 own_bottle`), blocked pairs and non-adrift bottles get `404`.
   **The journey outcome is untouched**: the bottle stays `lost`, so the sender keeps letter,
   passport and Lost entry, and the intended recipient is never delivered to — no arrival path
   acts on a bottle that is not `at_sea`. Nothing else is granted: no rescue, re-release, further
   travel or transfer of ownership.
-- **Reading afterwards.** The finder gets one reading session (see *Journey rules* below);
+- **Reading afterwards.** The finder gets one reading, once (see *Journey rules* below);
   nothing is archived for them and `GET /api/shore/received` lists shore deliveries only. The
   sender reads their own letter with `GET /api/bottles/sent/:id/letter`, a pure read they may
   repeat at will: it never claims the bottle, never removes it from the map and never touches
@@ -251,18 +252,17 @@ and the new `risk_decisions` table (one row per bottle per storm night, unique o
   and expiry refuses a bottle with an opening). Adrift bottles from before the migration have
   no deadline; `activatePublicListings` at API boot gives each of them 72 h from that moment
   (idempotent, journey clock), and logs how many it activated.
-- **One-time reading.** The opening row gets `session_expires_at = now + 15 min`. While the
-  session is open the finder can recover the same reading after a refresh or a dropped
-  connection through `GET /api/ocean/reading` or by re-posting the open; `POST
-  /api/ocean/public/:id/close` sets `closed_at` and ends access at once, and a stale session is
-  refused the same way (`409 reading_closed`, no content). The finder is never given a shore or
-  received entry, `GET /api/shore/received` is shore deliveries only and
-  `GET /api/shore/bottles/:id/letter` is recipient-only. The one-time responses are
-  `Cache-Control: no-store`; the client keeps the letter in React state only (no localStorage,
-  sessionStorage or other durable storage). Openings recorded before this change keep their
-  rows and events; with both session columns `NULL` they grant no further reads — the finder
-  archive entries they used to produce simply disappear from the Received list. The sender's
-  own reads stay unlimited.
+- **One-time reading.** The letter is served once, in the `POST /api/ocean/public/:id/open`
+  response, and never again: a second open is `409 reading_closed` with no content, and no
+  endpoint returns it later (the 15-minute `GET /api/ocean/reading` recovery was removed on
+  2026-09-26). `POST /api/ocean/public/:id/close` records the explicit, confirmed finish in
+  `closed_at`, after which the finder can no longer block the writer from it; leaving the Ocean
+  also finishes it, and the browser is asked to warn before a reload while it is open.
+  `session_expires_at` is kept for older rows only and is always `NULL` now (no migration). The
+  finder is never given a shore or received entry, `GET /api/shore/received` is shore
+  deliveries only and `GET /api/shore/bottles/:id/letter` is recipient-only. The one-time
+  response is `Cache-Control: no-store`; the client keeps the letter in React state only (no
+  localStorage, sessionStorage or other durable storage). The sender's own reads stay unlimited.
 - **Same harbour.** When origin and destination shore are the same, `releaseBottle` stamps
   `risk_policy_version = NULL`, plans the route snapshot with `plannedDurationMs = 0` and calls
   `commitArrival` inside the release transaction: the bottle is `delivered` at `releasedAt`, the

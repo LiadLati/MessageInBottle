@@ -141,6 +141,16 @@ would make a published document false:
 - **Browser storage.** The Privacy Policy lists exactly three things, and
   `apps/web/src/storage.test.ts` walks the source to prove there is no fourth.
 
+## Correction of 2026-09-26 (still version 1.1)
+
+The Terms of Use said a finder's reading "can be resumed for up to 15 minutes if it is
+interrupted". The product decision changed to one reading, once, with no resumable period, and
+the sentence now says so. Version 1.1 has not been published to any real user (there is no
+production deployment yet), so it was corrected in place rather than superseded, as with the
+earlier Privacy Policy correction; once a version has been published, a change like this needs a
+new version. The Privacy Policy and Child Safety Standards made no timing promise about a
+finder's reading and needed no change.
+
 ## Releasing a new version
 
 1. Edit the documents in `packages/shared/src/policies.ts`.

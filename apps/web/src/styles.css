@@ -2113,40 +2113,6 @@ button.avatar {
 }
 
 /* ---------- Ocean v2.0: hint pill, card actions, storm chip ---------- */
-/* A finder's one reading, closed for now but still open on the server (FE-R-002). A banner
-   under the mode switch, stopping short of the zoom column: it never covers the sheet, the
-   navigation, the header or the map's own controls. */
-.reading-resume {
-  position: absolute;
-  left: var(--gutter-screen);
-  right: calc(var(--gutter-screen) + 56px);
-  top: calc(var(--header-pad-top, 0px) + 148px);
-  z-index: 6;
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px 12px;
-  padding: 8px 8px 8px 14px;
-  border-radius: 16px;
-  background: rgba(6, 20, 30, 0.86);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
-  border: 1px solid rgba(215, 231, 228, 0.22);
-  color: #eaf1f0;
-  font-size: 12.5px;
-}
-@media (min-width: 900px), (orientation: landscape) and (max-height: 520px) and (min-width: 560px) {
-  .world-screen.two-pane .reading-resume {
-    right: calc(var(--pane-width) + var(--gutter-screen) + 56px);
-    max-width: 520px;
-  }
-}
-@media (orientation: landscape) and (max-height: 520px) and (min-width: 560px) {
-  .world-screen.two-pane .reading-resume {
-    top: calc(var(--header-pad-top, 0px) + 132px);
-  }
-}
 .hint-pill {
   position: absolute;
   left: 50%;
