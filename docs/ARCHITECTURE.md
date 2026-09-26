@@ -406,10 +406,17 @@ and the new `risk_decisions` table (one row per bottle per storm night, unique o
   none can be revoked or reopened (there is no route for it). Escalating an unappealed ordinary
   violation to critical restarts its 30-day appeal window once (`appeal_reopened` audit row).
   Appeals close 30 days after the decision on the real clock (`appealDeadline`).
-- **Automated review recommends only.** `services/ai-review.ts` stores a verdict, reasoning,
-  uncertainty, translation and a `childSafety` flag; a flag sets `moderation_cases.urgent_at`
-  once, which sorts the case first in `listCases`. Cases are listed before the model answers.
-  `MIB_AI_AUTO_DECIDE=true` is a configuration error.
+- **Automated review recommends only.** The model labels the *letter* (`violation`,
+  `no_violation` or `uncertain`, plus `threat` and `childSafety` flags); `parseReviewOutput`
+  maps that to the stored verdict about the report. The earlier accept/reject-the-report
+  answer was easy to invert, and a well-formed "reject" was trusted whatever it said (manual
+  review round 1). A clearance now stands only if it is confident (≥ 0.8), states no doubt,
+  flags nothing, and the letter trips no deterministic English threat backstop
+  (`looksLikeExplicitThreat`); otherwise it is stored as `uncertain` with the reason. A child
+  safety flag or a possible threat sets `moderation_cases.urgent_at` once, sorting the case
+  first in `listCases`, with an `urgent_child_safety_review` or `urgent_threat_review` audit
+  row; the admin DTO derives `urgentReason` from `ai_child_safety`. Cases are listed before the
+  model answers. `MIB_AI_AUTO_DECIDE=true` is a configuration error.
 - **Restricted accounts.** `services/restriction.ts`: when a suspension or ban takes effect,
   bottles travelling to the account are cancelled with capacity released once and the sender
   told only "Delivery unavailable"; `commitArrival` refuses delivery to a restricted recipient;

@@ -234,7 +234,7 @@ describe('the local AI review queue', () => {
   it('records a validated verdict as a recommendation and decides nothing by itself', async () => {
     const reviewer = answering(
       JSON.stringify({
-        verdict: 'accept',
+        label: 'violation',
         reason: 'Direct threat of physical harm.',
         uncertainty: null,
         language: 'English',
@@ -264,7 +264,7 @@ describe('the local AI review queue', () => {
   });
 
   it('treats anything that is not the required shape as no answer, then hands the case to a person', async () => {
-    for (const bad of ['yes', '{"verdict":"maybe","reason":"x"}', 42, { reason: 'no verdict' }]) {
+    for (const bad of ['yes', '{"label":"maybe","reason":"x"}', 42, { reason: 'no verdict' }]) {
       const c0 = getCase(w.ctx, caseId);
       const at = c0.ai.nextAttemptAt ? Date.parse(c0.ai.nextAttemptAt) : w.realClock.now();
       await runAiReviewTick(w.ctx, answering(bad), at);
@@ -278,15 +278,17 @@ describe('the local AI review queue', () => {
 
   it('reads a mixed answer conservatively and tolerates a code fence around the JSON', () => {
     expect(
-      parseReviewOutput('```json\n{"verdict":"reject","reason":"friendly"}\n```'),
+      parseReviewOutput(
+        '```json\n{"label":"no_violation","reason":"friendly","confidence":0.95}\n```',
+      ),
     ).toMatchObject({ verdict: 'reject' });
     expect(
       parseReviewOutput(
-        '{"verdict":"accept","reason":"threat","uncertainty":"the slang could be a joke"}',
+        '{"label":"violation","reason":"threat","uncertainty":"the slang could be a joke"}',
       )?.verdict,
     ).toBe('uncertain');
-    expect(parseReviewOutput('{"verdict":"accept"}')).toBeNull();
-    expect(parseReviewOutput({ verdict: 'reject', reason: 'x'.repeat(601) })).toBeNull();
+    expect(parseReviewOutput('{"label":"violation"}')).toBeNull();
+    expect(parseReviewOutput({ label: 'no_violation', reason: 'x'.repeat(601) })).toBeNull();
     expect(parseReviewOutput('not json at all')).toBeNull();
   });
 
@@ -297,7 +299,7 @@ describe('the local AI review queue', () => {
       reason: 'hate',
       hide: false,
     }).caseId;
-    const clear = answering(JSON.stringify({ verdict: 'accept', reason: 'Clearly hateful.' }));
+    const clear = answering(JSON.stringify({ label: 'violation', reason: 'Clearly hateful.' }));
     expect((await runAiReviewTick(w.ctx, clear)).deferred).toBe(0);
     const c = getCase(w.ctx, cid);
     expect(c.status).toBe('pending');
@@ -332,13 +334,18 @@ describe('the local AI review queue', () => {
           JSON.stringify(
             input.reasons.includes('sexual')
               ? {
-                  verdict: 'accept',
+                  label: 'violation',
                   reason: 'Possible sexualisation of a minor.',
                   uncertainty: 'the age is implied, not stated',
                   language: 'English',
                   childSafety: true,
                 }
-              : { verdict: 'reject', reason: 'Ordinary spam complaint.', childSafety: false },
+              : {
+                  label: 'no_violation',
+                  reason: 'Ordinary spam complaint.',
+                  confidence: 0.9,
+                  childSafety: false,
+                },
           ),
         ),
     };
@@ -371,7 +378,7 @@ describe('the local AI review queue', () => {
       calls.push({ url: url as string, body: init?.body as string });
       return Promise.resolve(
         new Response(
-          JSON.stringify({ message: { content: '{"verdict":"uncertain","reason":"r"}' } }),
+          JSON.stringify({ message: { content: '{"label":"uncertain","reason":"r"}' } }),
           { status: 200 },
         ),
       );
@@ -410,7 +417,7 @@ describe('the local AI review queue', () => {
     expect(user).not.toContain('ada');
   });
 
-  it('carries the multilingual evaluation set the operator runs before enabling auto-decide', () => {
+  it('carries the multilingual evaluation set the operator runs to judge the recommendations', () => {
     expect(AI_EVAL_SAMPLES.length).toBeGreaterThanOrEqual(24);
     const ids = new Set(AI_EVAL_SAMPLES.map((s) => s.id));
     expect(ids.size).toBe(AI_EVAL_SAMPLES.length);

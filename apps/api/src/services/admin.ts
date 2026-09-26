@@ -76,6 +76,8 @@ function summaryOf(db: DbOrTx, c: CaseRow): AdminCaseSummaryDto {
     id: c.id,
     status: c.status,
     urgentAt: isoOrNull(c.urgentAt),
+    // Only the review worker sets urgentAt: for a child-safety flag, or else for a threat.
+    urgentReason: c.urgentAt === null ? null : c.aiChildSafety ? 'child_safety' : 'threat',
     bottleId: c.bottleId,
     context: c.context,
     sender: person(db, c.senderId),

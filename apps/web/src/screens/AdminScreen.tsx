@@ -172,7 +172,7 @@ function ReportsSection({
                     </span>
                     {c.urgentAt ? (
                       <span style={{ display: 'block', marginTop: 6 }}>
-                        <UrgentChip />
+                        <UrgentChip reason={c.urgentReason} />
                       </span>
                     ) : null}
                   </span>
@@ -190,17 +190,21 @@ function ReportsSection({
 
 // A possible child-safety issue flagged by the model. It only moves the case up the queue:
 // nothing is decided, sanctioned or banned until an administrator does it.
-function UrgentChip() {
-  return <span className="status-chip status-lost">Urgent · possible child safety</span>;
+function UrgentChip({ reason }: { reason: 'child_safety' | 'threat' | null }) {
+  return (
+    <span className="status-chip status-lost">
+      {reason === 'threat' ? 'Urgent · possible threat' : 'Urgent · possible child safety'}
+    </span>
+  );
 }
 
 function AiChip({ ai }: { ai: AdminCaseSummaryDto['ai'] }) {
   const label =
     ai.status === 'done'
       ? ai.verdict === 'accept'
-        ? 'AI: accept report'
+        ? 'AI: violation'
         : ai.verdict === 'reject'
-          ? 'AI: reject report'
+          ? 'AI: no violation'
           : 'AI: uncertain'
       : ai.status === 'running'
         ? 'AI: reviewing'
@@ -428,15 +432,17 @@ function CaseBody({ c }: { c: AdminCaseDetailDto }) {
             </div>
           </div>
           <div className="row" style={{ gap: 6, flexWrap: 'wrap' }}>
-            {c.urgentAt ? <UrgentChip /> : null}
+            {c.urgentAt ? <UrgentChip reason={c.urgentReason} /> : null}
             <AiChip ai={c.ai} />
           </div>
         </div>
         {c.urgentAt ? (
           <p className="note amber" role="note">
-            The review model flagged a possible child-safety issue on {formatDayTime(c.urgentAt)},
-            so this case is at the top of the queue. The model only recommends: you decide, and
-            nothing has been sanctioned.
+            {c.urgentReason === 'threat'
+              ? 'The review flagged a possible credible threat'
+              : 'The review model flagged a possible child-safety issue'}{' '}
+            on {formatDayTime(c.urgentAt)}, so this case is at the top of the queue. The model only
+            recommends: you decide, and nothing has been sanctioned.
           </p>
         ) : null}
         {c.decision ? (
@@ -509,10 +515,10 @@ function CaseBody({ c }: { c: AdminCaseDetailDto }) {
               <p>
                 <strong>
                   {c.ai.verdict === 'accept'
-                    ? 'Accept the report'
+                    ? 'The letter breaks the rules: uphold the report'
                     : c.ai.verdict === 'reject'
-                      ? 'Reject the report'
-                      : 'Uncertain — a person must decide'}
+                      ? 'No violation found: reject the report'
+                      : 'Uncertain: a person must decide'}
                 </strong>
                 {c.ai.model ? <span className="t-meta"> · {c.ai.model}</span> : null}
               </p>

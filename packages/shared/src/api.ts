@@ -537,8 +537,27 @@ export const AI_VERDICTS = ['accept', 'reject', 'uncertain'] as const;
 export const AiVerdictSchema = z.enum(AI_VERDICTS);
 export type AiVerdict = z.infer<typeof AiVerdictSchema>;
 
-// What the local model returns, validated before anything reads it. The model never decides
-// anything itself: the backend validates this and performs every state change.
+// What the local model is asked to return (manual review round 1, item 6). It labels the
+// *letter*, not the report: "accept"/"reject" asked about the report was easy to invert ("reject"
+// the letter), and an explicit threat came back as "reject". The backend maps the label to the
+// stored verdict and escalates anything doubtful to a person; the model never decides anything.
+export const AI_LABELS = ['violation', 'no_violation', 'uncertain'] as const;
+export const AiModelAnswerSchema = z.object({
+  label: z.enum(AI_LABELS),
+  reason: z.string().trim().min(1).max(600),
+  uncertainty: z.string().trim().max(600).nullable().optional(),
+  language: z.string().trim().max(40).nullable().optional(),
+  translation: z.string().trim().max(4000).nullable().optional(),
+  confidence: z.number().min(0).max(1).nullable().optional(),
+  // A threat to harm a person. It only escalates the case to an urgent human review.
+  threat: z.boolean().nullable().optional(),
+  childSafety: z.boolean().nullable().optional(),
+});
+export type AiModelAnswer = z.infer<typeof AiModelAnswerSchema>;
+
+// The validated, normalised recommendation the backend stores (verdict about the report).
+// The model never decides anything itself: the backend validates this and performs every state
+// change.
 export const AiReviewOutputSchema = z.object({
   verdict: AiVerdictSchema,
   reason: z.string().trim().min(1).max(600),
@@ -551,6 +570,7 @@ export const AiReviewOutputSchema = z.object({
   // A possible child-safety issue. It only moves the case to the top of the human queue as an
   // urgent review; it never decides, sanctions or bans anything (product decision 2).
   childSafety: z.boolean().nullable().optional(),
+  threat: z.boolean().nullable().optional(),
 });
 export type AiReviewOutput = z.infer<typeof AiReviewOutputSchema>;
 
@@ -603,8 +623,10 @@ export type LetterReportDto = z.infer<typeof LetterReportSchema>;
 export const AdminCaseSummarySchema = z.object({
   id: IdSchema,
   status: CaseStatusSchema,
-  // Urgent child-safety review: listed first in the administrator's queue.
+  // Urgent review, listed first in the administrator's queue: a possible child-safety issue or
+  // a possible credible threat, as flagged for a person to decide.
   urgentAt: z.string().nullable(),
+  urgentReason: z.enum(['child_safety', 'threat']).nullable(),
   bottleId: IdSchema,
   context: z.enum(['shore', 'public']),
   sender: PersonSchema,

@@ -143,9 +143,8 @@ export interface AiConfig {
   timeoutMs: number;
   // How often the worker looks for queued cases.
   tickMs: number;
-  // false (default): the model's verdict is a recommendation shown to admins. true: a clear
-  // `accept` or `reject` decides the case itself; `uncertain` always goes to an admin. Enable
-  // only after running `pnpm --filter @mib/api ai:eval` against your own model.
+  // There is no automatic-decision setting: the model's answer is only ever a recommendation
+  // shown to an administrator (product decision 2), and MIB_AI_AUTO_DECIDE=true is refused.
 }
 
 export type MailProvider = 'outbox' | 'smtp' | 'disabled';

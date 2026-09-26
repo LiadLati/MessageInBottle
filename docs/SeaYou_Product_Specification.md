@@ -500,12 +500,14 @@ a case yields at most one violation. Report and Block are separate actions; bloc
 correspondence in both directions and also prevents the two accounts encountering each other
 through public-ocean interactions.
 
-A locally run model reviews each case and returns a validated accept / reject / uncertain with
-its reasoning, a translation beside the original, and, when unsure, why. It sees only reported
+A locally run model reviews each case and labels the letter (violation / no violation /
+uncertain), which is shown as a recommendation to uphold or reject the report; a "no violation"
+that is not confident, states a doubt, or concerns a letter that reads as a threat is shown as
+uncertain instead (decided 2026-09-26). It gives its reasoning, a translation beside the original, and, when unsure, why. It sees only reported
 letters and holds no database or administrative power: its verdict is a recommendation and it
 never decides, sanctions or bans (`MIB_AI_AUTO_DECIDE` was removed; `true` stops the API). If it
-flags a possible child-safety issue the case is marked urgent and listed first with the
-recommendation, reasoning, uncertainty and translation; a case is visible to administrators
+flags a possible child-safety issue, or the letter may contain a credible threat, the case is
+marked urgent and listed first with the recommendation, reasoning, uncertainty and translation; a case is visible to administrators
 before the model answers. It has no path at all to the critical child-safety action. If
 an external provider is ever used, the Privacy Policy and the store Data Safety declaration are
 updated before any report content is sent to it.
