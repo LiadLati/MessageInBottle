@@ -68,6 +68,11 @@ jobs:
         run: pnpm --filter @mib/api deploy --prod --legacy "$ARTEFACT_DIR"
 
       - name: Fresh migration with the compiled migrator
+        env:
+          # The compiled artefact runs in production mode, which requires an https:// public
+          # address. A reserved, non-routable placeholder: configuration input only; the
+          # migrator never contacts it.
+          MIB_APP_URL: https://ci.invalid
         run: |
           db="$RUNNER_TEMP/migrate-check/fresh.sqlite"
           mkdir -p "$(dirname "$db")"
