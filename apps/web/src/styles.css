@@ -2788,6 +2788,15 @@ button.avatar {
   z-index: 36;
   padding: 8px;
 }
+.admin-menu .menu-count {
+  margin-left: auto;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: var(--status-lost-core);
+  color: #fff;
+  font-size: 10.5px;
+  font-weight: 700;
+}
 .admin-menu button {
   width: 100%;
   justify-content: flex-start;

@@ -127,6 +127,15 @@ function Shell() {
   );
   const pendingFriends = friends.data?.pendingIncomingCount ?? 0;
   const reloadFriends = friends.reload;
+  // The moderation badge, for an administrator only: undecided reports and appeals, polled like
+  // the inbox and re-read after every decision. Opening the console clears nothing.
+  const isAdmin = user?.role === 'admin';
+  const adminPending = useAsync(
+    () => (isAdmin ? api.adminPendingCounts() : Promise.resolve(null)),
+    [user?.id, isAdmin, epoch],
+    20_000,
+  );
+  const reloadAdminPending = adminPending.reload;
   // Account standing (spec §16): polled like the inbox, so a suspension or ban decided while
   // the app is open takes hold within a poll; a first violation's warning is shown on entry.
   const standing = useAsync(
@@ -345,7 +354,16 @@ function Shell() {
       ) : null}
       <div key={epoch}>
         {admin && user.role === 'admin' ? (
-          <AdminScreen section={admin} onSection={setAdmin} onBack={() => setAdmin(null)} />
+          <AdminScreen
+            section={admin}
+            pending={adminPending.data ?? null}
+            onSection={setAdmin}
+            onChanged={() => void reloadAdminPending()}
+            onBack={() => {
+              setAdmin(null);
+              void reloadAdminPending();
+            }}
+          />
         ) : standingOpen && standing.data ? (
           <StandingScreen standing={standing.data} onBack={() => setStandingOpen(false)} />
         ) : null}
@@ -366,6 +384,7 @@ function Shell() {
             unread={unreadCount}
             onOpenInbox={openInbox}
             onOpenAdmin={user.role === 'admin' ? (section) => setAdmin(section) : undefined}
+            adminPending={adminPending.data ?? null}
             onWrite={() => leaveOceanTo('write')}
             onOpenProfile={openProfile}
             onOpenPassport={(id) => {

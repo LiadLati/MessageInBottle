@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from 'react';
-import type { PublicBottleDto, SentBottleSummaryDto } from '@mib/shared';
+import type { AdminPendingCountsDto, PublicBottleDto, SentBottleSummaryDto } from '@mib/shared';
 import { ApiError, api } from '../api/client.js';
+import { AdminControl } from '../components/AdminControl.js';
 import { LetterModal } from '../components/LetterModal.js';
 import { useLetterReader } from '../state/letterReader.js';
 import { OceanMap, SeaViewer } from '../components/lazy.js';
@@ -38,6 +39,8 @@ interface Props {
   onOpenInbox?: () => void;
   // Present only for an admin account: opens the admin menu (Reports, Appeals).
   onOpenAdmin?: ((section: 'reports' | 'appeals') => void) | undefined;
+  // The administrator's undecided reports and appeals, for the badge on the admin control.
+  adminPending?: AdminPendingCountsDto | null;
   onOpenPassport: (id: string) => void;
   onWrite: () => void;
   onOpenProfile: () => void;
@@ -122,6 +125,7 @@ export function OceanScreen({
   unread = 0,
   onOpenInbox,
   onOpenAdmin,
+  adminPending = null,
   onOpenPassport,
   onWrite,
   onOpenProfile,
@@ -457,7 +461,7 @@ export function OceanScreen({
               ) : null}
             </button>
           ) : null}
-          {onOpenAdmin ? <AdminControl onOpen={onOpenAdmin} /> : null}
+          {onOpenAdmin ? <AdminControl onOpen={onOpenAdmin} pending={adminPending} /> : null}
           <button
             type="button"
             className="avatar"
@@ -968,104 +972,5 @@ function UnavailableCard({ why, onClose }: { why: string; onClose: () => void })
             : 'Its letter belongs to whoever found it. The public ocean has other bottles.'}
       </p>
     </div>
-  );
-}
-
-// The admin icon beside the notification icon: drawn only for an admin account (the server
-// refuses every admin request from anyone else). Its menu starts with Reports and Appeals.
-// A menu button that behaves like one (audit A11Y-007): opening focuses the first item, arrow
-// keys move between items, Escape and a click elsewhere close it and return focus.
-function AdminControl({ onOpen }: { onOpen: (section: 'reports' | 'appeals') => void }) {
-  const [open, setOpen] = useState(false);
-  const rootRef = useRef<HTMLSpanElement>(null);
-  const triggerRef = useRef<HTMLButtonElement>(null);
-  const menuRef = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    if (!open) return;
-    menuRef.current?.querySelector<HTMLElement>('[role="menuitem"]')?.focus();
-    const onPointer = (e: PointerEvent) => {
-      if (!rootRef.current?.contains(e.target as Node)) setOpen(false);
-    };
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key !== 'Escape') return;
-      e.preventDefault();
-      setOpen(false);
-      triggerRef.current?.focus();
-    };
-    document.addEventListener('pointerdown', onPointer);
-    document.addEventListener('keydown', onKey);
-    return () => {
-      document.removeEventListener('pointerdown', onPointer);
-      document.removeEventListener('keydown', onKey);
-    };
-  }, [open]);
-  const onMenuKey = (e: React.KeyboardEvent) => {
-    const items = [...(menuRef.current?.querySelectorAll<HTMLElement>('[role="menuitem"]') ?? [])];
-    const at = items.indexOf(document.activeElement as HTMLElement);
-    const next =
-      e.key === 'ArrowDown'
-        ? items[(at + 1) % items.length]
-        : e.key === 'ArrowUp'
-          ? items[(at - 1 + items.length) % items.length]
-          : e.key === 'Home'
-            ? items[0]
-            : e.key === 'End'
-              ? items[items.length - 1]
-              : undefined;
-    if (next) {
-      e.preventDefault();
-      next.focus();
-    } else if (e.key === 'Tab') {
-      setOpen(false);
-    }
-  };
-  const choose = (section: 'reports' | 'appeals') => {
-    setOpen(false);
-    onOpen(section);
-  };
-  return (
-    <span className="admin-control" ref={rootRef}>
-      <button
-        ref={triggerRef}
-        type="button"
-        className="glass-control"
-        aria-label="Admin"
-        aria-haspopup="menu"
-        aria-expanded={open}
-        onClick={() => setOpen((o) => !o)}
-      >
-        <Icon name="shield" size={18} />
-      </button>
-      {open ? (
-        <div
-          ref={menuRef}
-          className="glass-panel admin-menu stack"
-          role="menu"
-          aria-label="Admin"
-          onKeyDown={onMenuKey}
-        >
-          <button
-            type="button"
-            role="menuitem"
-            tabIndex={-1}
-            className="btn-ghost"
-            onClick={() => choose('reports')}
-          >
-            <Icon name="report" size={14} />
-            Reports
-          </button>
-          <button
-            type="button"
-            role="menuitem"
-            tabIndex={-1}
-            className="btn-ghost"
-            onClick={() => choose('appeals')}
-          >
-            <Icon name="archive" size={14} />
-            Appeals
-          </button>
-        </div>
-      ) : null}
-    </span>
   );
 }

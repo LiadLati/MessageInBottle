@@ -28,6 +28,7 @@ import {
   type LetterFont,
   type PolicyAcceptanceRequest,
   type ReportReason,
+  AdminPendingCountsSchema,
 } from '@mib/shared';
 
 export class ApiError extends Error {
@@ -301,6 +302,9 @@ export const api = {
     request('POST', `/admin/reports/${id}/hold`, { reason, note }, OneCase),
   adminReleaseHold: (id: string) =>
     request('POST', `/admin/reports/${id}/hold/release`, undefined, OneCase),
+  // The moderation badge: undecided work this administrator can act on.
+  adminPendingCounts: () =>
+    request('GET', '/admin/pending-counts', undefined, AdminPendingCountsSchema),
   adminAppeals: (status: 'pending' | 'accepted' | 'rejected' | 'all') =>
     request('GET', `/admin/appeals?status=${status}`, undefined, Appeals),
   adminDecideAppeal: (id: string, outcome: 'accept' | 'reject', reason: string) =>

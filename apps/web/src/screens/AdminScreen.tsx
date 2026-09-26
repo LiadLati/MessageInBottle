@@ -6,6 +6,7 @@ import {
   type AdminCaseDetailDto,
   type AdminCaseSummaryDto,
   type ReportReason,
+  type AdminPendingCountsDto,
 } from '@mib/shared';
 import { api } from '../api/client.js';
 import { ConfirmDialog } from '../components/ConfirmDialog.js';
@@ -26,14 +27,18 @@ const STATUS_LABELS: Record<Status, string> = {
 
 interface Props {
   section: AdminSection;
+  // Undecided work, shown on each section tab; re-read by the app after every decision.
+  pending?: AdminPendingCountsDto | null;
   onSection: (s: AdminSection) => void;
+  // Called after a decision, so the moderation badge follows at once.
+  onChanged?: () => void;
   onBack: () => void;
 }
 
 // The admin console (spec §16 · moderation console): reports as cases, and appeals. Every list
 // and every action here is answered by the server only for an admin account; the screen adds
 // the explicit confirmation before each decision and records the reason with it.
-export function AdminScreen({ section, onSection, onBack }: Props) {
+export function AdminScreen({ section, pending = null, onSection, onChanged, onBack }: Props) {
   const [status, setStatus] = useState<Status>('pending');
   const [selected, setSelected] = useState<string | null>(null);
   const tabs = (
@@ -47,7 +52,11 @@ export function AdminScreen({ section, onSection, onBack }: Props) {
           onSection(s);
           setSelected(null);
         }}
-        labelOf={(s) => (s === 'reports' ? 'Reports' : 'Appeals')}
+        labelOf={(s) => {
+          const n = s === 'reports' ? pending?.reports : pending?.appeals;
+          const name = s === 'reports' ? 'Reports' : 'Appeals';
+          return n ? `${name} (${n} waiting)` : name;
+        }}
         controls={ADMIN_PANEL}
       />
       <TabList
@@ -70,6 +79,7 @@ export function AdminScreen({ section, onSection, onBack }: Props) {
       tabs={tabs}
       selected={selected}
       onSelect={setSelected}
+      onDecided={onChanged}
       onBack={onBack}
     />
   ) : (
@@ -78,6 +88,7 @@ export function AdminScreen({ section, onSection, onBack }: Props) {
       tabs={tabs}
       selected={selected}
       onSelect={setSelected}
+      onDecided={onChanged}
       onBack={onBack}
     />
   );
@@ -93,12 +104,14 @@ function ReportsSection({
   tabs,
   selected,
   onSelect,
+  onDecided,
   onBack,
 }: {
   status: Status;
   tabs: ReactNode;
   selected: string | null;
   onSelect: (id: string | null) => void;
+  onDecided?: (() => void) | undefined;
   onBack: () => void;
 }) {
   const list = useAsync(() => api.adminCases(status), [status], 15_000);
@@ -109,6 +122,7 @@ function ReportsSection({
         id={selected}
         onBack={() => onSelect(null)}
         onChanged={async () => {
+          onDecided?.();
           await list.reload();
         }}
       />
@@ -548,12 +562,14 @@ function AppealsSection({
   tabs,
   selected,
   onSelect,
+  onDecided,
   onBack,
 }: {
   status: Status;
   tabs: ReactNode;
   selected: string | null;
   onSelect: (id: string | null) => void;
+  onDecided?: (() => void) | undefined;
   onBack: () => void;
 }) {
   const list = useAsync(() => api.adminAppeals(status), [status], 15_000);
@@ -565,6 +581,7 @@ function AppealsSection({
         appeal={current}
         onBack={() => onSelect(null)}
         onChanged={async () => {
+          onDecided?.();
           await list.reload();
           onSelect(null);
         }}

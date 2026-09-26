@@ -2,6 +2,7 @@ import { and, desc, eq, isNull, sql } from 'drizzle-orm';
 import { APPEAL_WINDOW_MS } from '@mib/shared';
 import type {
   AdminAppealDto,
+  AdminPendingCountsDto,
   AdminCaseDetailDto,
   AdminCaseSummaryDto,
   AiReviewDto,
@@ -363,6 +364,31 @@ export function decideCase(
     applyStandingEffects(ctx, tx, c.senderId, now);
     return true;
   });
+}
+
+// ---------- the moderation badge ----------
+
+// What is waiting for this administrator to decide (the moderation badge). Opening a screen
+// clears nothing: an item leaves the count only when it is decided. A case counts once however
+// many reports it merges, and a case or appeal this administrator is a party to is left out,
+// because they cannot decide it (audit SEC-010).
+export function pendingCounts(ctx: AppContext, admin: AuthUser): AdminPendingCountsDto {
+  const decidable = (c: CaseRow) => !partiesOf(ctx.db, c).has(admin.id);
+  const reports = ctx.db
+    .select()
+    .from(t.moderationCases)
+    .where(eq(t.moderationCases.status, 'pending'))
+    .all()
+    .filter(decidable).length;
+  const appeals = ctx.db
+    .select({ c: t.moderationCases })
+    .from(t.appeals)
+    .innerJoin(t.violations, eq(t.violations.id, t.appeals.violationId))
+    .innerJoin(t.moderationCases, eq(t.moderationCases.id, t.violations.caseId))
+    .where(eq(t.appeals.status, 'pending'))
+    .all()
+    .filter((r) => decidable(r.c)).length;
+  return { reports, appeals, total: reports + appeals };
 }
 
 // ---------- appeals ----------

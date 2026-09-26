@@ -694,6 +694,16 @@ export const AuditEntrySchema = z.object({
 });
 export type AuditEntryDto = z.infer<typeof AuditEntrySchema>;
 
+// The administrator's actionable work, for the moderation badge: undecided cases (one per case,
+// however many reports it merges) and undecided appeals, leaving out anything this administrator
+// is a party to and so cannot decide.
+export const AdminPendingCountsSchema = z.object({
+  reports: z.number().int().nonnegative(),
+  appeals: z.number().int().nonnegative(),
+  total: z.number().int().nonnegative(),
+});
+export type AdminPendingCountsDto = z.infer<typeof AdminPendingCountsSchema>;
+
 export const AdminAppealSchema = z.object({
   id: IdSchema,
   status: z.enum(['pending', 'accepted', 'rejected']),
