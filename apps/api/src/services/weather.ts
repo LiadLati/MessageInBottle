@@ -70,12 +70,17 @@ export function zoneHistory(db: DbOrTx, userId: string): ZoneChange[] {
     .all();
 }
 
+// The zone the server accepted last, in the order it accepted them. Not "the latest effective
+// time": that time is the journey clock, and in development "Return to real time" moves it
+// back, which left a zone recorded while the clock was ahead outranking every later device
+// report — the account stored the device's zone while its map kept the old one (manual review
+// round 2). Outside a DEV reset both orders are the same.
 function latestZoneRow(db: DbOrTx, userId: string) {
   return db
     .select()
     .from(t.accountZoneChanges)
     .where(eq(t.accountZoneChanges.userId, userId))
-    .orderBy(desc(t.accountZoneChanges.effectiveAt), desc(sql`rowid`))
+    .orderBy(desc(sql`rowid`))
     .get();
 }
 
