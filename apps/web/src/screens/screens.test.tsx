@@ -142,8 +142,10 @@ describe('Settings → Blocked users', () => {
     render(<BlockedUsersDialog onClose={vi.fn()} />);
     fireEvent.click(await screen.findByRole('button', { name: 'Unblock Bea' }));
     const dialog = screen.getByRole('alertdialog');
-    expect(dialog.textContent).toMatch(/does not bring anything back/);
-    expect(dialog.textContent).toMatch(/not friends again/);
+    // Unblocking lifts the block: friends are friends again, letters do not come back.
+    expect(dialog.textContent).toMatch(/you are friends again/);
+    expect(dialog.textContent).toMatch(/does not bring any letter back/);
+    expect(dialog.textContent).not.toMatch(/not friends again/);
     expect(api.unblockUser).not.toHaveBeenCalled();
     fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }));
     expect(api.unblockUser).not.toHaveBeenCalled();
@@ -188,5 +190,28 @@ describe('blocking a friend (FE-016)', () => {
     fireEvent.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Block' }));
     await waitFor(() => expect(api.blockUser).toHaveBeenCalledWith('bea'));
     expect((await screen.findByRole('status')).textContent).toBe('Bea blocked');
+  });
+});
+
+describe('the Friends screen stays current while open (Block → Unblock follow-up)', () => {
+  const BEA = { id: 'usr_b', username: 'bea', displayName: 'Bea', hasShore: true };
+  const page = (friends: (typeof BEA)[]) => ({
+    friends,
+    incomingRequests: [],
+    outgoingRequests: [],
+    pendingIncomingCount: 0,
+  });
+
+  it('shows a friend who reappears after an unblock on the next poll, with no sign-in', async () => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+    api.friends.mockResolvedValueOnce(page([])).mockResolvedValue(page([BEA]));
+    render(<FriendsScreen />);
+    await waitFor(() => expect(api.friends).toHaveBeenCalledTimes(1));
+    expect(screen.queryByText('Bea')).toBeNull();
+    await act(async () => {
+      vi.advanceTimersByTime(20_000);
+      await Promise.resolve();
+    });
+    expect(await screen.findByText('Bea')).toBeTruthy();
   });
 });

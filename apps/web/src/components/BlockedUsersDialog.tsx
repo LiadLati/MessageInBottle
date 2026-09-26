@@ -12,7 +12,7 @@ type Blocked = BlockedUsersResponse['blocked'][number];
 
 // Settings → Blocked users (product decision 10). Only the people this account blocked are
 // listed, never who blocked it. Unblocking asks first, in the same dialog, and says exactly
-// what it does not bring back.
+// what it restores (a friendship the block only hid) and what it does not (any letter).
 export function BlockedUsersDialog({ onClose }: { onClose: () => void }) {
   const list = useAsync(() => api.blockedUsers(), []);
   const [confirming, setConfirming] = useState<Blocked | null>(null);
@@ -80,9 +80,10 @@ export function BlockedUsersDialog({ onClose }: { onClose: () => void }) {
                 each other’s bottles in the public ocean.
               </p>
               <p className="secondary">
-                Unblocking does not bring anything back: letters that were removed, cancelled or
-                hidden stay that way, and you are not friends again — either of you can send a new
-                friend request. Nothing that happened while the block was in place is shown.
+                If you were friends before the block, you are friends again and can write to each
+                other. Unblocking does not bring any letter back: letters that were removed,
+                cancelled or hidden stay that way. Nothing that happened while the block was in
+                place is shown.
               </p>
             </div>
             <ErrorNote error={error} />

@@ -263,7 +263,7 @@ export const TERMS_OF_USE: PolicyDocument = {
         'Blocking stops correspondence in both directions: neither account can write to the other.',
         `Blocking also keeps the two accounts from encountering each other through public-ocean interactions in ${PRODUCT_NAME}.`,
         `Blocking cannot reach anything already read, copied, photographed or saved outside ${PRODUCT_NAME}. It changes what happens next, not what has already left.`,
-        'You can unblock someone from Settings → Blocked users, after a confirmation. Unblocking allows future contact under the ordinary rules, including public-ocean encounters. It does not restore any letter that was removed, cancelled or hidden, does not restore a friendship (either of you can send a new request), and reveals nothing about what happened while the block was in place.',
+        'You can unblock someone from Settings → Blocked users, after a confirmation. Unblocking lifts the block. If you were friends before it, you are friends again, and contact is possible under the ordinary rules, including public-ocean encounters. It does not restore any letter that was removed, cancelled or hidden, it creates no friendship that did not exist before, and it reveals nothing about what happened while the block was in place.',
       ],
     },
     { type: 'h2', text: '8. Reporting and moderation' },
@@ -410,7 +410,7 @@ export const COMMUNITY_RULES: PolicyDocument = {
       items: [
         'Reporting a letter opens a moderation case for a human reviewer, and hides the letter from your own reading straight away.',
         'Blocking stops correspondence in both directions and keeps the two accounts from encountering each other through public-ocean interactions. It does not, by itself, report anything.',
-        'Unblocking, from Settings → Blocked users, allows future contact again. It brings back no removed, cancelled or hidden letter and no friendship, and reveals nothing about the time the block was in place.',
+        'Unblocking, from Settings → Blocked users, lifts the block, and friends are friends again. It brings back no removed, cancelled or hidden letter, creates no friendship that did not exist before, and reveals nothing about the time the block was in place.',
       ],
     },
     {

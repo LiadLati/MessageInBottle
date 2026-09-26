@@ -471,6 +471,9 @@ function Shell() {
           onClose={() => {
             setBlockedOpen(false);
             void reloadFriends();
+            // An unblock changes who is a friend and who can receive a letter: the open screen
+            // (Friends, Write) re-reads that now rather than on its next poll.
+            setEpoch((e) => e + 1);
           }}
         />
       ) : null}

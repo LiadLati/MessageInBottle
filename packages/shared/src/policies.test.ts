@@ -240,10 +240,13 @@ describe('the published documents', () => {
       expect(body).toMatch(/public-ocean/i);
     }
     expect(textOf(TERMS_OF_USE)).toMatch(/cannot reach anything already read, copied/i);
-    // Product decision 10: unblocking restores nothing and reveals nothing.
+    // Product decision 10, amended 2026-09-26: unblocking lifts the block (friends are friends
+    // again), restores no letter, creates no new friendship and reveals nothing.
     for (const body of [textOf(TERMS_OF_USE), textOf(COMMUNITY_RULES)]) {
       expect(body).toMatch(/Settings → Blocked users/);
-      expect(body).toMatch(/no friendship|does not restore a friendship/i);
+      expect(body).toMatch(/friends again/i);
+      expect(body).toMatch(/creates no friendship that did not exist before/i);
+      expect(body).not.toMatch(/does not restore a friendship|and no friendship/i);
       expect(body).toMatch(/reveals nothing/i);
     }
   });

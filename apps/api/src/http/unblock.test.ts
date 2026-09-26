@@ -8,8 +8,9 @@ import { devLoseBottle, listPublicOcean } from '../services/outcomes.js';
 import { releaseBottle } from '../services/release.js';
 import { createTestWorld, loginAs, releaseInput } from '../test/harness.js';
 
-// Product decision 10: Settings → Blocked users → Unblock, behind a confirmation. Unblocking
-// allows future contact under the ordinary rules; it restores nothing and reveals nothing.
+// Product decision 10, as amended 2026-09-26: Settings → Blocked users → Unblock, behind a
+// confirmation. Unblocking lifts the block: friends are friends again, but no letter cancelled,
+// removed or hidden during the block comes back, and nothing about that time is revealed.
 
 const DAY = 24 * 60 * 60 * 1000;
 
@@ -31,7 +32,7 @@ let n = 0;
 const key = () => `unblock-${String(++n).padStart(8, '0')}`;
 
 describe('blocked users and unblocking (product decision 10)', () => {
-  it('lists only the blocks you placed, and unblocks without restoring the friendship', async () => {
+  it('lists only the blocks you placed, and unblocks without bringing back any letter', async () => {
     const { w, ada, bo, call } = await setup();
     // A bottle to Bo is travelling when Ada blocks Bo; the block ends it at arrival.
     const inFlight = releaseBottle(
@@ -60,20 +61,9 @@ describe('blocked users and unblocking (product decision 10)', () => {
     expect(w.db.select().from(t.bottles).where(eq(t.bottles.id, inFlight)).get()!.state).toBe(
       'cancelled',
     );
-    // Not friends again until a new request is accepted.
+    // The friendship the block only hid is visible again, and letters can be sent again.
     const friends = await json<FriendsResponse>(await call(ada.token, 'GET', '/friends'));
-    expect(friends.friends.map((f) => f.username)).not.toContain('bo');
-    expect(() => releaseBottle(w.ctx, w.user('ada'), releaseInput(w.user('bo').id, key()))).toThrow(
-      /approved friends/,
-    );
-    expect((await call(ada.token, 'POST', '/friends/requests', { username: 'bo' })).status).toBe(
-      204,
-    );
-    const request = (await json<FriendsResponse>(await call(bo.token, 'GET', '/friends')))
-      .incomingRequests[0]!;
-    expect((await call(bo.token, 'POST', `/friends/requests/${request.id}/accept`)).status).toBe(
-      204,
-    );
+    expect(friends.friends.map((f) => f.username)).toContain('bo');
     expect(() =>
       releaseBottle(w.ctx, w.user('ada'), releaseInput(w.user('bo').id, key())),
     ).not.toThrow();
@@ -88,9 +78,16 @@ describe('blocked users and unblocking (product decision 10)', () => {
     expect((await call(ada.token, 'POST', '/friends/requests', { username: 'bo' })).status).toBe(
       404,
     );
+    const friendsOfAda = async () =>
+      (await json<FriendsResponse>(await call(ada.token, 'GET', '/friends'))).friends.map(
+        (f) => f.username,
+      );
+    expect(await friendsOfAda()).not.toContain('bo');
     await call(bo.token, 'DELETE', '/friends/blocks/ada');
+    // Both blocks lifted: they are the friends they were, with no new request needed.
+    expect(await friendsOfAda()).toContain('bo');
     expect((await call(ada.token, 'POST', '/friends/requests', { username: 'bo' })).status).toBe(
-      204,
+      409,
     );
     void w;
   });

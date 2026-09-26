@@ -282,7 +282,11 @@ and the new `risk_decisions` table (one row per bottle per storm night, unique o
   `createdAt.rowid` cursor and returns the unread count. `services/housekeeping.ts` prunes only
   operational data (worker retry state older than 90 days).
 - **Blocks and unblocks.** `listBlocked` shows only blocks the caller placed. `unblockUser`
-  removes the block and any friendship row, restoring nothing. A finder's block of an anonymous
+  removes the caller's block and nothing else. A block never touches the pair's friendship or
+  pending request, it only hides them (`isBlockedEitherWay` in the friends list, at release and
+  at arrival), so once no block stands either way the pair are what they were before. Until
+  2026-09-26 unblocking also deleted the friendship row, which is why an unblocked pair could not
+  see or write to each other. A finder's block of an anonymous
   writer stores `blocks.found_bottle_id` and is listed and undone by that bottle only.
 - **Direction controls.** `validateLetterText` rejects U+202A–U+202E and U+2066–U+2069 on client
   and server (`letter_direction_controls`); other invisible characters used by real RTL and

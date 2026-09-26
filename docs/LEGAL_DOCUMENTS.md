@@ -158,6 +158,13 @@ security records and what remains after deletion, both in the Privacy Policy). T
 now says that a possible threat, not only a possible child-safety issue, is marked urgent for a
 reviewer, matching the review worker. No right, obligation or practice changed.
 
+Also in the same round, the Terms of Use and Community Rules said that unblocking restores no
+friendship. The owner decided that unblocking lifts the block and nothing else: a friendship the
+block only hid is visible again, while no letter comes back and no new friendship is created.
+The two sentences now say so, matching the code. This one does change a practice, so it is
+recorded here explicitly. Like the other corrections, it is made in place because version 1.1 has
+not been published to any real user.
+
 ## Releasing a new version
 
 1. Edit the documents in `packages/shared/src/policies.ts`.
