@@ -79,7 +79,7 @@ export function createApp(ctx: AppContext) {
   });
   app.route('/api/auth', authRoutes(limiter));
   app.route('/api/policies', policyRoutes());
-  app.route('/api/account', accountRoutes());
+  app.route('/api/account', accountRoutes(limiter));
   // Public, unauthenticated HTML. Deliberately not under /api: these are pages, not endpoints.
   app.route('/legal', legalRoutes(limiter));
   // The support page: reachable signed out, while a new policy version is waiting to be

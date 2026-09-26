@@ -191,6 +191,18 @@ describe('deleting the account', () => {
     expect(onDeleted).not.toHaveBeenCalled();
   });
 
+  it('asks the person to wait when the attempt budget is spent (SEC-R-001)', async () => {
+    api.deleteAccount.mockRejectedValue(new ApiError(429, 'rate_limited', 'too many'));
+    const { go, onDeleted } = setup();
+    fireEvent.change(screen.getByLabelText('Confirm your password'), { target: { value: 'pw' } });
+    fireEvent.click(screen.getByRole('checkbox'));
+    fireEvent.click(go);
+    expect((await screen.findByRole('alert')).textContent).toBe(
+      'Too many attempts. Wait a few minutes and try again.',
+    );
+    expect(onDeleted).not.toHaveBeenCalled();
+  });
+
   it('deletes with the typed password', async () => {
     api.deleteAccount.mockResolvedValue({});
     const { go, onDeleted } = setup();
