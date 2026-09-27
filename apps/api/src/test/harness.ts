@@ -1,4 +1,6 @@
+import Database from 'better-sqlite3';
 import { eq } from 'drizzle-orm';
+import { drizzle } from 'drizzle-orm/better-sqlite3';
 import {
   POLICY_DOCUMENTS,
   SUPPORT_EMAIL,
@@ -8,6 +10,7 @@ import {
 } from '@mib/shared';
 import type { AppConfig } from '../config.js';
 import { createDb, runMigrations, type Db } from '../db/client.js';
+import * as schema from '../db/schema.js';
 import * as t from '../db/schema.js';
 import { DEV_SEED_PASSWORD } from '../db/seed-data.js';
 import { newId, newSecretToken, sha256 } from '../lib/ids.js';
@@ -88,12 +91,34 @@ export interface TestWorld {
   user(username: string): AuthUser;
 }
 
+// Migrating and seeding a world costs ~0.7 s (the global sea graph and harbour catalogue, and a
+// password hash per seeded account), and many tests build several worlds. On the CI runner, with
+// every test file running at once, that setup alone pushed ordinary tests past vitest's 5 s
+// limit — a different one each run. So each worker migrates and seeds once per shore capacity
+// (the only setting the seed reads) and every world starts from its own copy of that image:
+// the same rows as before, in a separate in-memory database, at a fraction of the cost.
+const seededImages = new Map<number, Buffer>();
+
+function seededDatabase(defaultShoreCapacity: number): Db {
+  let image = seededImages.get(defaultShoreCapacity);
+  if (!image) {
+    const { db, sqlite } = createDb(':memory:');
+    runMigrations(db);
+    seedChart(db, defaultShoreCapacity, T0);
+    seedUsers(db, T0);
+    image = sqlite.serialize();
+    sqlite.close();
+    seededImages.set(defaultShoreCapacity, image);
+  }
+  const sqlite = new Database(image);
+  sqlite.pragma('foreign_keys = ON');
+  sqlite.pragma('busy_timeout = 5000');
+  return drizzle(sqlite, { schema });
+}
+
 export function createTestWorld(overrides: Partial<AppConfig> = {}): TestWorld {
   const config = testConfig(overrides);
-  const { db } = createDb(':memory:');
-  runMigrations(db);
-  seedChart(db, config.defaultShoreCapacity, T0);
-  seedUsers(db, T0);
+  const db = seededDatabase(config.defaultShoreCapacity);
   const clock = new ManualClock(T0);
   const outbox = new OutboxMailer(() => clock.now());
   // Tests get a separate real clock so advancing `clock` (journeys, weather) never touches

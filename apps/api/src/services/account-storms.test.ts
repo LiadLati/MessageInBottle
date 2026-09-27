@@ -293,9 +293,6 @@ describe('storms follow the visible map state', () => {
     expect(rollsOf(w, id)).toEqual([]);
   });
 
-  // Two databases, each ticked and read every 20 minutes through an eleven-hour night: about
-  // 2 s alone, but past vitest's 5 s default on the CI runner, where every API test file runs
-  // at once (it timed out there on a121012 and 52f48a0). The work is bounded; it needs the time.
   it('a night gets exactly one deterministic 25% roll, persisted and never rerolled', () => {
     const storm = accountId('storm');
     const calm = accountId('calm');
@@ -321,7 +318,7 @@ describe('storms follow the visible map state', () => {
       ensureRolls(restarted, id, w.clock.now());
       expect(rollsOf(w, id)).toEqual(rolls);
     }
-  }, 30_000);
+  });
 
   it('the same account and inputs always produce the same result, in any database', () => {
     const id = accountId('storm');
