@@ -158,3 +158,26 @@ describe('checks the server repeats', () => {
     expect(sessionStorage.getItem(DRAFT_KEY)).toBe(before);
   });
 });
+
+describe('the letter page heading (manual review round 2)', () => {
+  it('names the chosen recipient, with no subtitle, and follows a change of recipient', async () => {
+    const DANI = {
+      id: 'usr_d',
+      username: 'dani',
+      displayName: 'Daniela Montgomery-Whitfield of the Northern Isles',
+      hasShore: true,
+    };
+    api.friends.mockResolvedValue({ friends: [BEA, DANI] });
+    mount();
+    fireEvent.click(await screen.findByRole('button', { name: /Bea/ }));
+    expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('A letter to Bea');
+    expect(document.body.textContent).not.toMatch(/Addressed to|will not see this journey/);
+    fireEvent.click(screen.getByRole('button', { name: 'Change' }));
+    fireEvent.click(await screen.findByRole('button', { name: /Daniela/ }));
+    expect(screen.getByRole('heading', { level: 1 }).textContent).toBe(
+      `A letter to ${DANI.displayName}`,
+    );
+    // The composer is for the new recipient: the heading is presentation only.
+    expect(screen.getByRole('button', { name: 'Change' })).toBeTruthy();
+  });
+});

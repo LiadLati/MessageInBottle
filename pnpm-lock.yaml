@@ -102,6 +102,9 @@ importers:
       '@fontsource/caveat':
         specifier: ^5.3.0
         version: 5.3.0
+      '@fontsource/dancing-script':
+        specifier: ^5.3.0
+        version: 5.3.0
       '@fontsource/eb-garamond':
         specifier: ^5.3.0
         version: 5.3.0
@@ -111,7 +114,16 @@ importers:
       '@fontsource/italianno':
         specifier: ^5.3.0
         version: 5.3.0
+      '@fontsource/libre-baskerville':
+        specifier: ^5.3.0
+        version: 5.3.0
       '@fontsource/lora':
+        specifier: ^5.3.0
+        version: 5.3.0
+      '@fontsource/nunito':
+        specifier: ^5.3.0
+        version: 5.3.0
+      '@fontsource/patrick-hand':
         specifier: ^5.3.0
         version: 5.3.0
       '@fontsource/special-elite':
@@ -802,6 +814,9 @@ packages:
   '@fontsource/caveat@5.3.0':
     resolution: {integrity: sha512-eHTfzQxFSW9ABERRLNruHoNJmKed2J7pqTUc5lp4a4POMgXGKpxmWj3d9Hz10kmAg6iuTTLe6UagbA4bnsmfQw==}
 
+  '@fontsource/dancing-script@5.3.0':
+    resolution: {integrity: sha512-/FFbz4ZCNN+eG2a6phkZB41iKmyCC6rq2blA/kG9OFeI3/tpzLNazND1bBdEnogLhpfg7o4NfauTbEEYSpSUGg==}
+
   '@fontsource/eb-garamond@5.3.0':
     resolution: {integrity: sha512-VplwHpB8FLuzl+4G5LDci1b3Z4SghiuXH8XEgaxjnOb5aue5mEt1njmDKeO6iyLeGa73LffU7PC7hzncLRx0ZA==}
 
@@ -811,8 +826,17 @@ packages:
   '@fontsource/italianno@5.3.0':
     resolution: {integrity: sha512-zbI5nY80P4BB1OppKFFnUs8vMKgrbQW1zI0LQ74KR5sD6lmczcJdimM9X7TDIo3auanCRqgYpNSMH341v+7C/Q==}
 
+  '@fontsource/libre-baskerville@5.3.0':
+    resolution: {integrity: sha512-IA6OLq36/JWMX70Fha15sri2qWsijFh7hgdDXCRZHjKUHtWarLQoiGilvm7iMqm7HiYFEv9acF3+IuRHO9kUiA==}
+
   '@fontsource/lora@5.3.0':
     resolution: {integrity: sha512-OK1g1z01rHVPqO5aw/FOIoDqc46KKYZdgL3NOLkxLWDk6QhDHhdr/h2BV1cke6gTvR1tzpDfdKyUkGsC+sQLeQ==}
+
+  '@fontsource/nunito@5.3.0':
+    resolution: {integrity: sha512-vw9TaTQJ/zpEpKrsODuPmOvaVjXgdda6B+xXA4YqjrdeJ62MLgVoDerdRXFQHyBnSCt2yQ2nHKCHPP/Pv7Xq4Q==}
+
+  '@fontsource/patrick-hand@5.3.0':
+    resolution: {integrity: sha512-V8C38IlIFfdWg0Xtri3F7sLCVpm069rUwn6w4n+oyn38gt7H4arOJmuReg3tAw1Q6jHqZp89wTnAAJagq4Atxw==}
 
   '@fontsource/special-elite@5.3.0':
     resolution: {integrity: sha512-fOQ9XU8m4KnqzcLibAXCxTsKzbxePNDjPqVss5GSMcPVCY1TuCv+Wq8gm1ebqIR6XS1rhMbQ7ECP9ocKVEEpTA==}
@@ -2756,13 +2780,21 @@ snapshots:
 
   '@fontsource/caveat@5.3.0': {}
 
+  '@fontsource/dancing-script@5.3.0': {}
+
   '@fontsource/eb-garamond@5.3.0': {}
 
   '@fontsource/instrument-sans@5.3.0': {}
 
   '@fontsource/italianno@5.3.0': {}
 
+  '@fontsource/libre-baskerville@5.3.0': {}
+
   '@fontsource/lora@5.3.0': {}
+
+  '@fontsource/nunito@5.3.0': {}
+
+  '@fontsource/patrick-hand@5.3.0': {}
 
   '@fontsource/special-elite@5.3.0': {}
 

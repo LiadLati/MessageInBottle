@@ -13,7 +13,8 @@ interface Props {
   children?: ReactNode;
 }
 
-// The four letter faces load lazily the first time a letter surface is shown (FONTS.md).
+// The letter faces load lazily the first time a letter surface is shown (FONTS.md), all from
+// the app's own bundle.
 let letterFacesRequested = false;
 export function ensureLetterFaces() {
   if (letterFacesRequested) return;
@@ -23,6 +24,10 @@ export function ensureLetterFaces() {
     import('@fontsource/italianno/400.css'),
     import('@fontsource/special-elite/400.css'),
     import('@fontsource/lora/400.css'),
+    import('@fontsource/dancing-script/400.css'),
+    import('@fontsource/patrick-hand/400.css'),
+    import('@fontsource/libre-baskerville/400.css'),
+    import('@fontsource/nunito/400.css'),
   ]);
 }
 

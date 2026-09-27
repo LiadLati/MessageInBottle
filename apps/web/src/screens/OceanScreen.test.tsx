@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -38,10 +38,17 @@ const weather = vi.hoisted(() => ({
 }));
 vi.mock('../state/weather.js', () => ({ useWeather: () => weather.state }));
 vi.mock('../lib/webgl.js', () => ({ isWebGLAvailable: () => true }));
-const drawn = vi.hoisted(() => ({ weather: [] as Record<string, BottleWeather>[] }));
+const drawn = vi.hoisted(() => ({
+  weather: [] as Record<string, BottleWeather>[],
+  select: null as ((id: string) => void) | null,
+}));
 vi.mock('../components/lazy.js', () => ({
-  OceanMap: (props: { weather: Record<string, BottleWeather> }) => {
+  OceanMap: (props: {
+    weather: Record<string, BottleWeather>;
+    onSelectRoute?: (id: string) => void;
+  }) => {
     drawn.weather.push(props.weather);
+    drawn.select = props.onSelectRoute ?? null;
     return <div data-testid="map" />;
   },
   SeaViewer: () => null,
@@ -107,16 +114,27 @@ describe('the storm on the Ocean map', () => {
   it('gives the bottle at sea its storm cloud and lays nothing over the map', async () => {
     const { container } = mount();
     await waitFor(() => expect(drawn.weather.at(-1)).toEqual({ btl_sea: 'storm' }));
-    // The storm is said in words…
-    expect(screen.getByRole('status').textContent).toMatch(/storm is passing/);
-    // …and there is no map-wide stripe or rain layer at all.
-    expect(container.querySelector('.map-storm-sky')).toBeNull();
+    // No floating storm message and no map-wide layer (manual review rounds 1 and 2)…
+    expect(screen.queryByText(/storm is passing/i)).toBeNull();
+    expect(container.querySelector('.map-storm, .map-storm-sky')).toBeNull();
     const css = readFileSync(join(__dirname, '..', 'styles.css'), 'utf8');
-    const stormRules = css.slice(css.indexOf('.map-storm {'), css.indexOf('.map-storm-label {'));
-    expect(stormRules).not.toMatch(/gradient|background/);
-    expect(css).not.toMatch(/map-storm-sky|map-storm-rain/);
-    // The cloud itself is the marker's storm glyph.
+    expect(css).not.toMatch(/\.map-storm/);
+    // …only the marker's storm glyph, the cloud above the bottle.
     expect(css).toMatch(/\.map-marker\.storm \.glyph/);
+  });
+
+  it('explains the storm, with its end time, in the bottle’s journey card', async () => {
+    weather.state.stormUntil = Date.parse('2026-09-26T17:48:00.000Z');
+    mount();
+    await waitFor(() => expect(drawn.select).not.toBeNull());
+    act(() => drawn.select!('btl_sea'));
+    const card = await screen.findByText(/A storm is over your sea/);
+    // 17:48 UTC is 20:48 in Jerusalem, the account's zone.
+    expect(card.textContent).toBe(
+      'A storm is over your sea until 20:48. Each bottle at sea faces it on its own.',
+    );
+    expect(screen.getByText('In a storm')).toBeTruthy();
+    weather.state.stormUntil = null;
   });
 
   it('shows neither cloud nor storm message by day', async () => {
@@ -125,6 +143,27 @@ describe('the storm on the Ocean map', () => {
     const { container } = mount();
     await waitFor(() => expect(drawn.weather.at(-1)).toEqual({ btl_sea: 'calm' }));
     expect(container.querySelector('.map-storm')).toBeNull();
+    expect(screen.queryByText(/storm/i)).toBeNull();
+  });
+});
+
+describe('the private Ocean with nothing at sea', () => {
+  it('leaves the map unobstructed: no empty-state card, no second Write button', async () => {
+    api.sentBottles.mockResolvedValue({ bottles: [] });
+    mount();
+    await screen.findByRole('heading', { name: 'Ocean' });
+    await waitFor(() => expect(api.sentBottles).toHaveBeenCalled());
+    expect(screen.queryByText('No bottles at sea')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Write a letter' })).toBeTruthy(); // the header +
+    expect(screen.getAllByRole('button', { name: /Write a letter/ })).toHaveLength(1);
+    expect(document.querySelector('section.sheet')).toBeNull();
+  });
+
+  it('still shows a load error', async () => {
+    api.sentBottles.mockResolvedValue({ bottles: [] });
+    api.chart.mockRejectedValue(new Error('chart unavailable'));
+    mount();
+    expect(await screen.findByText(/chart unavailable/)).toBeTruthy();
   });
 });
 

@@ -217,7 +217,6 @@ export function OceanScreen({
   // Keep the weather map referentially stable while its values are unchanged, so the periodic
   // clock tick does not re-render the cards for nothing.
   const forced = overrideToForce(oceanStormOverride);
-  const mapStorm = forced === 'on' ? true : forced === 'off' ? false : storm === 'storm';
   const weatherKey = Object.entries(oceanWeatherMap(list, storm, { force: forced }))
     .map(([id, w]) => `${id}=${w}`)
     .join(',');
@@ -436,19 +435,9 @@ export function OceanScreen({
           paused={viewing !== null}
           fitKey={fitKey}
         />
-        {/* The account's one storm is drawn as the cloud above each affected bottle (the map's
-            markers) and said in words here. Nothing is laid over the map itself: it stays clear
-            and readable (manual review round 1, follow-up). */}
-        {mapStorm && !isPublic ? (
-          <div className="map-storm" role="status" aria-live="polite">
-            <span className="map-storm-label">
-              <Icon name="storm" size={14} />
-              {stormUntil
-                ? `A storm is passing over your sea until ${mapClockTime(stormUntil, timeZone)}`
-                : 'A storm is passing over your sea'}
-            </span>
-          </div>
-        ) : null}
+        {/* The account's one storm is drawn only as the cloud above each affected bottle (the
+            map's markers). Nothing floats over the map: the journey card says it in words
+            (manual review round 2). */}
       </div>
       <div className="scrim scrim-map" />
       <div className="scrim-map-header" />
@@ -629,18 +618,13 @@ export function OceanScreen({
           <Skeleton />
         </section>
       ) : list.length === 0 ? (
-        <section className="sheet" tabIndex={0} aria-label="Journey">
-          <div className="stack">
-            <h2 className="t-display-sm">No bottles at sea</h2>
-            <p className="t-meta" style={{ fontSize: 13.5 }}>
-              The water is calm and patient. Write to a friend and let the current carry it.
-            </p>
-            <button type="button" className="btn-primary" onClick={onWrite}>
-              Write a letter
-            </button>
+        // Nothing travelling: the map stays unobstructed (manual review round 2). A load error
+        // for the chart is still shown.
+        loadError ? (
+          <section className="sheet" tabIndex={0} aria-label="Journey">
             <ErrorNote error={loadError} />
-          </div>
-        </section>
+          </section>
+        ) : null
       ) : showList ? (
         <section className="sheet" tabIndex={0} aria-label="Your bottles">
           <h2 className="t-card-title">
@@ -714,6 +698,7 @@ export function OceanScreen({
           <JourneyCard
             bottle={current}
             weather={weatherOf(current.id)}
+            stormUntil={stormUntil === null ? null : mapClockTime(stormUntil, timeZone)}
             onViewAtSea={current.state === 'at_sea' ? () => setViewing(current.id) : null}
             onBack={
               view.fromRoute ? () => setView({ kind: 'route', routeKey: view.fromRoute! }) : null
@@ -771,9 +756,12 @@ function JourneyCard({
   onClose,
   onPassport,
   onViewAtSea,
+  stormUntil = null,
 }: {
   bottle: SentBottleSummaryDto;
   weather: 'calm' | 'storm';
+  // When the account's storm ends, on the account's clock ("02:48"), for the card to say.
+  stormUntil?: string | null;
   onBack: (() => void) | null;
   onClose: () => void;
   onPassport: () => void;
@@ -857,7 +845,9 @@ function JourneyCard({
         </p>
       ) : storm ? (
         <p className="card-note">
-          A storm is over your sea. Each bottle at sea faces it on its own.
+          {stormUntil
+            ? `A storm is over your sea until ${stormUntil}. Each bottle at sea faces it on its own.`
+            : 'A storm is over your sea. Each bottle at sea faces it on its own.'}
         </p>
       ) : null}
       {/* The action row (handoff v2.0): the sea viewer is reached only from here, never from a

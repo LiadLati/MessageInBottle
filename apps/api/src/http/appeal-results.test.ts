@@ -113,7 +113,7 @@ describe('appeal results reach the appellant', () => {
   });
 
   it('an acceptance is a visible notification, and the badge counts only what the list shows', async () => {
-    const { app, appeals, get, decide } = await setup();
+    const { app, appeals, get, decide, seen } = await setup();
     expect((await decide(appeals[0]!, 'accept')).status).toBe(200);
 
     // One violation left in force: the account is out of suspension and has its inbox back.
@@ -130,13 +130,20 @@ describe('appeal results reach the appellant', () => {
     // No ghost badge: every unread counted is an entry in the list.
     expect(page.unreadCount).toBe(page.notifications.filter((n) => n.readAt === null).length);
 
-    // The popup offers the same row; reading the inbox answers it too.
+    // The popup offers the same row. Reading the inbox reads everything else but leaves the
+    // result for its popup; only dismissing the popup reads it.
     const popup = (await get<AppealResultsDto>('/api/moderation/appeal-results')).body.results;
     expect(popup.map((n) => n.id)).toEqual([accepted[0]!.id]);
     await app.request('/api/notifications/read-all', {
       method: 'POST',
       headers: { authorization: `Bearer ${(await loginAs(app, 'ada')).token}` },
     });
+    expect(
+      (await get<AppealResultsDto>('/api/moderation/appeal-results')).body.results.map((n) => n.id),
+    ).toEqual([accepted[0]!.id]);
+    const inbox = (await get<NotificationsPageDto>('/api/notifications')).body;
+    expect(inbox.unreadCount).toBe(1);
+    expect((await seen(accepted[0]!.id)).status).toBe(204);
     expect((await get<AppealResultsDto>('/api/moderation/appeal-results')).body.results).toEqual(
       [],
     );
