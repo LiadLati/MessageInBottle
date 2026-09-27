@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, inArray, isNull, lt, or, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, isNull, lt, notInArray, or, sql } from 'drizzle-orm';
 import {
   NOTIFICATIONS_PAGE_SIZE,
   type NotificationDto,
@@ -70,6 +70,14 @@ function classify(
 // This is the only notification data SeaYou keeps: delivery is a database write, so there are
 // no separate delivery attempts or provider logs behind it (services/housekeeping.ts prunes
 // only operational records).
+//
+// Newest means most recently written, so the order and the cursor are SQLite's rowid (insertion
+// order), not `createdAt`. The two agree in production, where there is one clock. In a DEV
+// build they do not: journey notices are stamped by the shared DEV clock, which may be days
+// ahead, and moderation notices by the real clock, so ordering by `createdAt` buried an appeal
+// result written today under arrivals stamped in the simulated future — it was in the history,
+// just nowhere the person would look. The cursor is the rowid of the last row served; an older
+// "<createdAt>.<rowid>" cursor is still understood by its rowid.
 export function notificationPage(
   ctx: AppContext,
   userId: string,
@@ -82,21 +90,8 @@ export function notificationPage(
     .select({ n: t.notifications, lossReason: t.bottles.lossReason, rowid })
     .from(t.notifications)
     .leftJoin(t.bottles, eq(t.bottles.id, t.notifications.bottleId))
-    .where(
-      and(
-        eq(t.notifications.userId, userId),
-        cursor
-          ? or(
-              lt(t.notifications.createdAt, cursor.createdAt),
-              and(eq(t.notifications.createdAt, cursor.createdAt), lt(rowid, cursor.rowid)),
-            )
-          : undefined,
-      ),
-    )
-    // Newest first. Ids are random, so two notices written in the same millisecond (a
-    // suspension and the appeal that lifted it, say) would otherwise come back in a different
-    // order on every read; SQLite's rowid is insertion order, which is the one we mean.
-    .orderBy(desc(t.notifications.createdAt), desc(rowid))
+    .where(and(eq(t.notifications.userId, userId), cursor === null ? undefined : lt(rowid, cursor)))
+    .orderBy(desc(rowid))
     .limit(limit + 1)
     .all();
   const more = rows.length > limit;
@@ -117,7 +112,7 @@ export function notificationPage(
       createdAt: new Date(n.createdAt).toISOString(),
       readAt: n.readAt === null ? null : new Date(n.readAt).toISOString(),
     })),
-    nextCursor: more && last ? `${last.n.createdAt}.${last.rowid}` : null,
+    nextCursor: more && last ? String(last.rowid) : null,
     unreadCount: unread?.n ?? 0,
   };
 }
@@ -127,19 +122,32 @@ export function listNotifications(ctx: AppContext, userId: string): Notification
   return notificationPage(ctx, userId, { limit: 100 }).notifications;
 }
 
-function parseCursor(raw: string | null): { createdAt: number; rowid: number } | null {
-  const m = raw ? /^(\d{1,15})\.(\d{1,15})$/.exec(raw) : null;
-  return m ? { createdAt: Number(m[1]), rowid: Number(m[2]) } : null;
+function parseCursor(raw: string | null): number | null {
+  const m = raw ? /^(?:\d{1,15}\.)?(\d{1,15})$/.exec(raw) : null;
+  return m ? Number(m[1]) : null;
 }
 
 // Reading the inbox marks everything as read. It only clears the unread badge: every entry stays
 // in the history. This touches notifications only: no bottle, marker visibility, opening or
 // outcome is involved.
+//
+// An unread appeal result is the one exception: it stays unread until its one-time popup is
+// dismissed (markAppealResultSeen). Otherwise opening the inbox before the next poll consumed
+// the popup unseen, and the result was reduced to one row among many in the history.
 export function markAllRead(ctx: AppContext, userId: string): void {
   ctx.db
     .update(t.notifications)
     .set({ readAt: ctx.clock.now() })
-    .where(and(eq(t.notifications.userId, userId), isNull(t.notifications.readAt)))
+    .where(
+      and(
+        eq(t.notifications.userId, userId),
+        isNull(t.notifications.readAt),
+        or(
+          isNull(t.notifications.kind),
+          notInArray(t.notifications.kind, [...APPEAL_RESULT_KINDS]),
+        ),
+      ),
+    )
     .run();
 }
 

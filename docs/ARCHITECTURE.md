@@ -306,8 +306,13 @@ and the new `risk_decisions` table (one row per bottle per storm night, unique o
   retries, repeated ticks and replayed requests insert nothing new. Older sender events
   (`cancelled:`, `public_opened:`) stay in history with their own icons.
 - **Inbox.** The envelope beside the `+` control shows the unread count; opening it marks all of
-  this account's notifications read (`POST /api/notifications/read-all`), which is persisted, so
-  a reload or another session shows the same state. Rows are newest first, information only:
+  this account's notifications read (`POST /api/notifications/read-all`) except an unread appeal
+  result (below), which is persisted, so a reload or another session shows the same state. Rows
+  are newest first by insertion order (rowid), not by `createdAt`: in a DEV build journey notices
+  are stamped by the shared DEV clock and moderation notices by the real clock, so `createdAt`
+  would bury today's appeal result under arrivals stamped days ahead. The paging cursor is that
+  rowid. Opening the inbox re-reads the list at once rather than waiting for the next poll. Rows
+  are information only:
   no row opens a bottle, navigates, or touches a marker. Reading a sinking notice is not seeing
   the marker — `bottle_outcome_views` is written only by the map viewport, as before.
 - **My Shore badge.** It was `unread.length` over *every* notification, so a sender's own lost,
@@ -321,9 +326,11 @@ and the new `risk_decisions` table (one row per bottle per storm night, unique o
   suspended or banned account (product decision 14), so the result also has its own route:
   `GET /api/moderation/appeal-results` returns the unread appeal-result notices whatever the
   standing, and the web shows the oldest as a one-time popup, in the app or over the standing
-  screen. `POST /api/moderation/appeal-results/:id/seen` marks that one notice read, which is
-  the same state opening the inbox writes, so the popup, the badge and the history never
-  disagree, and nothing is deleted.
+  screen. `POST /api/moderation/appeal-results/:id/seen` marks that one notice read, and nothing
+  else does: opening the inbox leaves an unread result unread, so opening it before the next
+  poll no longer consumes the popup unseen (it now comes up over the inbox at once). The popup,
+  the badge and the history still never disagree, and nothing is deleted. A decision notice
+  still owed an answer comes first; the result follows once it is answered.
 
 ## Legal documents, consent, and account deletion
 

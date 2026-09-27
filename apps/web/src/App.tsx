@@ -219,15 +219,17 @@ function Shell() {
   useEffect(() => {
     if (tab === 'shore') void reloadShore();
   }, [tab, reloadShore]);
-  // Opening the inbox is what marks its notifications read; the count follows.
+  // Opening the inbox is what marks its notifications read; the count follows. It does not wait
+  // for the next poll, which may be 20 s away: whatever arrived since (an appeal result decided a
+  // moment ago, say) is in the list at once, and an unread appeal result brings up its one-time
+  // popup now. The server keeps that result unread until the popup itself is dismissed.
   const openInbox = () => {
     setInboxOpen(true);
-    if (unreadCount > 0)
-      void api.markNotificationsRead().then(() => {
-        void reloadNotifications();
-        // Reading the inbox answers an appeal-result popup too: it is the same entry.
-        void reloadAppealResults();
-      });
+    void reloadAppealResults();
+    void api
+      .markNotificationsRead()
+      .catch(() => undefined)
+      .then(() => reloadNotifications());
   };
   const closeInbox = () => setInboxOpen(false);
 
