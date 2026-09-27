@@ -16,7 +16,7 @@ import type * as Ids from '../lib/ids.js';
 import { AppError } from '../lib/errors.js';
 import { getMyShore, getSentBottle, listReceivedLetters, readOwnLetter } from './bottles.js';
 import type { AppContext } from './context.js';
-import { plannedArrivalAt } from '../domain/routing.js';
+import { JOURNEY_DURATION_FACTOR, plannedArrivalAt } from '../domain/routing.js';
 import { commitArrivalIfDue, runJourneyTick } from './journey.js';
 import { listNotifications } from './notifications.js';
 import { closeReading, commitLoss, listPublicOcean, openPublicBottle } from './outcomes.js';
@@ -246,7 +246,9 @@ describe(`automatic storm outcomes (policy v${RISK_POLICY_VERSION})`, () => {
   });
 
   it('never decides at or after 80% progress, and arrival wins a race with a later storm', () => {
-    w = slowWorld({ minJourneyMs: 80 * DAY });
+    // An 80-day scheduled journey: the floor is set so that, after the 70% schedule factor,
+    // the journey is still 80 days long and has storms both sides of the cutoff.
+    w = slowWorld({ minJourneyMs: Math.round((80 * DAY) / JOURNEY_DURATION_FACTOR) });
     const probe = releaseBottle(w.ctx, ada(), releaseInput(bo().id, 'key-0000000050')).bottleId;
     const probePlan = w.db
       .select()

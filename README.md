@@ -173,8 +173,10 @@ All variables are optional and documented in `.env.example`. The important ones:
   The in-app dev clock bar is additionally compiled out of production bundles: it renders only
   in `vite` development builds (`import.meta.env.DEV`) and only while the API reports dev mode.
   `pnpm --filter @mib/web preview` serves the production bundle against the local API.
-- `MIB_MS_PER_CHART_UNIT` / `MIB_MIN_JOURNEY_MS`: the provisional travel model (spec decision D01 is
-  still open). Defaults give roughly 1–4 days per crossing.
+- `MIB_MS_PER_CHART_UNIT` / `MIB_MIN_JOURNEY_MS`: the travel model (spec decision D01). The
+  duration they produce is then scheduled at 70% (`JOURNEY_DURATION_FACTOR` in
+  `apps/api/src/domain/routing.ts`) when a new journey is released; journeys already at sea keep
+  the schedule they were saved with, and same-harbour letters still arrive at once.
 - `MIB_SHORE_CAPACITY`: bottles one account's shore holds at once — travelling plus
   delivered-unread (default 100). `MIB_DEFAULT_SHORE_CAPACITY` only seeds a legacy column.
 - `MIB_RISK_POLICY_VERSION` (default `4`): the automatic storm-outcome policy new journeys are

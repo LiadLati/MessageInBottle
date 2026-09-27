@@ -711,7 +711,7 @@ This roadmap is a plan only. The current task ends with the updated specificatio
 
 | ID | Decision | Recommendation or clarification |
 | --- | --- | --- |
-| D01 | Travel speed and duration | **Decided (product decision 15):** keep the current constants (`MIB_MS_PER_CHART_UNIT`, `MIB_MIN_JOURNEY_MS`); same-harbour delivery stays immediate; device time has no effect. No retune. |
+| D01 | Travel speed and duration | **Decided (product decision 15):** keep the current constants (`MIB_MS_PER_CHART_UNIT`, `MIB_MIN_JOURNEY_MS`); same-harbour delivery stays immediate; device time has no effect. **Amended 2026-09-27:** a new journey is scheduled at 70% of the duration those constants produce (the route and the calculation are unchanged); journeys already at sea keep their saved schedule. |
 | D02 | Fate after three public days | **Decided 2026-09-19:** permanent removal after exactly 72 hours from the loss; no resumption (§9.3). |
 | D03 | Public identity fields and participant access | Hide recipient/destination; propose excluding sender and recipient from discovery interactions. Decide sender attribution. |
 | D04 | Completion and retention | Propose private received archive and visual recycling; user confirmed only that opening ends the journey. Decide sender copy after loss. |

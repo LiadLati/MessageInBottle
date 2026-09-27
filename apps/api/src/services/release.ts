@@ -13,6 +13,7 @@ import * as t from '../db/schema.js';
 import { DISCLOSURE_VERSION } from '../config.js';
 import {
   journeyDurationMs,
+  scheduledJourneyMs,
   pathGeoPoints,
   pathPoints,
   planRoute,
@@ -132,10 +133,8 @@ export function checkEligibility(
   if (heldForRecipient(db, recipientId) >= ctx.config.shoreCapacity) {
     return { ok: false, rejection: 'shore_full', partial };
   }
-  const plannedDurationMs = journeyDurationMs(
-    path.totalLength,
-    ctx.config.msPerChartUnit,
-    ctx.config.minJourneyMs,
+  const plannedDurationMs = scheduledJourneyMs(
+    journeyDurationMs(path.totalLength, ctx.config.msPerChartUnit, ctx.config.minJourneyMs),
   );
   return {
     ok: true,
@@ -172,10 +171,12 @@ export function previewRelease(
       ? routeView(
           partial.graph,
           partial.path,
-          journeyDurationMs(
-            partial.path.totalLength,
-            ctx.config.msPerChartUnit,
-            ctx.config.minJourneyMs,
+          scheduledJourneyMs(
+            journeyDurationMs(
+              partial.path.totalLength,
+              ctx.config.msPerChartUnit,
+              ctx.config.minJourneyMs,
+            ),
           ),
         )
       : null;
