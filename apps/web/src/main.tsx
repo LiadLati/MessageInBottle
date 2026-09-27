@@ -12,11 +12,31 @@ import './design/tokens.css';
 import './styles.css';
 import { App } from './App.js';
 import { AppCrashed, ErrorBoundary } from './components/ErrorBoundary.js';
+import { endpointProblem } from './lib/endpoints.js';
+import { installNativeShell } from './lib/nativeShell.js';
+
+installNativeShell();
+
+// A packaged app built without its server address would otherwise send every request to the
+// phone itself and look merely broken; it says what is wrong instead.
+const misconfigured = endpointProblem();
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    <ErrorBoundary fallback={() => <AppCrashed />}>
-      <App />
-    </ErrorBoundary>
+    {misconfigured ? (
+      <main className="deck-screen" role="alert">
+        <div
+          className="glass-panel stack"
+          style={{ maxWidth: 480, margin: '15vh auto', padding: 24 }}
+        >
+          <h1 className="t-display">SeaYou cannot start</h1>
+          <p className="secondary">{misconfigured}</p>
+        </div>
+      </main>
+    ) : (
+      <ErrorBoundary fallback={() => <AppCrashed />}>
+        <App />
+      </ErrorBoundary>
+    )}
   </StrictMode>,
 );

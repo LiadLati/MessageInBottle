@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- SeaYou talks only to its own API over HTTPS. It asks for nothing else: no location
+         (the time zone comes from the device settings), no camera, storage, contacts or
+         notifications. -->
+    <uses-permission android:name="android.permission.INTERNET" />
+
+    <!-- allowBackup/dataExtractionRules: nothing on the device is backed up or transferred
+         (res/xml/data_extraction_rules.xml). usesCleartextTraffic: plain http is refused; only
+         the debug build may reach a development API on the emulator's host
+         (src/debug/res/xml/network_security_config.xml). -->
+    <application
+        android:allowBackup="false"
+        android:fullBackupContent="false"
+        android:dataExtractionRules="@xml/data_extraction_rules"
+        android:usesCleartextTraffic="false"
+        android:icon="@mipmap/ic_launcher"
+        android:label="@string/app_name"
+        android:roundIcon="@mipmap/ic_launcher_round"
+        android:supportsRtl="true"
+        android:theme="@style/AppTheme">
+
+        <!-- configChanges: rotation, keyboard and theme changes do not recreate the activity,
+             so the WebView (and the letter being written) survives them. adjustResize keeps
+             the focused field above the keyboard. -->
+        <activity
+            android:configChanges="orientation|keyboardHidden|keyboard|screenSize|locale|smallestScreenSize|screenLayout|uiMode|navigation|density"
+            android:name=".MainActivity"
+            android:label="@string/title_activity_main"
+            android:theme="@style/AppTheme.NoActionBarLaunch"
+            android:launchMode="singleTask"
+            android:windowSoftInputMode="adjustResize"
+            android:exported="true">
+
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+
+        </activity>
+    </application>
+</manifest>

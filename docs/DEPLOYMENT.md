@@ -9,13 +9,15 @@ through Gmail from `seayou.support@gmail.com` (section 2a).
 
 ```bash
 pnpm install --frozen-lockfile
-pnpm build                                              # API → apps/api/dist, web → apps/web/dist
+pnpm build                                              # API → apps/api/dist
 pnpm --filter @mib/api deploy --prod --legacy /srv/seayou-api
-cp -r apps/web/dist /srv/seayou-web
 ```
 
 `/srv/seayou-api` holds the compiled API, its migrations and production dependencies — no
-TypeScript runtime, no source, no `.env`, no database. `/srv/seayou-web` is static files.
+TypeScript runtime, no source, no `.env`, no database. **No web app is deployed**: SeaYou's
+interface is bundled inside the Android app (`docs/ANDROID.md`), which calls this server over
+HTTPS. The server itself publishes only the API and the public pages (`/support`, `/legal`,
+`/legal/delete-account`, `/reset-password`).
 CI proves the artefact on every pull request (`apps/api/scripts/smoke-artefact.mjs`).
 
 ## 2. Required environment
@@ -23,7 +25,8 @@ CI proves the artefact on every pull request (`apps/api/scripts/smoke-artefact.m
 | Variable | Requirement |
 | --- | --- |
 | `MIB_DATABASE_PATH` | **Required, absolute**, on persistent storage outside `/srv/seayou-api` (a redeploy replaces that directory). The server refuses to start otherwise. |
-| `MIB_APP_URL` | **Required, `https://`** — the public origin. Reset links are built from it. The server refuses `http://` in production. |
+| `MIB_APP_URL` | **Required, `https://`** — the public origin of this server. Password-reset e-mails link to `MIB_APP_URL/reset-password`. The server refuses `http://` in production. The Android app is built with the same origin (`VITE_MIB_API_ORIGIN`). |
+| `MIB_CORS_ORIGIN` | Leave unset: in production it defaults to `https://localhost`, the origin the Android app's WebView serves the interface from. Only https origins are accepted; `*` is refused. |
 | `MIB_DEV_MODE` | Unset or `false`. `true` is refused by the compiled server. |
 | `MIB_TRUST_PROXY` | `true` behind the reverse proxy below; then bind the API to `127.0.0.1` so nothing can reach it except through the proxy. |
 | `MIB_TRUSTED_PROXY_HOPS` | Number of proxies that append to `X-Forwarded-For` (default `1`). The client address is read that many entries from the right. |
@@ -60,7 +63,7 @@ The App Password is a credential: it lives only in the host's secret store (or a
    ```
 
 4. Restart the API, request a reset for an account you control, and check the message arrives
-   and its link opens `MIB_APP_URL`. Links expire after 30 minutes and work once; using one
+   and its link opens `MIB_APP_URL/reset-password`. Links expire after 30 minutes and work once; using one
    revokes every session and every other reset link.
 5. To rotate: create a new App Password, update the secret, restart, then revoke the old one in
    the Google Account. Revoke it immediately if it may have leaked.
@@ -91,17 +94,17 @@ file. Run CLI tools (`grant-*.js`, `retention.js`, `backup.js`) against the live
 needed; they are safe alongside the server (SQLite locking plus `busy_timeout`) but add write
 load.
 
-## 4. Reverse proxy, TLS and the web app
+## 4. Reverse proxy and TLS
 
-One origin serves everything:
+One origin, the API's:
 
-- `https://<domain>/` → the static web app (`/srv/seayou-web`), falling back to `index.html`;
-- `/api/*`, `/legal`, `/legal/*`, `/support` → the API on `127.0.0.1:3001`.
+- `/api/*`, `/legal`, `/legal/*`, `/support`, `/reset-password` → the API on `127.0.0.1:3001`;
+- `/` → a redirect to `/support`; every other path → 404. There is no web app to serve.
 
 The proxy terminates TLS, redirects `http://` to `https://`, appends the client address to
 `X-Forwarded-For`, and limits request bodies (the API also refuses bodies over 64 KB itself).
 The API sets its own security headers (CSP, `X-Frame-Options`, `nosniff`, `Referrer-Policy`,
-and HSTS when `MIB_APP_URL` is https). The static web app needs its own headers from the proxy.
+and HSTS when `MIB_APP_URL` is https).
 `docs/deploy/Caddyfile` is a complete reference configuration; any proxy that does the same is
 fine.
 
@@ -155,7 +158,8 @@ MIB_DATABASE_PATH=… node dist/grant-admin.js --email you@example.com --confirm
 7. Running the historical deletion backfill (`deletion:backfill`, dry run first, after a
    backup) on the real database — owner-operated, never run by development work.
 8. Enabling GitHub branch protection so CI blocks merges.
-9. Store packaging and the Play Console Data Safety form (`docs/LEGAL_DOCUMENTS.md`).
+9. The Android release, its signing key and the Play Console listing and Data Safety form
+   (`docs/ANDROID.md`, `docs/LEGAL_DOCUMENTS.md`).
 10. The external append-only or immutable log for moderation events (section 2b), chosen with
     the hosting and logging provider. This is a production deployment dependency, not an open
     product decision; the local table is not tamper-evident by itself.

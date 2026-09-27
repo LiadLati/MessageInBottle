@@ -127,7 +127,7 @@ async function nextMessage(count: number): Promise<Captured> {
 }
 const tokenIn = (m: Captured) => {
   const body = decodeQp(m.data);
-  const match = /\/\?reset=([A-Za-z0-9_-]{32,128})/.exec(body);
+  const match = /\/reset-password\?token=([A-Za-z0-9_-]{32,128})/.exec(body);
   if (!match) throw new Error('no reset link in the message');
   return match[1]!;
 };
@@ -155,9 +155,7 @@ describe('password reset through SMTP (product decision 4)', () => {
     const body = decodeQp(m.data);
     expect(body).toMatch(/Subject: Reset your SeaYou password/);
     expect(body).toMatch(/30 minutes/);
-    expect(body).toContain(
-      `https://seayou.example/?reset=${tokenIn(m)}`.replace('https://seayou.example', ''),
-    );
+    expect(body).toContain(`/reset-password?token=${tokenIn(m)}`);
   });
 
   it('resets once, invalidates the older link, and ends every session', async () => {

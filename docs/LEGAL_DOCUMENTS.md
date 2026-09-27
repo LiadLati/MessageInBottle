@@ -141,6 +141,19 @@ would make a published document false:
 - **Browser storage.** The Privacy Policy lists exactly three things, and
   `apps/web/src/storage.test.ts` walks the source to prove there is no fourth.
 
+## Correction of 2026-09-27 (still version 1.1): SeaYou is an Android app
+
+SeaYou is distributed as an Android app on Google Play, with its interface bundled in the app
+(`docs/ANDROID.md`). The Privacy Policy described storage "in your browser" that the browser
+removes "when the tab is closed". Nothing stored changed — the same three items, in the same
+`sessionStorage`/`localStorage` — but the wording now describes the app: storage private to the
+app; the session and the unsent letter cleared when SeaYou is closed, including when Android ends
+it in the background, after which the person signs in again. Three facts were added: the app's
+storage is excluded from Android backups and device transfer; a Google Play purchase is handled by
+Google and SeaYou receives no payment details; the reset e-mail links to a page on the SeaYou
+server. The scope names the Android app and `/reset-password`. As with the corrections below,
+version 1.1 has not been published to any real user, so it was corrected in place.
+
 ## Correction of 2026-09-26 (still version 1.1)
 
 The Terms of Use said a finder's reading "can be resumed for up to 15 minutes if it is

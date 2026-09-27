@@ -1,7 +1,9 @@
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
+  ANDROID_APP_ORIGIN,
   ConfigError,
+  corsOriginsOf,
   PRODUCTION_BUILD,
   envBool,
   isProductionRuntime,
@@ -137,5 +139,35 @@ describe('production fails closed', () => {
     } catch (err) {
       expect(String(err)).not.toContain('hunter2');
     }
+  });
+});
+
+describe('browser-engine origins allowed to call the API (MIB_CORS_ORIGIN)', () => {
+  const prod = { NODE_ENV: 'production', MIB_DATABASE_PATH: PROD_DB, MIB_APP_URL: PROD_URL };
+
+  it('defaults to the Android app in production and the Vite dev server otherwise', () => {
+    expect(loadConfig(prod, { productionBuild: true }).corsOrigin).toEqual([ANDROID_APP_ORIGIN]);
+    expect(ANDROID_APP_ORIGIN).toBe('https://localhost');
+    expect(loadConfig({}).corsOrigin).toEqual(['http://localhost:5173']);
+  });
+
+  it('accepts a comma-separated list of origins', () => {
+    expect(corsOriginsOf('https://localhost, http://localhost:5173/', false)).toEqual([
+      'https://localhost',
+      'http://localhost:5173',
+    ]);
+    expect(
+      loadConfig({ ...prod, MIB_CORS_ORIGIN: 'https://localhost' }, { productionBuild: true })
+        .corsOrigin,
+    ).toEqual(['https://localhost']);
+  });
+
+  it('refuses http, paths and wildcards in production, and anything that is not an origin', () => {
+    expect(() => corsOriginsOf('http://localhost:5173', true)).toThrow(ConfigError);
+    expect(() => corsOriginsOf('*', true)).toThrow(ConfigError);
+    expect(() => corsOriginsOf('https://localhost/app', false)).toThrow(ConfigError);
+    expect(() => corsOriginsOf('localhost', false)).toThrow(ConfigError);
+    expect(() => corsOriginsOf(' , ', false)).toThrow(ConfigError);
+    expect(corsOriginsOf('*', false)).toBe('*');
   });
 });

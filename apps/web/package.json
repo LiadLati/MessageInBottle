@@ -8,9 +8,14 @@
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "android:dev": "node scripts/android-build.mjs dev",
+    "android:release": "node scripts/android-build.mjs release"
   },
   "dependencies": {
+    "@capacitor/android": "8.5.2",
+    "@capacitor/app": "8.1.1",
+    "@capacitor/core": "8.5.2",
     "@fontsource/caveat": "^5.3.0",
     "@fontsource/dancing-script": "^5.3.0",
     "@fontsource/eb-garamond": "^5.3.0",
@@ -29,6 +34,7 @@
     "zod": "^4.5.4"
   },
   "devDependencies": {
+    "@capacitor/cli": "8.5.2",
     "@testing-library/dom": "^10.4.2",
     "@testing-library/react": "^16.3.3",
     "@types/geojson": "^7946.0.16",

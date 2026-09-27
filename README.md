@@ -4,6 +4,10 @@ Slow correspondence between friends: write a letter, seal it in a bottle, releas
 sea, and follow its simulated journey to your friend's virtual shore. The recipient only learns about
 the bottle once the server has committed its arrival.
 
+SeaYou is distributed as an **Android app** on Google Play: the interface in `apps/web` is
+bundled inside the app with Capacitor and calls the API over HTTPS. No web version is published;
+the browser build is for development only. See `docs/ANDROID.md`.
+
 Product source of truth: `docs/SeaYou_Product_Specification.md`. Its §11 "As built" and §18
 describe what this repository implements; the earlier v0.2 draft is historical and not in the
 repository.
@@ -163,8 +167,11 @@ All variables are optional and documented in `.env.example`. The important ones:
   of which, the mail outbox included, requires a signed-in `developer` account). It is refused
   in production: the compiled API, or anything run with `NODE_ENV=production`, will not start
   with it.
-- `MIB_APP_URL`: the public origin; reset links are built from it. Production requires
-  `https://`, and HSTS is sent when it is https.
+- `MIB_APP_URL`: the public origin of the API; password-reset e-mails link to its
+  `/reset-password` page. Production requires `https://`, and HSTS is sent when it is https.
+- `MIB_CORS_ORIGIN`: origins allowed to call `/api` from a browser engine, comma-separated.
+  Production default `https://localhost` (the Android app); development default
+  `http://localhost:5173`. Production accepts only `https://` origins.
 - `MIB_TRUST_PROXY` / `MIB_TRUSTED_PROXY_HOPS` (default `1`): behind a reverse proxy, the client
   address is read that many entries from the **right** of `X-Forwarded-For`. See
   `docs/DEPLOYMENT.md` for the whole deployment contract (one API process, which the server

@@ -347,7 +347,7 @@ describe('the development clock never touches authentication', () => {
       body: JSON.stringify({ email: 'resetter@example.test' }),
     });
     expect(res.status).toBe(202);
-    const link = w.outbox.messages.at(-1)!.text.match(/\?reset=([a-f0-9]+)/)![1]!;
+    const link = w.outbox.messages.at(-1)!.text.match(/reset-password\?token=([a-f0-9]+)/)![1]!;
     // Days of journey time pass; the token is still the one that was mailed.
     w.clock.advance(7 * 24 * 60 * 60 * 1000);
     const used = await app.request('/api/auth/password/reset', {

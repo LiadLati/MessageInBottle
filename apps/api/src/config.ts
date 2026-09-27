@@ -105,14 +105,18 @@ export interface AppConfig {
   shoreCapacity: number;
   journeyTickMs: number;
   sessionTtlMs: number;
-  corsOrigin: string;
+  // Origins allowed to call /api from a browser engine: the Android app's WebView origin
+  // (https://localhost) in production, plus the Vite dev server in development. A list, from
+  // MIB_CORS_ORIGIN separated by commas; '*' only outside production.
+  corsOrigin: string | string[];
   // Only behind a reverse proxy that sets X-Forwarded-For: otherwise clients could pick their
   // own rate-limit bucket by sending the header themselves.
   trustProxy: boolean;
   // How many trusted proxies append to X-Forwarded-For in front of the API (default 1). The
   // client address is read that many entries from the right (http/client-address.ts).
   trustedProxyHops: number;
-  // Public URL of the web app, used to build links in e-mails.
+  // Public https:// origin of this server, used to build the password-reset link in e-mails,
+  // which opens the server's own /reset-password page (the interface itself is in the app).
   appUrl: string;
   // The published support address shown on /support and in the legal documents. A public
   // contact point, never a credential: nothing in SeaYou holds a password or token for it.
@@ -156,6 +160,39 @@ export interface MailConfig {
   smtp: { host: string; port: number; secure: boolean; user: string; pass: string };
 }
 
+// The origin Capacitor serves the bundled interface from inside the Android app.
+export const ANDROID_APP_ORIGIN = 'https://localhost';
+
+// MIB_CORS_ORIGIN: one origin or several separated by commas. Each must be an origin (scheme,
+// host and optional port, nothing else). In production each must be https — the Android app's
+// WebView origin, https://localhost, is — and '*' is refused, because a wildcard would let any
+// web page script the API with a token it had obtained.
+export function corsOriginsOf(raw: string, production: boolean): string | string[] {
+  const items = raw
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean);
+  if (items.length === 0) throw new ConfigError('MIB_CORS_ORIGIN is empty.');
+  if (items.includes('*')) {
+    if (production || items.length > 1)
+      throw new ConfigError("MIB_CORS_ORIGIN='*' is refused in production and cannot be combined.");
+    return '*';
+  }
+  for (const item of items) {
+    let url: URL;
+    try {
+      url = new URL(item);
+    } catch {
+      throw new ConfigError(`MIB_CORS_ORIGIN entry is not an origin: ${item}`);
+    }
+    if (url.origin !== item.replace(/\/$/, ''))
+      throw new ConfigError(`MIB_CORS_ORIGIN entry must be an origin only: ${item}`);
+    if (production && url.protocol !== 'https:')
+      throw new ConfigError(`MIB_CORS_ORIGIN must use https:// in production: ${item}`);
+  }
+  return items.map((i) => i.replace(/\/$/, ''));
+}
+
 // Reads and validates the whole configuration before anything listens. Development mode is off
 // unless MIB_DEV_MODE is exactly `true`, and it is refused outright in production: a forgotten
 // variable must never be what turns on seeded accounts, the dev clock or /api/dev.
@@ -180,12 +217,18 @@ export function loadConfig(
         'storage outside the application directory).',
     );
   const appUrl = env.MIB_APP_URL ?? 'http://localhost:5173';
+  // By default the browser engine allowed to call the API is the Android app's WebView
+  // (https://localhost) in production and the Vite dev server in development.
+  const corsOrigin = corsOriginsOf(
+    env.MIB_CORS_ORIGIN ?? (production ? ANDROID_APP_ORIGIN : 'http://localhost:5173'),
+    production,
+  );
   // Password-reset links are built from this URL, and the Privacy Policy says a production
   // deployment requires HTTPS; a production server with an http:// public URL would mail
   // plain-text links to its users (SEC-014).
   if (production && !/^https:\/\//.test(appUrl))
     throw new ConfigError(
-      'MIB_APP_URL must be the public https:// address of the web app in production.',
+      'MIB_APP_URL must be the public https:// address of this server in production.',
     );
   // Automated review is recommendation-only (product decision 2): there is no automatic
   // decision path left in the code, so the old switch is refused outright rather than
@@ -206,7 +249,7 @@ export function loadConfig(
     shoreCapacity: envInt(env, 'MIB_SHORE_CAPACITY', SHORE_CAPACITY),
     journeyTickMs: envInt(env, 'MIB_JOURNEY_TICK_MS', 15_000),
     sessionTtlMs: envInt(env, 'MIB_SESSION_TTL_MS', 30 * 24 * 60 * 60 * 1000),
-    corsOrigin: env.MIB_CORS_ORIGIN ?? 'http://localhost:5173',
+    corsOrigin,
     trustProxy: envBool(env, 'MIB_TRUST_PROXY', false),
     trustedProxyHops: envPositiveInt(env, 'MIB_TRUSTED_PROXY_HOPS', 1),
     appUrl,

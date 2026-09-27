@@ -327,7 +327,7 @@ describe('a real developer can still work in development mode', () => {
       messages: Array<{ to: string; text: string }>;
     };
     const mail = outbox.messages.find((m) => m.to === me.email);
-    const token = /reset=([a-f0-9]+)/.exec(mail?.text ?? '')?.[1];
+    const token = /reset-password\?token=([a-f0-9]+)/.exec(mail?.text ?? '')?.[1];
     expect(token).toBeTruthy();
     const reset = await app.request('/api/auth/password/reset', {
       method: 'POST',

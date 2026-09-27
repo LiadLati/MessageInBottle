@@ -78,7 +78,11 @@ afterEach(() => {
   fs.rmSync(dir, { recursive: true, force: true });
 });
 
-describe('granting a role', () => {
+// Every test here runs the real command-line tools as child processes (tsx compiles each one
+// on start, about 1 s apart from anything else), up to three in a row. That is the point of the
+// tests, so they get the same budget as their setup instead of vitest's 5 s default, which three
+// cold process starts exceed when the whole repository's suites run at once.
+describe('granting a role', { timeout: 60_000 }, () => {
   it('only reports the account when asked to look it up, and changes nothing', () => {
     const res = run('grant-admin', ['--email', 'rosa@example.test']);
     expect(res.code).toBe(0);

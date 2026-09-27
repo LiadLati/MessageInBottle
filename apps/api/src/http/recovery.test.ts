@@ -27,7 +27,7 @@ const forgot = (app: App, email: string) =>
   app.request('/api/auth/password/forgot', json({ email }));
 const reset = (app: App, token: string, password: string) =>
   app.request('/api/auth/password/reset', json({ token, password }));
-const tokenFrom = (text: string) => /\?reset=([0-9a-f]{64})/.exec(text)![1]!;
+const tokenFrom = (text: string) => /reset-password\?token=([0-9a-f]{64})/.exec(text)![1]!;
 
 describe('registration with e-mail', () => {
   it('requires a valid address, normalizes it and keeps it unique case-insensitively', async () => {
@@ -93,7 +93,7 @@ describe('password recovery', () => {
     expect(w.outbox.messages).toHaveLength(1);
     const mail = w.outbox.messages[0]!;
     expect(mail.to).toBe('mira@example.com');
-    expect(mail.text).toContain('http://app.test/?reset=');
+    expect(mail.text).toContain('http://app.test/reset-password?token=');
     // Only the hash is stored, never the token.
     const token = tokenFrom(mail.text);
     const row = w.db.select().from(t.passwordResets).get()!;
