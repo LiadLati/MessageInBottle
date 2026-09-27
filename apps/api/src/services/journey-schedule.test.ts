@@ -22,7 +22,11 @@ const HOUR = 60 * 60 * 1000;
 
 function world() {
   // A 1 ms floor, so the distance-based calculation and not the minimum decides the duration.
-  const w = createTestWorld({ minJourneyMs: 1, defaultShoreCapacity: 20 });
+  // No storm risk: these tests are about the schedule, and a twelve-day crossing under the
+  // approved policy is sometimes lost in a storm decided by its random bottle id, which made
+  // them fail about one run in eight. Storm timing on the same saved plans is covered in
+  // risk.test.ts.
+  const w = createTestWorld({ minJourneyMs: 1, defaultShoreCapacity: 20, riskPolicyVersion: 0 });
   setUserShore(w.ctx, w.user('ada').id, 'shore_gb_southampton');
   setUserShore(w.ctx, w.user('bo').id, 'shore_jp_yokohama');
   return w;
