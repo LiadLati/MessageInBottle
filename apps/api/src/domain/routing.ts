@@ -264,3 +264,15 @@ export function journeyDurationMs(
 ): number {
   return Math.max(minJourneyMs, Math.round(totalLength * msPerChartUnit));
 }
+
+// Journeys sail at 70% of the duration the calculation above produces (product decision,
+// 2026-09-27: long waits felt tiring). The route, its length and the calculation itself are
+// unchanged; only the schedule saved for a new journey is shorter. It is applied once, when the
+// plan is written, so every later reading of that plan (arrival, progress, risk and storm
+// timing, the ETA the client shows) follows the same shortened schedule, and a journey already
+// at sea keeps the schedule it was released with.
+export const JOURNEY_DURATION_FACTOR = 0.7;
+
+export function scheduledJourneyMs(calculatedMs: number): number {
+  return Math.round(calculatedMs * JOURNEY_DURATION_FACTOR);
+}

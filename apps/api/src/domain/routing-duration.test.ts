@@ -5,7 +5,7 @@ import { setUserShore } from '../services/chart.js';
 import { activePlan } from '../services/journey.js';
 import { previewRelease, releaseBottle } from '../services/release.js';
 import { createTestWorld, releaseInput } from '../test/harness.js';
-import { journeyDurationMs } from './routing.js';
+import { journeyDurationMs, scheduledJourneyMs } from './routing.js';
 
 const HOUR = 60 * 60 * 1000;
 
@@ -46,9 +46,10 @@ describe('planned duration on the real sea graph', () => {
     const far = previewRelease(w.ctx, cy, bo.id).route!;
     expect(near.totalLength).toBeLessThan(far.totalLength);
     expect(near.plannedDurationMs).toBeLessThan(far.plannedDurationMs);
+    // The schedule is 70% of what the length-based calculation produces.
     for (const r of [near, far])
       expect(r.plannedDurationMs).toBe(
-        journeyDurationMs(r.totalLength, w.ctx.config.msPerChartUnit, 1),
+        scheduledJourneyMs(journeyDurationMs(r.totalLength, w.ctx.config.msPerChartUnit, 1)),
       );
 
     // And the persisted plan of an actual release is the same number.
