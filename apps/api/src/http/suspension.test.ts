@@ -133,8 +133,12 @@ describe('a temporarily suspended account (product decision 14)', () => {
     expect((await get('/api/moderation/standing')).status).toBe(200);
     expect((await get('/support')).status).toBe(200);
 
-    // The suspension ends on server time; everything returns without anyone acting.
-    w.realClock.advance(SUSPENSION_MS);
+    // The suspension ends on server time; everything returns without anyone acting. One
+    // millisecond before its end it is still in force (audit QA-R-006).
+    w.realClock.advance(SUSPENSION_MS - 1);
+    const boLate = await loginAs(app, 'bo');
+    expect((await get('/api/notifications', boLate.token)).status).toBe(403);
+    w.realClock.advance(1);
     const dee2 = await loginAs(app, 'dee');
     expect((await friendsOf(app, dee2.token)).friends.map((f) => f.username)).toContain('bo');
     const bo2 = await loginAs(app, 'bo');

@@ -1,5 +1,5 @@
 import { eq } from 'drizzle-orm';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { RISK_POLICY_VERSION, nightWindow, phaseAt } from '@mib/shared';
 import * as t from '../db/schema.js';
 import { createApp } from '../http/app.js';
@@ -135,15 +135,22 @@ describe('AI review timeout, distinct from connection refused', () => {
     const reviewer = createOllamaReviewer({ ...w.ctx.config.ai, timeoutMs }, hanging);
 
     const now = w.realClock.now();
-    const started = Date.now();
-    expect(await runAiReviewTick(w.ctx, reviewer, now)).toEqual({
-      reviewed: 0,
-      deferred: 1,
-    });
-    const elapsed = Date.now() - started;
-    expect(signal?.aborted).toBe(true);
-    expect(elapsed).toBeGreaterThanOrEqual(timeoutMs - 5);
-    expect(elapsed).toBeLessThan(5000);
+    // Fake timers, not elapsed wall-clock time (audit QA-R-007): not aborted a moment before the
+    // timeout, aborted at it.
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    let result: unknown;
+    try {
+      const tick = runAiReviewTick(w.ctx, reviewer, now).then((r) => (result = r));
+      await vi.advanceTimersByTimeAsync(timeoutMs - 1);
+      expect(signal).toBeDefined();
+      expect(signal!.aborted).toBe(false);
+      await vi.advanceTimersByTimeAsync(1);
+      await tick;
+    } finally {
+      vi.useRealTimers();
+    }
+    expect(signal!.aborted).toBe(true);
+    expect(result).toEqual({ reviewed: 0, deferred: 1 });
 
     const c = getCase(w.ctx, caseId);
     expect(c.status).toBe('pending');

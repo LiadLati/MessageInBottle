@@ -3,7 +3,12 @@ import { describe, expect, it } from 'vitest';
 import * as t from '../db/schema.js';
 import { createApp } from '../http/app.js';
 import { decideCase } from './admin.js';
-import { releaseStaleAiClaims } from './ai-review.js';
+import {
+  releaseStaleAiClaims,
+  runAiReviewTick,
+  staleClaimAfterMs,
+  type AiReviewer,
+} from './ai-review.js';
 import { blockUser } from './friends.js';
 import { deleteAccount } from './deletion.js';
 import { commitArrivalIfDue } from './journey.js';
@@ -215,6 +220,41 @@ describe('an interrupted AI review no longer holds evidence forever (ARCH-003)',
     expect(c.aiStatus).toBe('queued');
     expect(c.aiLastError).toMatch(/interrupted/);
   });
+});
+
+// Audit QA-R-005: the release is tested where it runs, in the review worker's own tick, not
+// only as a function. With AI review off the tick reviews nothing, and still releases.
+describe('the review tick returns interrupted claims to the queue (ARCH-003 wiring)', () => {
+  for (const enabled of [true, false])
+    it(`does so with AI review ${enabled ? 'on' : 'off'}`, async () => {
+      const w = createTestWorld({ defaultShoreCapacity: 80 });
+      w.ctx.config.ai.enabled = enabled;
+      const id = send(w, 'ada', 'bo');
+      w.clock.advance(60 * DAY);
+      commitArrivalIfDue(w.ctx, id, w.clock.now());
+      openBottle(w.ctx, w.user('bo'), id);
+      const caseId = reportLetter(w.ctx, w.user('bo'), {
+        bottleId: id,
+        reason: 'harassment',
+        hide: false,
+      }).caseId;
+      const now = w.realClock.now();
+      const stale = staleClaimAfterMs(w.ctx.config.ai.timeoutMs) + 1;
+      w.db
+        .update(t.moderationCases)
+        .set({ aiStatus: 'running', aiStartedAt: now - stale, aiNextAttemptAt: now + DAY })
+        .where(eq(t.moderationCases.id, caseId))
+        .run();
+      // A model that is never reached: whatever the tick does, it must not leave the claim.
+      const unreachable: AiReviewer = { review: () => Promise.reject(new Error('model down')) };
+      await runAiReviewTick(w.ctx, unreachable, now);
+      const c = w.db
+        .select()
+        .from(t.moderationCases)
+        .where(eq(t.moderationCases.id, caseId))
+        .get()!;
+      expect(c.aiStatus).toBe('queued');
+    });
 });
 
 describe('backfill for accounts deleted before these rules (dry run by default)', () => {

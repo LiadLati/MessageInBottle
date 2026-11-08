@@ -58,14 +58,22 @@ describe('password storage cost (SEC-007)', () => {
 });
 
 describe('password hashing never blocks the API (SEC-006)', () => {
+  // Counted, not timed (audit QA-R-007): the event loop must keep turning while hashes are in
+  // flight. Synchronous scrypt finished every hash before the loop could turn even once.
   it('keeps the event loop responsive while hashes run', async () => {
+    let finished = false;
+    let turnsWhileHashing = 0;
+    const spin = (async () => {
+      while (!finished) {
+        await new Promise((resolve) => setImmediate(resolve));
+        if (!finished) turnsWhileHashing++;
+      }
+    })();
     const work = Array.from({ length: 8 }, (_, i) => hashPasswordAsync(`password number ${i}`));
-    const started = performance.now();
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    const tick = performance.now() - started;
     await Promise.all(work);
-    // Synchronous scrypt made this wait for every hash in turn (~40 ms each at this cost).
-    expect(tick).toBeLessThan(40);
+    finished = true;
+    await spin;
+    expect(turnsWhileHashing).toBeGreaterThan(8);
   });
 
   it('refuses new work once the bounded queue is full', async () => {
