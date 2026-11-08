@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import { bodyLimit } from 'hono/body-limit';
+import { HTTPException } from 'hono/http-exception';
 import { logger } from 'hono/logger';
 import type { ZodError } from 'zod';
 import { AppError } from '../lib/errors.js';
@@ -112,6 +113,21 @@ export function createApp(ctx: AppContext) {
       return c.json(
         { error: { code: 'busy', message: 'The server is busy. Try again in a moment.' } },
         503,
+      );
+    }
+    // Hono's own client errors, chiefly a body that is not valid JSON: the client's mistake, so
+    // a 400 with no stack trace logged (audit SEC-R-010). Never the raw message, which can quote
+    // the request.
+    if (err instanceof HTTPException && err.status < 500) {
+      return c.json(
+        {
+          error: {
+            code: err.status === 400 ? 'malformed_request' : 'bad_request',
+            message:
+              err.status === 400 ? 'the request body could not be read as JSON' : 'bad request',
+          },
+        },
+        err.status,
       );
     }
     if (isZodError(err)) {

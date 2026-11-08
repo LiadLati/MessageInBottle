@@ -58,7 +58,12 @@ export function clearSignIn(limiter: RateLimiter, username: string, address: str
 }
 export const REGISTER_PER_ADDRESS: RateLimitRule = { limit: 10, windowMs: 60 * 60 * 1000 };
 export const FORGOT_PER_ADDRESS: RateLimitRule = { limit: 5, windowMs: 15 * 60 * 1000 };
-export const FORGOT_PER_EMAIL: RateLimitRule = { limit: 3, windowMs: 60 * 60 * 1000 };
+// Reset e-mails to one address are counted per (address book entry, requester), so a third
+// party exhausts only their own pair and the owner can still ask for a link (audit SEC-R-014),
+// and per address book entry overall, with a ceiling that only a distributed attempt reaches,
+// which still bounds the mail any one inbox can be sent.
+export const FORGOT_PER_EMAIL_ADDRESS: RateLimitRule = { limit: 3, windowMs: 60 * 60 * 1000 };
+export const FORGOT_PER_EMAIL: RateLimitRule = { limit: 10, windowMs: 60 * 60 * 1000 };
 export const ZONE_CHANGES_PER_ACCOUNT: RateLimitRule = { limit: 4, windowMs: 24 * 60 * 60 * 1000 };
 export const RESET_PER_ADDRESS: RateLimitRule = { limit: 10, windowMs: 15 * 60 * 1000 };
 
@@ -97,8 +102,11 @@ export function authRoutes(limiter = new RateLimiter()) {
   // Same answer whether or not the address is known: the response cannot be used to enumerate.
   r.post('/password/forgot', jsonBody(ForgotPasswordRequestSchema), (c) => {
     const { email } = c.req.valid('json');
-    enforce(`forgot:addr:${clientKey(c)}`, FORGOT_PER_ADDRESS);
-    enforce(`forgot:email:${normalizeEmail(email)}`, FORGOT_PER_EMAIL);
+    const address = clientKey(c);
+    const target = normalizeEmail(email);
+    enforce(`forgot:addr:${address}`, FORGOT_PER_ADDRESS);
+    enforce(`forgot:email:${target}:addr:${address}`, FORGOT_PER_EMAIL_ADDRESS);
+    enforce(`forgot:email:${target}`, FORGOT_PER_EMAIL);
     // Not awaited: the answer never depends on whether the address is known or whether mail
     // could be delivered. Failures are handled and logged inside.
     void requestPasswordReset(c.get('ctx'), email);

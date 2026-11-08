@@ -458,6 +458,15 @@ export function decideCase(
   });
 }
 
+// Accounts that can moderate now: the admin role and an active account (SEC-R-004 start notice).
+export function activeAdministratorCount(db: DbOrTx): number {
+  return db
+    .select({ id: t.users.id })
+    .from(t.users)
+    .where(and(eq(t.users.role, 'admin'), eq(t.users.status, 'active')))
+    .all().length;
+}
+
 // ---------- the moderation badge ----------
 
 // What is waiting for this administrator to decide (the moderation badge). Opening a screen

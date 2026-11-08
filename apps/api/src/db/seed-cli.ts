@@ -6,7 +6,7 @@ import { createDb, runMigrations } from './client.js';
 import { seedChart, seedUsers } from './seed.js';
 
 loadEnvFiles();
-const config = loadConfig();
+const config = loadConfig(process.env, { forTool: true });
 const { db } = createDb(config.databasePath);
 runMigrations(db);
 const now = Date.now();

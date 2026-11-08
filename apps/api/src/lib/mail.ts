@@ -56,6 +56,9 @@ export class SmtpMailer implements Mailer {
       host: this.config.smtp.host,
       port: this.config.smtp.port,
       secure: this.config.smtp.secure,
+      // Without implicit TLS, STARTTLS is mandatory: a server that does not offer it gets no
+      // credentials and no message (audit SEC-R-011).
+      requireTLS: !this.config.smtp.secure && this.config.smtp.requireTls,
       auth: this.config.smtp.user
         ? { user: this.config.smtp.user, pass: this.config.smtp.pass }
         : undefined,

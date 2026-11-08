@@ -6,7 +6,7 @@ import { seedChart, seedUsers } from './seed.js';
 
 // The same .env files the API reads, so MIB_DEV_MODE and MIB_DATABASE_PATH mean the same here.
 loadEnvFiles();
-const config = loadConfig();
+const config = loadConfig(process.env, { forTool: true });
 if (!config.devMode) {
   console.error(
     'db:reset deletes the database, so it runs only with MIB_DEV_MODE=true (set in apps/api/.env or the root .env) and never in production.',

@@ -6,6 +6,7 @@ import {
   envBool,
   isProductionRuntime,
   loadConfig,
+  requireAiDecision,
 } from './config.js';
 
 // Audit finding DEPLOY-001 (ARCH-001 / SEC-001 / QA-002): development mode used to be the
@@ -137,5 +138,132 @@ describe('production fails closed', () => {
     } catch (err) {
       expect(String(err)).not.toContain('hunter2');
     }
+  });
+});
+
+// Re-audit ARCH-R-011, ARCH-R-004, SEC-R-011 and SEC-R-015.
+describe('numeric settings are range-checked (ARCH-R-011)', () => {
+  it('refuses out-of-range, fractional and nonsensical values and names the range', () => {
+    const bad: Array<[string, string]> = [
+      ['MIB_PORT', '0'],
+      ['MIB_PORT', '70000'],
+      ['MIB_PORT', '3000.5'],
+      ['MIB_JOURNEY_TICK_MS', '-1'],
+      ['MIB_JOURNEY_TICK_MS', '0'],
+      ['MIB_SESSION_TTL_MS', '0'],
+      ['MIB_SHORE_CAPACITY', '0'],
+      ['MIB_DEFAULT_SHORE_CAPACITY', '-3'],
+      ['MIB_MS_PER_CHART_UNIT', '0'],
+      ['MIB_MIN_JOURNEY_MS', '-5'],
+      ['MIB_RETENTION_TICK_MS', '5'],
+      ['MIB_AI_TIMEOUT_MS', '0'],
+      ['MIB_AI_TICK_MS', '1e12'],
+      ['MIB_SMTP_PORT', '0'],
+    ];
+    for (const [name, value] of bad) {
+      expect(() => loadConfig({ [name]: value }), `${name}=${value}`).toThrow(ConfigError);
+      expect(() => loadConfig({ [name]: value }), `${name}=${value}`).toThrow(
+        new RegExp(`${name} must be a whole number from`),
+      );
+    }
+  });
+
+  it('accepts sensible values', () => {
+    const c = loadConfig({
+      MIB_PORT: '8080',
+      MIB_JOURNEY_TICK_MS: '5000',
+      MIB_MIN_JOURNEY_MS: '0',
+      MIB_SHORE_CAPACITY: '30',
+    });
+    expect([c.port, c.journeyTickMs, c.minJourneyMs, c.shoreCapacity]).toEqual([8080, 5000, 0, 30]);
+  });
+});
+
+describe('the listening interface (ARCH-R-004)', () => {
+  it('is loopback in production unless MIB_HOST says otherwise', () => {
+    const prod = { MIB_DATABASE_PATH: PROD_DB, MIB_APP_URL: PROD_URL };
+    expect(loadConfig(prod, { productionBuild: true }).host).toBe('127.0.0.1');
+    expect(loadConfig({ ...prod, MIB_HOST: '0.0.0.0' }, { productionBuild: true }).host).toBe(
+      '0.0.0.0',
+    );
+    expect(() => loadConfig({ ...prod, MIB_HOST: 'http://x/' }, { productionBuild: true })).toThrow(
+      /MIB_HOST/,
+    );
+  });
+
+  it('is every interface in development, so a device on the LAN can reach it', () => {
+    expect(loadConfig({}).host).toBeUndefined();
+    expect(loadConfig({ MIB_HOST: '127.0.0.1' }).host).toBe('127.0.0.1');
+  });
+});
+
+describe('SMTP transport security (SEC-R-011)', () => {
+  it('requires STARTTLS by default and refuses switching it off outside development', () => {
+    expect(loadConfig({}).mail.smtp.requireTls).toBe(true);
+    expect(() => loadConfig({ MIB_SMTP_REQUIRE_TLS: 'false' })).toThrow(/development-only/);
+    expect(
+      loadConfig({ MIB_DEV_MODE: 'true', MIB_SMTP_REQUIRE_TLS: 'false' }).mail.smtp.requireTls,
+    ).toBe(false);
+  });
+
+  it('refuses a port and TLS mode that cannot work together', () => {
+    expect(() => loadConfig({ MIB_SMTP_PORT: '465' })).toThrow(/MIB_SMTP_SECURE=true/);
+    expect(() => loadConfig({ MIB_SMTP_PORT: '587', MIB_SMTP_SECURE: 'true' })).toThrow(
+      /MIB_SMTP_SECURE=false/,
+    );
+    const gmail = loadConfig({ MIB_SMTP_PORT: '465', MIB_SMTP_SECURE: 'true' }).mail.smtp;
+    expect([gmail.port, gmail.secure]).toEqual([465, true]);
+  });
+});
+
+describe('automated review settings (SEC-R-015)', () => {
+  const prod = { MIB_DATABASE_PATH: PROD_DB, MIB_APP_URL: PROD_URL };
+
+  it('must be written down in production, either way', () => {
+    const unset = loadConfig(prod, { productionBuild: true });
+    expect(unset.ai.enabled).toBe(false);
+    expect(() => requireAiDecision(unset, true)).toThrow(/MIB_AI_ENABLED must be set/);
+    for (const value of ['true', 'false']) {
+      const set = loadConfig({ ...prod, MIB_AI_ENABLED: value }, { productionBuild: true });
+      expect(set.ai.enabled).toBe(value === 'true');
+      expect(() => requireAiDecision(set, true)).not.toThrow();
+    }
+  });
+
+  it('keeps the development default and needs no decision there', () => {
+    const dev = loadConfig({});
+    expect(dev.ai.enabled).toBe(true);
+    expect(() => requireAiDecision(dev, false)).not.toThrow();
+  });
+
+  it('sends letters over plain http only to this machine', () => {
+    for (const ok of [
+      'http://127.0.0.1:11434',
+      'http://localhost:11434/',
+      'http://[::1]:11434',
+      'https://models.example.org',
+    ])
+      expect(() => loadConfig({ MIB_AI_ENDPOINT: ok }), ok).not.toThrow();
+    for (const bad of ['http://10.0.0.5:11434', 'http://models.example.org', 'ftp://x', 'nope'])
+      expect(() => loadConfig({ MIB_AI_ENDPOINT: bad }), bad).toThrow(/MIB_AI_ENDPOINT/);
+    // Not checked when review is off: nothing is ever sent.
+    expect(() =>
+      loadConfig({ MIB_AI_ENABLED: 'false', MIB_AI_ENDPOINT: 'http://10.0.0.5:11434' }),
+    ).not.toThrow();
+  });
+});
+
+describe('operator tools (ARCH-R-012)', () => {
+  it('run in production without the public web address only the server needs', () => {
+    const env = { MIB_DATABASE_PATH: PROD_DB };
+    expect(() => loadConfig(env, { productionBuild: true })).toThrow(/MIB_APP_URL/);
+    expect(() => loadConfig(env, { productionBuild: true, forTool: true })).not.toThrow();
+    // Everything else still applies to them.
+    expect(() => loadConfig({}, { productionBuild: true, forTool: true })).toThrow(
+      /MIB_DATABASE_PATH/,
+    );
+    expect(() =>
+      loadConfig({ ...env, MIB_DEV_MODE: 'true' }, { productionBuild: true, forTool: true }),
+    ).toThrow(/MIB_DEV_MODE/);
   });
 });

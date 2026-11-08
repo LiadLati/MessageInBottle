@@ -24,7 +24,7 @@ const asJson = argv.includes('--json');
 const repeat = Math.max(1, Number(flag('repeat') ?? 1));
 
 loadEnvFiles();
-const config = loadConfig();
+const config = loadConfig(process.env, { forTool: true });
 const reviewer = createOllamaReviewer(config.ai);
 
 interface Answer {

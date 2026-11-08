@@ -20,8 +20,15 @@ interface Captured {
 }
 
 // Speaks just enough SMTP for nodemailer: greeting, EHLO with AUTH PLAIN, MAIL, RCPT, DATA.
-function fakeSmtp(): Promise<{ port: number; messages: Captured[]; close: () => Promise<void> }> {
+function fakeSmtp(): Promise<{
+  port: number;
+  messages: Captured[];
+  // Every AUTH line received, whether or not a message followed: what crossed the wire.
+  auths: string[];
+  close: () => Promise<void>;
+}> {
   const messages: Captured[] = [];
+  const auths: string[] = [];
   const server = net.createServer((socket) => {
     let buffer = '';
     let inData = false;
@@ -49,6 +56,7 @@ function fakeSmtp(): Promise<{ port: number; messages: Captured[]; close: () => 
           reply('250 AUTH PLAIN');
         } else if (verb === 'AUTH') {
           current.auth = Buffer.from(line.split(' ')[2] ?? '', 'base64').toString('utf8');
+          auths.push(current.auth);
           reply('235 2.7.0 accepted');
         } else if (verb === 'MAIL') {
           current.from = line;
@@ -59,6 +67,9 @@ function fakeSmtp(): Promise<{ port: number; messages: Captured[]; close: () => 
         } else if (verb === 'DATA') {
           inData = true;
           reply('354 go ahead');
+        } else if (verb === 'STAR') {
+          // STARTTLS: this server has no TLS, as a plain-text-only server answers.
+          reply('502 5.5.1 STARTTLS not implemented');
         } else if (verb === 'QUIT') {
           reply('221 bye');
           socket.end();
@@ -71,6 +82,7 @@ function fakeSmtp(): Promise<{ port: number; messages: Captured[]; close: () => 
       resolve({
         port: (server.address() as net.AddressInfo).port,
         messages,
+        auths,
         close: () => new Promise((r) => server.close(() => r())),
       }),
     ),
@@ -100,6 +112,9 @@ async function world() {
       host: '127.0.0.1',
       port: smtp.port,
       secure: false,
+      // This fake speaks plain SMTP only, so the mandatory STARTTLS is switched off here, as
+      // development mode alone allows. The test below shows what happens with it on.
+      requireTls: false,
       user: 'seayou.support@gmail.com',
       pass: 'placeholder-not-a-credential',
     },
@@ -230,5 +245,30 @@ describe('password reset through SMTP (product decision 4)', () => {
     await new Promise((r) => setTimeout(r, 50));
     expect(smtp!.messages).toHaveLength(1);
     expect(smtp!.messages[0]!.to.join()).toMatch(/ada@example\.test/);
+  });
+});
+
+// Audit SEC-R-011 / QA-R-010: outside development, a server that does not offer STARTTLS gets
+// neither the account password nor the message.
+describe('SMTP without TLS is refused', () => {
+  it('sends no credentials and no mail to a server that does not offer STARTTLS', async () => {
+    smtp = await fakeSmtp();
+    const mailer = new SmtpMailer({
+      provider: 'smtp',
+      from: 'SeaYou <seayou.support@gmail.com>',
+      smtp: {
+        host: '127.0.0.1',
+        port: smtp.port,
+        secure: false,
+        requireTls: true,
+        user: 'seayou.support@gmail.com',
+        pass: 'placeholder-not-a-credential',
+      },
+    });
+    await expect(
+      mailer.send({ to: 'ada@example.test', subject: 'x', text: 'reset link' }),
+    ).rejects.toThrow();
+    expect(smtp.auths).toEqual([]);
+    expect(smtp.messages).toEqual([]);
   });
 });

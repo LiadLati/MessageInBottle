@@ -55,7 +55,7 @@ export function backfillDeletedAccounts(db: Db, now: number, apply: boolean): Ba
 
 function main(): void {
   loadEnvFiles();
-  const config = loadConfig();
+  const config = loadConfig(process.env, { forTool: true });
   const apply = process.argv.includes('--apply');
   let sqlite: Database.Database;
   try {

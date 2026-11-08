@@ -18,7 +18,7 @@ if (!userId || !/^usr_[a-z0-9]+$/.test(userId)) {
   process.exit(1);
 }
 loadEnvFiles();
-const config = loadConfig();
+const config = loadConfig(process.env, { forTool: true });
 let sqlite: Database.Database;
 try {
   sqlite = new Database(config.databasePath, { readonly: true, fileMustExist: true });

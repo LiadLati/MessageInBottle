@@ -2,7 +2,7 @@ import { eq } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 import { RESET_TOKEN_TTL_MS } from '@mib/shared';
 import { createApp } from './app.js';
-import { FORGOT_PER_EMAIL } from './routes/auth.js';
+import { FORGOT_PER_EMAIL, FORGOT_PER_EMAIL_ADDRESS } from './routes/auth.js';
 import * as t from '../db/schema.js';
 import { DisabledMailer, OutboxMailer, SmtpMailer, createMailer } from '../lib/mail.js';
 import { sha256 } from '../lib/ids.js';
@@ -162,10 +162,39 @@ describe('password recovery', () => {
     const w = createTestWorld();
     const app = createApp(w.ctx);
     await registered(app, 'mira', 'mira@example.com');
-    for (let i = 0; i < FORGOT_PER_EMAIL.limit; i++)
+    for (let i = 0; i < FORGOT_PER_EMAIL_ADDRESS.limit; i++)
       expect((await forgot(app, 'mira@example.com')).status).toBe(202);
     expect((await forgot(app, 'mira@example.com')).status).toBe(429);
-    expect(w.outbox.messages).toHaveLength(FORGOT_PER_EMAIL.limit);
+    expect(w.outbox.messages).toHaveLength(FORGOT_PER_EMAIL_ADDRESS.limit);
+  });
+
+  // Audit SEC-R-014: someone else asking for Mira's link from their own address cannot use up
+  // the links Mira can ask for from hers; an inbox still has an overall ceiling.
+  it('a third party cannot spend the owner’s reset budget', async () => {
+    const w = createTestWorld();
+    const app = createApp(w.ctx);
+    await registered(app, 'mira', 'mira@example.com');
+    const from = (address: string) =>
+      app.request('/api/auth/password/forgot', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'x-forwarded-for': address },
+        body: JSON.stringify({ email: 'mira@example.com' }),
+      });
+    for (let i = 0; i < FORGOT_PER_EMAIL_ADDRESS.limit; i++)
+      expect((await from('203.0.113.9')).status).toBe(202);
+    expect((await from('203.0.113.9')).status).toBe(429);
+    // The attacker's other addresses in the same IPv6 /64 are the same requester.
+    expect((await from('2001:db8:1:2::1')).status).toBe(202);
+    expect((await from('2001:db8:1:2::1')).status).toBe(202);
+    expect((await from('2001:db8:1:2::1')).status).toBe(202);
+    expect((await from('2001:db8:1:2:ffff::9')).status).toBe(429);
+    // Mira, from her own address, still gets her link.
+    expect((await from('198.51.100.7')).status).toBe(202);
+    // And the inbox as a whole stops at its ceiling, however many addresses ask.
+    let accepted = 7;
+    for (let i = 0; accepted < FORGOT_PER_EMAIL.limit; i++, accepted++)
+      expect((await from(`192.0.2.${i + 1}`)).status).toBe(202);
+    expect((await from('192.0.2.200')).status).toBe(429);
   });
 });
 
