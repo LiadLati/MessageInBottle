@@ -95,3 +95,14 @@ jobs:
       # sign-in work; the audited reset-link takeover chain fails; SIGTERM stops it cleanly.
       - name: Production artefact smoke (dev endpoints absent, seeded credentials refused)
         run: node apps/api/scripts/smoke-artefact.mjs --artefact "$ARTEFACT_DIR" --prod-only
+
+      # Browser and accessibility smoke (re-audit QA-R-002): the production web bundle and the
+      # compiled API in production mode, behind the reference proxy's headers and CSP, on a
+      # temporary database (apps/e2e/serve.mjs). Fails on any console error, CSP violation or
+      # serious/critical axe finding on the main screens. The browser version is pinned by
+      # @playwright/test in apps/e2e/package.json.
+      - name: Install the test browser
+        run: pnpm --filter @mib/e2e exec playwright install --with-deps chromium
+
+      - name: Browser and accessibility smoke (Playwright + axe)
+        run: pnpm --filter @mib/e2e e2e

@@ -1697,15 +1697,18 @@ button.avatar {
   .world-screen {
     left: var(--rail-width);
   }
-  .world-screen.two-pane .world-layer,
-  .world-screen.two-pane .scrim-map,
-  .world-screen.two-pane .scrim-map-header,
-  .world-screen.two-pane .scrim-3d,
-  .world-screen.two-pane .world-header {
+  /* The side pane is reserved only while it has something in it (audit FE-R-013): with
+     nothing selected the map takes the whole width instead of leaving a blank column that
+     could hide the only bottle. */
+  .world-screen.two-pane:has(.sheet) .world-layer,
+  .world-screen.two-pane:has(.sheet) .scrim-map,
+  .world-screen.two-pane:has(.sheet) .scrim-map-header,
+  .world-screen.two-pane:has(.sheet) .scrim-3d,
+  .world-screen.two-pane:has(.sheet) .world-header {
     right: var(--pane-width);
   }
-  .world-screen.two-pane .zoom-cluster,
-  .world-screen.two-pane .beat-title {
+  .world-screen.two-pane:has(.sheet) .zoom-cluster,
+  .world-screen.two-pane:has(.sheet) .beat-title {
     right: calc(var(--pane-width) + var(--gutter-screen));
   }
   .world-screen.two-pane .sheet {
@@ -1724,7 +1727,7 @@ button.avatar {
     box-shadow: none;
   }
   /* The cosmetic weather note belongs to the scene, never over the side pane's controls. */
-  .world-screen.two-pane .weather-advisory.shore {
+  .world-screen.two-pane:has(.sheet) .weather-advisory.shore {
     right: calc(var(--pane-width) + 24px);
   }
   .world-screen.two-pane .sheet.preview {
