@@ -5,7 +5,10 @@
 //
 // Accounts deleted before the ARCH-002 / ARCH-014 / SEC-012 fixes may still have adrift letters
 // listed in the public ocean, lost letters with their text, harbour places held by letters that
-// can never be opened, and moderation cases whose evidence can never become final. Whether to
+// can never be opened, and moderation cases whose evidence can never become final; accounts
+// deleted under even older rules may still hold sessions, friendships, blocks, notifications,
+// letter text or identifying fields. The pass is the one account deletion itself runs
+// (services/deletion.ts, eraseAccount), so every current rule applies (audit ARCH-R-006). Whether to
 // apply this to existing data is an operator decision (docs/REMEDIATION.md); the tool never
 // runs on its own. The dry run performs the exact same work inside a transaction and rolls it
 // back, so its counts are what --apply would do. It never runs migrations.
@@ -16,23 +19,38 @@ import { loadEnvFiles } from '../lib/env.js';
 import { loadConfig } from '../config.js';
 import type { Db } from '../db/client.js';
 import * as schema from '../db/schema.js';
-import { sweepDeletedAccount, type DeletionSweep } from '../services/deletion.js';
+import { eraseAccount, type DeletionSweep } from '../services/deletion.js';
+
+export type BackfillTotals = DeletionSweep & {
+  sessionsRevoked: number;
+  journeysCancelled: number;
+  lettersClearedForSender: number;
+  friendshipsRemoved: number;
+  blocksRemoved: number;
+  notificationsRemoved: number;
+};
 
 export interface BackfillReport {
   applied: boolean;
   accounts: number;
-  totals: DeletionSweep;
+  totals: BackfillTotals;
 }
 
 class Rollback extends Error {}
 
 export function backfillDeletedAccounts(db: Db, now: number, apply: boolean): BackfillReport {
-  const totals: DeletionSweep = {
+  const totals: BackfillTotals = {
     adriftWithdrawn: 0,
     lostLettersCleared: 0,
     inboundJourneysEnded: 0,
     harbourPlacesReleased: 0,
     appealsClosed: 0,
+    sessionsRevoked: 0,
+    journeysCancelled: 0,
+    lettersClearedForSender: 0,
+    friendshipsRemoved: 0,
+    blocksRemoved: 0,
+    notificationsRemoved: 0,
   };
   const deleted = db
     .select({ id: schema.users.id })
@@ -42,8 +60,14 @@ export function backfillDeletedAccounts(db: Db, now: number, apply: boolean): Ba
   try {
     db.transaction((tx) => {
       for (const { id } of deleted) {
-        const r = sweepDeletedAccount(tx, id, now);
-        for (const k of Object.keys(totals) as (keyof DeletionSweep)[]) totals[k] += r[k];
+        const { sweep, ...r } = eraseAccount(tx, id, now);
+        for (const k of Object.keys(sweep) as (keyof DeletionSweep)[]) totals[k] += sweep[k];
+        totals.sessionsRevoked += r.sessionsRevoked;
+        totals.journeysCancelled += r.journeysCancelled;
+        totals.lettersClearedForSender += r.lettersClearedForSender;
+        totals.friendshipsRemoved += r.friendshipsRemoved;
+        totals.blocksRemoved += r.blocksRemoved;
+        totals.notificationsRemoved += r.notificationsRemoved;
       }
       if (!apply) throw new Rollback();
     });

@@ -1,4 +1,4 @@
-import { and, eq, lte, max, or } from 'drizzle-orm';
+import { and, eq, lte, max, or, sql } from 'drizzle-orm';
 import { canTransition, type BottleState, type JourneyEventType } from '@mib/shared';
 import type { DbOrTx } from '../db/client.js';
 import * as t from '../db/schema.js';
@@ -184,9 +184,18 @@ export function releaseCapacityOnce(db: DbOrTx, bottleId: string, now: number): 
   return true;
 }
 
+// Most arrivals one tick commits. Anything beyond waits for the next tick, a few seconds later;
+// each arrival is dated at its own planned instant, so the outcome is the same either way, and
+// a backlog after downtime is worked off without holding the one API thread for long.
+export const ARRIVALS_PER_TICK = 1000;
+
 // Worker tick: deterministic catch-up from persisted plans; safe to run repeatedly or after
 // downtime. Order matters and is fixed: risk decisions first (a storm that struck before an
 // arrival that is also due must be applied first), then arrivals, then public-listing expiry.
+//
+// Only journeys whose arrival is due are read (audit ARCH-R-008: every bottle at sea used to be
+// visited each tick), and each arrival is its own transaction: one that fails is logged and
+// retried on the next tick without stopping the rest (audit ARCH-R-009).
 export function runJourneyTick(ctx: AppContext): {
   delivered: number;
   // Arrivals refused at the shore (a block or an inactive recipient): the journey ended
@@ -194,25 +203,25 @@ export function runJourneyTick(ctx: AppContext): {
   cancelled: number;
   risk: { decided: number; lost: number };
   expired: number;
+  // Bottles, accounts or storms skipped because their own processing failed.
+  failures: number;
 } {
   const now = ctx.clock.now();
-  const risk = processRiskDecisions(ctx, now);
-  const due = ctx.db
-    .select({ bottleId: t.routePlans.bottleId })
-    .from(t.routePlans)
-    .innerJoin(t.bottles, eq(t.bottles.id, t.routePlans.bottleId))
-    .where(
-      and(
-        eq(t.routePlans.active, true),
-        eq(t.bottles.state, 'at_sea'),
-        lte(t.routePlans.startsAt, now),
-      ),
-    )
-    .all();
+  const { failures: riskFailures = 0, ...risk } = processRiskDecisions(ctx, now);
+  const due = dueArrivals(ctx, now);
   let delivered = 0;
   let cancelled = 0;
-  for (const { bottleId } of due) {
-    if (!commitArrivalIfDue(ctx, bottleId, now)) continue;
+  let failures = riskFailures;
+  for (const bottleId of due) {
+    let committed: boolean;
+    try {
+      committed = commitArrivalIfDue(ctx, bottleId, now);
+    } catch (err) {
+      failures++;
+      console.error(`journey worker: arrival of bottle ${bottleId} failed`, err);
+      continue;
+    }
+    if (!committed) continue;
     const state = ctx.db
       .select({ state: t.bottles.state })
       .from(t.bottles)
@@ -222,5 +231,28 @@ export function runJourneyTick(ctx: AppContext): {
     else cancelled++;
   }
   const expired = expirePublicListings(ctx, now);
-  return { delivered, cancelled, risk, expired };
+  return { delivered, cancelled, risk, expired, failures };
+}
+
+// Journeys at sea whose planned arrival has passed, earliest first, at most `limit`.
+export function dueArrivals(ctx: AppContext, now: number, limit = ARRIVALS_PER_TICK): string[] {
+  return ctx.db
+    .select({ bottleId: t.routePlans.bottleId })
+    .from(t.routePlans)
+    .innerJoin(t.bottles, eq(t.bottles.id, t.routePlans.bottleId))
+    .where(
+      and(
+        eq(t.routePlans.active, true),
+        eq(t.bottles.state, 'at_sea'),
+        lte(t.routePlans.startsAt, now),
+        sql`${t.routePlans.startsAt} + ${t.routePlans.plannedDurationMs} <= ${now}`,
+      ),
+    )
+    .orderBy(
+      sql`${t.routePlans.startsAt} + ${t.routePlans.plannedDurationMs}`,
+      t.routePlans.bottleId,
+    )
+    .limit(limit)
+    .all()
+    .map((r) => r.bottleId);
 }

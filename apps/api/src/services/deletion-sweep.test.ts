@@ -254,7 +254,57 @@ describe('backfill for accounts deleted before these rules (dry run by default)'
       inboundJourneysEnded: 0,
       harbourPlacesReleased: 0,
       appealsClosed: 0,
+      sessionsRevoked: 0,
+      journeysCancelled: 0,
+      lettersClearedForSender: 0,
+      friendshipsRemoved: 0,
+      blocksRemoved: 0,
+      notificationsRemoved: 0,
     });
+  });
+
+  // Audit ARCH-R-006 (and the backfill-counter gap in QA-R-006): an account deleted under the
+  // oldest rules — status only — gets every current deletion rule, not just the later sweep.
+  it('applies every current deletion rule to a status-only deletion, then nothing twice', async () => {
+    const w = createTestWorld({ defaultShoreCapacity: 80 });
+    const app = createApp(w.ctx);
+    await loginAs(app, 'ada');
+    const atSea = send(w, 'ada', 'bo');
+    const delivered = send(w, 'ada', 'cy');
+    w.clock.advance(60 * DAY);
+    commitArrivalIfDue(w.ctx, delivered, w.clock.now());
+    const stillAtSea = send(w, 'ada', 'bo');
+    void atSea;
+    blockUser(w.ctx, w.user('ada').id, 'dee');
+    const ada = w.user('ada');
+    w.db
+      .update(t.users)
+      .set({ status: 'deleted', deletedAt: w.realClock.now() })
+      .where(eq(t.users.id, ada.id))
+      .run();
+    const deletedAt = w.realClock.now();
+
+    const report = backfillDeletedAccounts(w.db, w.clock.now(), true);
+    expect(report.accounts).toBe(1);
+    expect(report.totals.sessionsRevoked).toBeGreaterThan(0);
+    expect(report.totals.journeysCancelled).toBeGreaterThan(0);
+    expect(report.totals.lettersClearedForSender).toBeGreaterThan(0);
+    expect(report.totals.friendshipsRemoved).toBeGreaterThan(0);
+    expect(report.totals.blocksRemoved).toBe(1);
+    expect(report.totals.notificationsRemoved).toBeGreaterThan(0);
+
+    const row = w.db.select().from(t.users).where(eq(t.users.id, ada.id)).get()!;
+    expect(row.username).toMatch(/^deleted_/);
+    expect([row.email, row.passwordHash, row.shoreId]).toEqual([null, null, null]);
+    expect(row.deletedAt).toBe(deletedAt);
+    expect(bottle(w, stillAtSea).state).toBe('cancelled');
+    expect(letterText(w, delivered)).toBe('');
+    expect(w.db.select().from(t.sessions).where(eq(t.sessions.userId, ada.id)).all()).toEqual([]);
+
+    const again = backfillDeletedAccounts(w.db, w.clock.now(), true);
+    expect(Object.values(again.totals).every((n) => n === 0)).toBe(true);
+    const same = w.db.select().from(t.users).where(eq(t.users.id, ada.id)).get()!;
+    expect(same.username).toBe(row.username);
   });
 });
 

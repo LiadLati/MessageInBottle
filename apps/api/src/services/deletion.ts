@@ -8,7 +8,7 @@ import { appendEvent, releaseCapacityOnce } from './journey.js';
 import { dummyPasswordHash, verifyPasswordAsync } from '../lib/password.js';
 import type { AppContext } from './context.js';
 import { writeAudit } from './audit.js';
-import { endInboundJourneys } from './restriction.js';
+import { endInboundJourneys, settleDueForSender, settleDueStormsInbound } from './restriction.js';
 
 // Deleting an account, at its owner's request, as one transactional and idempotent operation.
 //
@@ -146,145 +146,192 @@ export function deleteAccount(ctx: AppContext, userId: string): AccountDeletionS
       };
     }
 
-    // 1. Access ends here. The status alone already refuses every sign-in and every existing
-    //    session; removing the rows leaves nothing to resolve either.
-    const sessionsRevoked = tx
-      .delete(t.sessions)
-      .where(eq(t.sessions.userId, userId))
-      .run().changes;
-    tx.delete(t.passwordResets).where(eq(t.passwordResets.userId, userId)).run();
-
-    // 2. Letters nobody has received: cancel the journey, free the harbour place, clear the text.
-    const inFlight = tx
-      .select({ id: t.bottles.id, letterId: t.bottles.letterId, version: t.bottles.version })
-      .from(t.bottles)
-      .where(and(eq(t.bottles.senderId, userId), inArray(t.bottles.state, IN_FLIGHT)))
-      .all();
-    for (const b of inFlight) {
-      tx.update(t.bottles)
-        .set({
-          state: 'cancelled',
-          version: b.version + 1,
-          completedAt: now,
-          publicDeadlineAt: null,
-          publicExpiredAt: now,
-        })
-        .where(eq(t.bottles.id, b.id))
-        .run();
-      tx.update(t.capacityReservations)
-        .set({ status: 'released', releasedAt: now })
-        .where(
-          and(eq(t.capacityReservations.bottleId, b.id), eq(t.capacityReservations.status, 'held')),
-        )
-        .run();
-      appendEvent(tx, b.id, 'cancelled', now, { reason: 'account_deleted' });
-    }
-    const swept = sweepDeletedAccount(tx, userId, now);
-
-    // Everything this account wrote goes with it (product decision 7): the text of every
-    // letter it authored is cleared — on its way, lost, delivered or opened — and a delivered
-    // letter still waiting on someone's shore leaves it, freeing that place. The one exception
-    // is a letter whose moderation case is under an active legal or child-safety hold: the hold
-    // exists to preserve it, so it stays until the hold is released and retention takes over.
-    // Other people's letters TO this account are not touched: they stay in their authors' Sent
-    // history, addressed to "Deleted user".
-    const authored = tx
-      .select({ id: t.bottles.id, letterId: t.bottles.letterId, state: t.bottles.state })
-      .from(t.bottles)
-      .where(eq(t.bottles.senderId, userId))
-      .all();
-    const held = new Set(
-      tx
-        .select({ bottleId: t.moderationCases.bottleId })
-        .from(t.moderationCases)
-        .where(
-          and(
-            eq(t.moderationCases.senderId, userId),
-            isNotNull(t.moderationCases.holdReason),
-            isNull(t.moderationCases.holdReleasedAt),
-          ),
-        )
-        .all()
-        .map((r) => r.bottleId),
-    );
-    const clearable = authored.filter((b) => !held.has(b.id)).map((b) => b.letterId);
-    if (clearable.length)
-      tx.update(t.letters)
-        .set({ text: '', characters: 0 })
-        .where(inArray(t.letters.id, clearable))
-        .run();
-    for (const b of authored) if (b.state === 'delivered') releaseCapacityOnce(tx, b.id, now);
-
-    // 3. The account disappears from other people's lists and from discovery.
-    const friendshipsRemoved = tx
-      .delete(t.friendships)
-      .where(or(eq(t.friendships.userLowId, userId), eq(t.friendships.userHighId, userId)))
-      .run().changes;
-    const blocksRemoved = tx
-      .delete(t.blocks)
-      .where(or(eq(t.blocks.blockerId, userId), eq(t.blocks.blockedId, userId)))
-      .run().changes;
-    // The account's map clock (time-zone history) and its weather rolls go with it.
-    tx.delete(t.accountZoneChanges).where(eq(t.accountZoneChanges.userId, userId)).run();
-    tx.delete(t.weatherRolls).where(eq(t.weatherRolls.userId, userId)).run();
-
-    // 4. Everything the account alone held.
-    const notificationsRemoved = tx
-      .delete(t.notifications)
-      .where(eq(t.notifications.userId, userId))
-      .run().changes;
-    tx.delete(t.bottleOutcomeViews).where(eq(t.bottleOutcomeViews.userId, userId)).run();
-    tx.delete(t.idempotencyKeys).where(eq(t.idempotencyKeys.userId, userId)).run();
-    // Records of which document versions it accepted: nothing needs them once the account and
-    // its agreement are gone.
-    tx.delete(t.policyAcceptances).where(eq(t.policyAcceptances.userId, userId)).run();
-
-    // 5. The name other people would still see on a letter they hold.
-    tx.update(t.bottles)
-      .set({ senderNameSnapshot: DELETED_DISPLAY_NAME })
-      .where(eq(t.bottles.senderId, userId))
-      .run();
-    tx.update(t.bottles)
-      .set({ recipientNameSnapshot: DELETED_DISPLAY_NAME })
-      .where(eq(t.bottles.recipientId, userId))
-      .run();
-
-    // 6. The account row itself: emptied, unusable, and no longer anybody in particular.
-    tx.update(t.users)
-      .set({
-        username: `deleted_${newSecretToken().slice(0, 16)}`,
-        displayName: DELETED_DISPLAY_NAME,
-        email: null,
-        passwordHash: null,
-        passwordUpdatedAt: now,
-        shoreId: null,
-        timeZone: null,
-        timeZoneSince: null,
-        shoreFullSince: null,
-        role: 'member',
-        roleGrantedAt: null,
-        roleGrantedBy: null,
-        status: 'deleted',
-        deletedAt: now,
-      })
-      .where(eq(t.users.id, userId))
-      .run();
-
+    // What had already happened by now is settled first, as the worker would have settled it,
+    // so the outcome never depends on how far behind the worker was (audit ARCH-R-005): storm
+    // midpoints already passed are decided, for this account's journeys and for those
+    // travelling to it, and this account's letters already due ashore are delivered.
+    settleDueStormsInbound(ctx, tx, userId);
+    settleDueForSender(ctx, tx, userId);
+    const erased = eraseAccount(tx, userId, now);
     return {
       userId,
       alreadyDeleted: false,
       deletedAt: new Date(now).toISOString(),
-      sessionsRevoked,
-      journeysCancelled: inFlight.length,
-      inboundJourneysEnded: swept.inboundJourneysEnded,
-      harbourPlacesReleased: inFlight.length + swept.harbourPlacesReleased,
-      lettersClearedForSender: clearable.length,
-      friendshipsRemoved,
-      blocksRemoved,
-      notificationsRemoved,
+      sessionsRevoked: erased.sessionsRevoked,
+      journeysCancelled: erased.journeysCancelled,
+      inboundJourneysEnded: erased.inboundJourneysEnded,
+      harbourPlacesReleased: erased.harbourPlacesReleased,
+      lettersClearedForSender: erased.lettersClearedForSender,
+      friendshipsRemoved: erased.friendshipsRemoved,
+      blocksRemoved: erased.blocksRemoved,
+      notificationsRemoved: erased.notificationsRemoved,
       moderationRecordsRetained: countModerationRecords(tx, userId),
     };
   });
+}
+
+// Everything deletion removes or ends, as one idempotent pass inside the caller's
+// transaction. Account deletion runs it once; tools/deletion-backfill.ts runs it again over
+// accounts deleted under older rules, so every rule here — not only the later additions in
+// sweepDeletedAccount — reaches them too (audit ARCH-R-006). Every write is guarded on the
+// state it changes, so a second pass changes nothing.
+export function eraseAccount(tx: DbOrTx, userId: string, now: number): AccountErasure {
+  // 1. Access ends here. The status alone already refuses every sign-in and every existing
+  //    session; removing the rows leaves nothing to resolve either.
+  const sessionsRevoked = tx.delete(t.sessions).where(eq(t.sessions.userId, userId)).run().changes;
+  tx.delete(t.passwordResets).where(eq(t.passwordResets.userId, userId)).run();
+
+  // 2. Letters nobody has received: cancel the journey, free the harbour place, clear the text.
+  //    (deleteAccount has already settled what was due by now: see there.)
+  const inFlight = tx
+    .select({ id: t.bottles.id, letterId: t.bottles.letterId, version: t.bottles.version })
+    .from(t.bottles)
+    .where(and(eq(t.bottles.senderId, userId), inArray(t.bottles.state, IN_FLIGHT)))
+    .all();
+  for (const b of inFlight) {
+    tx.update(t.bottles)
+      .set({
+        state: 'cancelled',
+        version: b.version + 1,
+        completedAt: now,
+        publicDeadlineAt: null,
+        publicExpiredAt: now,
+      })
+      .where(eq(t.bottles.id, b.id))
+      .run();
+    tx.update(t.capacityReservations)
+      .set({ status: 'released', releasedAt: now })
+      .where(
+        and(eq(t.capacityReservations.bottleId, b.id), eq(t.capacityReservations.status, 'held')),
+      )
+      .run();
+    appendEvent(tx, b.id, 'cancelled', now, { reason: 'account_deleted' });
+  }
+  const swept = sweepDeletedAccount(tx, userId, now);
+
+  // Everything this account wrote goes with it (product decision 7): the text of every
+  // letter it authored is cleared — on its way, lost, delivered or opened — and a delivered
+  // letter still waiting on someone's shore leaves it, freeing that place. The one exception
+  // is a letter whose moderation case is under an active legal or child-safety hold: the hold
+  // exists to preserve it, so it stays until the hold is released and retention takes over.
+  // Other people's letters TO this account are not touched: they stay in their authors' Sent
+  // history, addressed to "Deleted user".
+  const authored = tx
+    .select({ id: t.bottles.id, letterId: t.bottles.letterId, state: t.bottles.state })
+    .from(t.bottles)
+    .where(eq(t.bottles.senderId, userId))
+    .all();
+  const held = new Set(
+    tx
+      .select({ bottleId: t.moderationCases.bottleId })
+      .from(t.moderationCases)
+      .where(
+        and(
+          eq(t.moderationCases.senderId, userId),
+          isNotNull(t.moderationCases.holdReason),
+          isNull(t.moderationCases.holdReleasedAt),
+        ),
+      )
+      .all()
+      .map((r) => r.bottleId),
+  );
+  const clearable = authored.filter((b) => !held.has(b.id)).map((b) => b.letterId);
+  const lettersCleared = clearable.length
+    ? tx
+        .update(t.letters)
+        .set({ text: '', characters: 0 })
+        .where(and(inArray(t.letters.id, clearable), ne(t.letters.text, '')))
+        .run().changes
+    : 0;
+  for (const b of authored) if (b.state === 'delivered') releaseCapacityOnce(tx, b.id, now);
+
+  // 3. The account disappears from other people's lists and from discovery.
+  const friendshipsRemoved = tx
+    .delete(t.friendships)
+    .where(or(eq(t.friendships.userLowId, userId), eq(t.friendships.userHighId, userId)))
+    .run().changes;
+  const blocksRemoved = tx
+    .delete(t.blocks)
+    .where(or(eq(t.blocks.blockerId, userId), eq(t.blocks.blockedId, userId)))
+    .run().changes;
+  // The account's map clock (time-zone history) and its weather rolls go with it.
+  tx.delete(t.accountZoneChanges).where(eq(t.accountZoneChanges.userId, userId)).run();
+  tx.delete(t.weatherRolls).where(eq(t.weatherRolls.userId, userId)).run();
+
+  // 4. Everything the account alone held.
+  const notificationsRemoved = tx
+    .delete(t.notifications)
+    .where(eq(t.notifications.userId, userId))
+    .run().changes;
+  tx.delete(t.bottleOutcomeViews).where(eq(t.bottleOutcomeViews.userId, userId)).run();
+  tx.delete(t.idempotencyKeys).where(eq(t.idempotencyKeys.userId, userId)).run();
+  // Records of which document versions it accepted: nothing needs them once the account and
+  // its agreement are gone.
+  tx.delete(t.policyAcceptances).where(eq(t.policyAcceptances.userId, userId)).run();
+
+  // 5. The name other people would still see on a letter they hold.
+  tx.update(t.bottles)
+    .set({ senderNameSnapshot: DELETED_DISPLAY_NAME })
+    .where(eq(t.bottles.senderId, userId))
+    .run();
+  tx.update(t.bottles)
+    .set({ recipientNameSnapshot: DELETED_DISPLAY_NAME })
+    .where(eq(t.bottles.recipientId, userId))
+    .run();
+
+  // 6. The account row itself: emptied, unusable, and no longer anybody in particular.
+  const row = tx
+    .select({ username: t.users.username, deletedAt: t.users.deletedAt })
+    .from(t.users)
+    .where(eq(t.users.id, userId))
+    .get();
+  tx.update(t.users)
+    .set({
+      // Re-applying the rules to an account already emptied keeps its anonymous name and
+      // its original deletion time (tools/deletion-backfill.ts).
+      username: row?.username.startsWith('deleted_')
+        ? row.username
+        : `deleted_${newSecretToken().slice(0, 16)}`,
+      displayName: DELETED_DISPLAY_NAME,
+      email: null,
+      passwordHash: null,
+      passwordUpdatedAt: now,
+      shoreId: null,
+      timeZone: null,
+      timeZoneSince: null,
+      shoreFullSince: null,
+      role: 'member',
+      roleGrantedAt: null,
+      roleGrantedBy: null,
+      status: 'deleted',
+      deletedAt: row?.deletedAt ?? now,
+    })
+    .where(eq(t.users.id, userId))
+    .run();
+
+  return {
+    sessionsRevoked,
+    journeysCancelled: inFlight.length,
+    inboundJourneysEnded: swept.inboundJourneysEnded,
+    harbourPlacesReleased: inFlight.length + swept.harbourPlacesReleased,
+    lettersClearedForSender: lettersCleared + swept.lostLettersCleared,
+    friendshipsRemoved,
+    blocksRemoved,
+    notificationsRemoved,
+    sweep: swept,
+  };
+}
+
+export interface AccountErasure {
+  sessionsRevoked: number;
+  journeysCancelled: number;
+  inboundJourneysEnded: number;
+  harbourPlacesReleased: number;
+  lettersClearedForSender: number;
+  friendshipsRemoved: number;
+  blocksRemoved: number;
+  notificationsRemoved: number;
+  sweep: DeletionSweep;
 }
 
 export const DELETED_DISPLAY_NAME = 'Deleted user';

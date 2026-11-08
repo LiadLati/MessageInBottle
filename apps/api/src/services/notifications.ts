@@ -24,6 +24,15 @@ export function enqueueNotification(
     now: number;
   },
 ): void {
+  // A deleted account has nobody to read it, and deletion already removed its history: a late
+  // journey event, a moderation decision or a worker catching up must not write it a new row
+  // (audit ARCH-R-013).
+  const owner = db
+    .select({ status: t.users.status })
+    .from(t.users)
+    .where(eq(t.users.id, input.userId))
+    .get();
+  if (!owner || owner.status === 'deleted') return;
   db.insert(t.notifications)
     .values({
       id: newId('ntf'),

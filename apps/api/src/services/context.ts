@@ -14,6 +14,20 @@ export interface AppContext {
   realClock: Clock;
   config: AppConfig;
   mailer: Mailer;
+  // How the in-process workers are doing, for the readiness check (audit ARCH-R-009). Set by
+  // the server; absent in tests and tools, where no worker runs.
+  workers?: WorkerStatus;
+}
+
+export interface WorkerStatus {
+  journey: {
+    // When a tick last finished, and how many bottles or accounts it had to skip because their
+    // own processing failed (each is retried on the next tick).
+    lastTickAt: number | null;
+    lastTickFailures: number;
+    // Consecutive ticks that failed as a whole.
+    failedTicks: number;
+  };
 }
 
 export interface AuthUser {

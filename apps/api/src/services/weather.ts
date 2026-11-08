@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, isNull, lte, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, gt, isNull, lte, sql } from 'drizzle-orm';
 import {
   RISK_POLICY,
   RISK_POLICY_VERSION,
@@ -140,9 +140,30 @@ export function acceptDeviceZone(
   });
 }
 
+// Would choosing this harbour move the account's map clock? Only before any device report, and
+// only to a different zone: the change budget is charged exactly when it does (ARCH-R-010).
+export function harbourMovesMapClock(ctx: AppContext, userId: string, shoreId: string): boolean {
+  const latest = latestZoneRow(ctx.db, userId);
+  if (latest?.source === 'device') return false;
+  const shore = ctx.db
+    .select({ lng: t.shores.lng })
+    .from(t.shores)
+    .where(eq(t.shores.id, shoreId))
+    .get();
+  if (!shore) return false;
+  const zone = harbourTimeZone(shore.lng) ?? 'UTC';
+  return !latest || latest.zone !== zone;
+}
+
 // The chosen harbour changed. Before any device report the harbour sets the map clock, so the
 // fallback follows it from now on; once a device has reported, the harbour no longer matters.
-export function harbourChanged(ctx: AppContext, userId: string): void {
+// As for a device zone, everything due before now is settled first under the old clock
+// (`settleDue`, audit ARCH-R-005).
+export function harbourChanged(
+  ctx: AppContext,
+  userId: string,
+  settleDue: (tx: DbOrTx, now: number) => void,
+): void {
   const latest = latestZoneRow(ctx.db, userId);
   if (latest?.source === 'device') return;
   const fallback = fallbackZone(ctx.db, userId);
@@ -150,11 +171,14 @@ export function harbourChanged(ctx: AppContext, userId: string): void {
   const now = ctx.clock.now();
   ctx.db.transaction((tx) => {
     ensureRollsIn(ctx, tx, userId, now);
+    settleDue(tx, now);
     recordZone(tx, userId, fallback.zone, fallback.source, now);
     if (phaseAt(now, fallback.zone) === 'day') cancelPendingStorms(tx, userId, now);
   });
 }
 
+// Only storms whose midpoint is still ahead: one already due is decided, never cancelled, even
+// if no caller settled it first (audit ARCH-R-005).
 function cancelPendingStorms(tx: DbOrTx, userId: string, now: number) {
   tx.update(t.weatherRolls)
     .set({ cancelledAt: now, cancelReason: 'daytime' })
@@ -164,6 +188,7 @@ function cancelPendingStorms(tx: DbOrTx, userId: string, now: number) {
         eq(t.weatherRolls.outcome, 'storm'),
         isNull(t.weatherRolls.decidedAt),
         isNull(t.weatherRolls.cancelledAt),
+        gt(t.weatherRolls.decisionAt, now),
       ),
     )
     .run();

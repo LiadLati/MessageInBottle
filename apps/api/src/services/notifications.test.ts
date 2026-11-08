@@ -2,6 +2,7 @@ import { eq } from 'drizzle-orm';
 import { beforeEach, describe, expect, it } from 'vitest';
 import * as t from '../db/schema.js';
 import { getSentBottle } from './bottles.js';
+import { deleteAccount } from './deletion.js';
 import { commitArrivalIfDue } from './journey.js';
 import { enqueueNotification, listNotifications, markAllRead } from './notifications.js';
 import { commitLoss, markOutcomeSeen } from './outcomes.js';
@@ -79,5 +80,26 @@ describe('notifications inbox', () => {
     w.db.update(t.notifications).set({ kind: null }).run();
     const kinds = listNotifications(w.ctx, ada().id).map((n) => [n.kind]);
     expect(kinds).toEqual([['received_arrived'], ['sent_sunk']]);
+  });
+});
+
+// Audit ARCH-R-013: nothing is written for an account that no longer exists.
+describe('notifications for a deleted account', () => {
+  it('are not written', () => {
+    const w = createTestWorld();
+    const ada = w.user('ada');
+    deleteAccount(w.ctx, ada.id);
+    enqueueNotification(w.db, {
+      userId: ada.id,
+      type: 'journey_event',
+      kind: 'sent_cancelled',
+      bottleId: null,
+      dedupeKey: 'late:event',
+      message: 'late',
+      now: w.clock.now(),
+    });
+    expect(
+      w.db.select().from(t.notifications).where(eq(t.notifications.userId, ada.id)).all(),
+    ).toEqual([]);
   });
 });

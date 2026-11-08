@@ -1,4 +1,4 @@
-import { and, eq, isNull, lte, sql } from 'drizzle-orm';
+import { and, eq, isNull, lte, notExists, sql } from 'drizzle-orm';
 import {
   RISK_POLICY,
   RISK_POLICY_VERSION,
@@ -57,11 +57,44 @@ export function stormWindowsFor(
 export interface RiskTickResult {
   decided: number;
   lost: number;
+  // Accounts or storms skipped because their own processing threw (worker only; retried on the
+  // next tick, and reported to the readiness check).
+  failures?: number;
 }
 
 // Rolls every account that has a journey at risk up to `now`, then takes every due midpoint.
 // Deterministic catch-up: safe to run repeatedly, after downtime, or beside the arrival worker.
+//
+// Only accounts that can be due a roll are visited (audit ARCH-R-008): rolls are at least
+// RISK_POLICY.rollSpacingMs apart, so an account whose last roll is more recent than that has
+// nothing to roll yet, and visiting it would write nothing. Each account and each storm is
+// processed on its own, so one that fails is logged and retried on the next tick without
+// holding up the others (audit ARCH-R-009).
 export function processRiskDecisions(ctx: AppContext, now: number): RiskTickResult {
+  let failures = 0;
+  for (const userId of sendersDueRolls(ctx, now)) {
+    try {
+      ensureRolls(ctx, userId, now);
+    } catch (err) {
+      failures++;
+      console.error(`journey worker: weather for account ${userId} failed`, err);
+    }
+  }
+  const decided = decideDueStorms(ctx, ctx.db, null, now, { isolate: true });
+  return { ...decided, failures: failures + (decided.failures ?? 0) };
+}
+
+// Accounts with a journey at risk whose next roll can be due by `now`.
+export function sendersDueRolls(ctx: AppContext, now: number): string[] {
+  const recent = ctx.db
+    .select({ id: t.weatherRolls.id })
+    .from(t.weatherRolls)
+    .where(
+      and(
+        eq(t.weatherRolls.userId, t.bottles.senderId),
+        sql`${t.weatherRolls.rolledAt} > ${now - RISK_POLICY.rollSpacingMs}`,
+      ),
+    );
   const senders = ctx.db
     .selectDistinct({ userId: t.bottles.senderId })
     .from(t.bottles)
@@ -72,11 +105,11 @@ export function processRiskDecisions(ctx: AppContext, now: number): RiskTickResu
         eq(t.routePlans.active, true),
         lte(t.routePlans.startsAt, now),
         sql`${t.bottles.riskPolicyVersion} is not null`,
+        notExists(recent),
       ),
     )
     .all();
-  for (const { userId } of senders) ensureRolls(ctx, userId, now);
-  return decideDueStorms(ctx, ctx.db, null, now);
+  return senders.map((s) => s.userId);
 }
 
 // Takes every storm midpoint that is due (for one account, or all), in order, each storm in its
@@ -88,6 +121,9 @@ export function decideDueStorms(
   db: DbOrTx,
   userId: string | null,
   now: number,
+  // The worker only: a storm that throws is logged and skipped (retried next tick). Callers
+  // inside a decision's transaction leave it off, so a failure fails the decision.
+  options: { isolate?: boolean } = {},
 ): RiskTickResult {
   const result: RiskTickResult = { decided: 0, lost: 0 };
   const due = db
@@ -105,13 +141,24 @@ export function decideDueStorms(
     .orderBy(t.weatherRolls.decisionAt)
     .all();
   for (const roll of due) {
-    const r = db.transaction((tx) => {
-      // Re-read under the writer: a concurrent run may have decided or cancelled it.
-      const fresh = tx.select().from(t.weatherRolls).where(eq(t.weatherRolls.id, roll.id)).get();
-      if (!fresh || fresh.decidedAt !== null || fresh.cancelledAt !== null)
-        return { decided: 0, lost: 0 };
-      return decideStorm(ctx, tx, fresh, now);
-    });
+    const decide = () =>
+      db.transaction((tx) => {
+        // Re-read under the writer: a concurrent run may have decided or cancelled it.
+        const fresh = tx.select().from(t.weatherRolls).where(eq(t.weatherRolls.id, roll.id)).get();
+        if (!fresh || fresh.decidedAt !== null || fresh.cancelledAt !== null)
+          return { decided: 0, lost: 0 };
+        return decideStorm(ctx, tx, fresh, now);
+      });
+    let r: RiskTickResult;
+    if (options.isolate) {
+      try {
+        r = decide();
+      } catch (err) {
+        result.failures = (result.failures ?? 0) + 1;
+        console.error(`journey worker: storm ${roll.id} failed`, err);
+        continue;
+      }
+    } else r = decide();
     result.decided += r.decided;
     result.lost += r.lost;
   }

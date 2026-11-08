@@ -62,11 +62,18 @@ async function main(): Promise<void> {
   if (activated > 0) console.log(`Public listing deadline set for ${activated} legacy bottle(s).`);
   const app = createApp(ctx);
 
-  // In-process journey worker. Deterministic catch-up means a missed tick is harmless.
+  // In-process journey worker. Deterministic catch-up means a missed tick is harmless. Its
+  // state is kept for the readiness check (/api/health, audit ARCH-R-009).
+  ctx.workers = { journey: { lastTickAt: null, lastTickFailures: 0, failedTicks: 0 } };
+  const journeyStatus = ctx.workers.journey;
   const worker = setInterval(() => {
     try {
-      runJourneyTick(ctx);
+      const result = runJourneyTick(ctx);
+      journeyStatus.lastTickAt = Date.now();
+      journeyStatus.lastTickFailures = result.failures;
+      journeyStatus.failedTicks = 0;
     } catch (err) {
+      journeyStatus.failedTicks++;
       console.error('journey tick failed', err);
     }
   }, config.journeyTickMs);

@@ -62,8 +62,15 @@ export function createApp(ctx: AppContext) {
     } catch {
       return c.json({ ok: false, error: { code: 'database_unavailable' } }, 503);
     }
+    // The journey worker (audit ARCH-R-009): failing as a whole for three ticks in a row means
+    // arrivals and storms have stopped, which a process manager should hear about. Individual
+    // bottles it had to skip are reported as degraded, without detail; the log has the ids.
+    const journey = ctx.workers?.journey;
+    if (journey && journey.failedTicks >= 3)
+      return c.json({ ok: false, error: { code: 'journey_worker_failing' } }, 503);
     return c.json({
       ok: true,
+      ...(journey ? { worker: journey.lastTickFailures > 0 ? 'degraded' : 'ok' } : {}),
       serverTime: new Date(ctx.clock.now()).toISOString(),
       // Development builds say how mail is handled, so the password-recovery screen can state
       // plainly that nothing will be delivered. Omitted entirely outside development.
@@ -90,7 +97,7 @@ export function createApp(ctx: AppContext) {
       'cache-control': 'public, max-age=300',
     }),
   );
-  app.route('/api/chart', chartRoutes());
+  app.route('/api/chart', chartRoutes(limiter));
   app.route('/api/friends', friendRoutes());
   app.route('/api/bottles', bottleRoutes(limiter));
   app.route('/api/shore', shoreRoutes());
