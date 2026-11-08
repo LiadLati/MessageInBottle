@@ -5,6 +5,11 @@ platform that can run one Node 22 process with a persistent disk satisfies it. *
 provider and the domain are open decisions** (see the end of this file). Password-reset mail goes
 through Gmail from `seayou.support@gmail.com` (section 2a).
 
+**Scope.** This file describes `main`: the API plus the web app served as static files by the
+same origin. The Android packaging work (Capacitor, on the unmerged branch
+`feature/android-app`) changes how the client is shipped and serves no web app; its own
+`docs/ANDROID.md` and its version of this file apply only once that branch is merged.
+
 ## 1. The artefact
 
 ```bash
@@ -16,7 +21,22 @@ cp -r apps/web/dist /srv/seayou-web
 
 `/srv/seayou-api` holds the compiled API, its migrations and production dependencies — no
 TypeScript runtime, no source, no `.env`, no database. `/srv/seayou-web` is static files.
-CI proves the artefact on every pull request (`apps/api/scripts/smoke-artefact.mjs`).
+CI proves the artefact on every pull request (`apps/api/scripts/smoke-artefact.mjs`), and runs
+the built web app against it in a browser behind this file's proxy headers and CSP
+(`apps/e2e`, Playwright and axe).
+
+### 1a. A fresh database
+
+Production starts from an empty database created by the compiled migrator, never from a copy of
+a development database:
+
+```bash
+MIB_DATABASE_PATH=/var/lib/seayou/seayou.sqlite node /srv/seayou-api/dist/migrate.js
+```
+
+The server refuses to start in production on a database whose development accounts (`ada`,
+`bo`, `cy`, `dee`) still sign in with the published development password, and says so; nothing
+is changed. Migrations are append-only: CI pins the content of every released migration.
 
 ## 2. Required environment
 
@@ -25,15 +45,21 @@ CI proves the artefact on every pull request (`apps/api/scripts/smoke-artefact.m
 | `MIB_DATABASE_PATH` | **Required, absolute**, on persistent storage outside `/srv/seayou-api` (a redeploy replaces that directory). The server refuses to start otherwise. |
 | `MIB_APP_URL` | **Required, `https://`** — the public origin. Reset links are built from it. The server refuses `http://` in production. |
 | `MIB_DEV_MODE` | Unset or `false`. `true` is refused by the compiled server. |
-| `MIB_TRUST_PROXY` | `true` behind the reverse proxy below; then bind the API to `127.0.0.1` so nothing can reach it except through the proxy. |
+| `MIB_TRUST_PROXY` | `true` behind the reverse proxy below; the API must then be reachable only through the proxy (see `MIB_HOST`). |
+| `MIB_HOST` | The interface the API listens on. Production default `127.0.0.1` (proxy on the same host). A container deployment whose proxy reaches the API over a container network sets `0.0.0.0` and must **not** publish the API port. |
 | `MIB_TRUSTED_PROXY_HOPS` | Number of proxies that append to `X-Forwarded-For` (default `1`). The client address is read that many entries from the right. |
-| `MIB_MAIL_PROVIDER`, `MIB_SMTP_*`, `MIB_MAIL_FROM` | `smtp` through Gmail (section 2a), or accept that password recovery sends nothing (`disabled`, the default). |
+| `MIB_MAIL_PROVIDER`, `MIB_SMTP_*`, `MIB_MAIL_FROM` | `smtp` through Gmail (section 2a), or accept that password recovery sends nothing (`disabled`, the default). Port 465 requires `MIB_SMTP_SECURE=true` and 587 `false`; without implicit TLS the server requires STARTTLS and sends nothing to a server that does not offer it (`MIB_SMTP_REQUIRE_TLS=false` is development-only). |
 | `MIB_SUPPORT_EMAIL` | The published support address (it appears in the Privacy Policy and Child Safety Standards). |
-| `MIB_AI_ENABLED` | `false` unless an Ollama-compatible model runs on infrastructure the operator controls. The model only recommends; `MIB_AI_AUTO_DECIDE=true` stops the server (the setting was removed). |
+| `MIB_AI_ENABLED` | **Required in production, `true` or `false`**: the server refuses to start with it unset. `true` sends the text of reported letters to the model at `MIB_AI_ENDPOINT` for a recommendation; `false` leaves every report to an administrator, and the console says automated review is off. Whether to run a model, and where, is an owner decision. The model only recommends; `MIB_AI_AUTO_DECIDE=true` stops the server (the setting was removed). |
+| `MIB_AI_ENDPOINT` | With review on: `https://…`, or `http://` only on this machine (`localhost`, `127.0.0.1`, `::1`). Anything else is refused. |
 | `MIB_RISK_POLICY_VERSION` | Leave unset (`4`, the approved policy: one map clock per account, storms follow the map). `0` disables automatic outcomes for new journeys. |
 | `MIB_SHORE_CAPACITY` | Optional. Bottles one account's shore holds at once (default `100`, product decision 8). |
 | `MIB_RETENTION_DAYS` | Optional. Leave unset: evidence is redacted 30 days after the decision (or once a timely appeal is decided), matching the published Privacy Policy. |
 | `MIB_LOG_REQUESTS` | Request lines include ids in paths; decide a log retention period (below). |
+
+Every numeric setting (`MIB_PORT`, the tick intervals, capacities, timeouts, the session
+lifetime, `MIB_SMTP_PORT`) must be a whole number within its stated range, or the server refuses
+to start and names the range.
 
 ## 2a. Password-reset email through Gmail
 
@@ -85,9 +111,12 @@ violation, appeal, subject and actor ids, role, reason, detail, time).
 
 The journey, AI-review and retention workers run inside the API process, and rate limits are
 kept in its memory. Run **one** process per database file: `replicas: 1`, and a
-**stop-then-start** (recreate) deploy, never a rolling one. The server takes an exclusive lock
-file beside the database (`<database>.lock`) and refuses to start a second process on the same
-file. Run CLI tools (`grant-*.js`, `retention.js`, `backup.js`) against the live file only when
+**stop-then-start** (recreate) deploy, never a rolling one. The server holds an exclusive
+operating-system lock on `<database>.process-lock` for as long as it runs and refuses to start a
+second process on the same file, including from another container that mounts the same volume.
+The lock is released when the process exits or is killed. Like SQLite itself it needs working
+file locks: keep the database on a local volume, never on a network file system. (Earlier
+versions wrote a PID to `<database>.lock`; that file is ignored and can be deleted.) Run CLI tools (`grant-*.js`, `retention.js`, `backup.js`) against the live file only when
 needed; they are safe alongside the server (SQLite locking plus `busy_timeout`) but add write
 load.
 
@@ -116,6 +145,10 @@ MIB_DATABASE_PATH=/var/lib/seayou/seayou.sqlite node dist/backup.js --to /var/ba
 node dist/backup.js --verify /var/backups/seayou/<file>.sqlite       # integrity, migrations, row counts
 ```
 
+The operator tools (`migrate.js`, `backup.js`, `grant-*.js`, `retention.js`, `audit-export.js`,
+`deletion-backfill.js`) need `MIB_DATABASE_PATH` only; they build no links, so they do not need
+`MIB_APP_URL`. A scheduled job can run them with just that variable.
+
 Schedule it (for example daily), copy the files off the host, and keep them for a period you
 decide. **Restore:** stop the API; move the current database and its `-wal`/`-shm` files aside;
 copy the backup to `MIB_DATABASE_PATH`; start the API. The drill is automated in
@@ -128,16 +161,25 @@ database a newer version has migrated is unsupported; the recovery path is a res
 ## 6. Accounts that must exist before launch
 
 There is no bootstrap path and no default administrator. Before the first report can be decided,
-grant at least one administrator on the host:
+grant administrators on the host:
 
 ```bash
 MIB_DATABASE_PATH=… node dist/grant-admin.js --email you@example.com            # look up
 MIB_DATABASE_PATH=… node dist/grant-admin.js --email you@example.com --confirm usr_…
 ```
 
+An administrator may not decide, hold or read the reporters of a case they are part of (as
+sender, recipient or reporter). With a single administrator, such a case can be decided by
+nobody, so plan for **at least two**, or accept that gap in writing. The grant tool and the
+server's start-up log both say how many active administrators there are and warn below two.
+Every grant and revocation is recorded in the moderation audit trail (`role_changed`).
+
 ## 7. Operations
 
-- Health: `GET /api/health` answers 200 only while the database answers, 503 otherwise.
+- Health: `GET /api/health` answers 200 only while the database answers, 503 otherwise. It also
+  answers 503 (`journey_worker_failing`) after three journey-worker ticks in a row failed, and
+  reports `"worker": "degraded"` when the last tick had to skip a bottle, account or storm (the
+  log has the ids; each is retried on the next tick).
 - Stop: `SIGTERM` stops accepting requests, stops the workers and closes the database.
 - Memory: ~110 MB for the route graph plus Node's baseline; more if a model runs on the same host.
 - Logs: request logs contain bottle and violation ids; there are no structured logs, metrics or
@@ -153,7 +195,10 @@ MIB_DATABASE_PATH=… node dist/grant-admin.js --email you@example.com --confirm
 5. Log destination and retention period.
 6. Who holds shell access to grant roles on the live host.
 7. Running the historical deletion backfill (`deletion:backfill`, dry run first, after a
-   backup) on the real database — owner-operated, never run by development work.
+   backup) on the real database — owner-operated, never run by development work. It applies
+   every current deletion rule to accounts deleted under older code. It is only relevant if an
+   existing database is carried into production; a fresh production database (section 1a) has
+   nothing to backfill.
 8. Enabling GitHub branch protection so CI blocks merges.
 9. Store packaging and the Play Console Data Safety form (`docs/LEGAL_DOCUMENTS.md`).
 10. The external append-only or immutable log for moderation events (section 2b), chosen with

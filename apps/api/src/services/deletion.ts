@@ -417,7 +417,7 @@ export function sweepDeletedAccount(tx: DbOrTx, userId: string, now: number): De
 
   // A deleted account can never answer a decision notice, so its unused appeal opportunity
   // ends with the account (audit SEC-012). Without this, the case never became final and the
-  // evidence copy was kept forever — contrary to the Privacy Policy's seven-day rule.
+  // evidence copy was kept forever — contrary to the Privacy Policy's retention rule.
   const open = tx
     .select({ id: t.violations.id, caseId: t.violations.caseId })
     .from(t.violations)

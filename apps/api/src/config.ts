@@ -285,7 +285,7 @@ export function loadConfig(
     policies: { status: policySetStatus(POLICY_DOCUMENTS) },
     riskPolicyVersion: riskPolicyVersionOf(env),
     retention: loadRetentionPolicy(env),
-    // Hourly. The pass is idempotent and the window is seven days, so the exact cadence only
+    // Hourly. The pass is idempotent and the window is 30 days, so the exact cadence only
     // decides how soon after the boundary the evidence actually goes.
     retentionTickMs: envIntIn(env, 'MIB_RETENTION_TICK_MS', HOUR, SECOND, DAY),
     ai: loadAiConfig(env, production),

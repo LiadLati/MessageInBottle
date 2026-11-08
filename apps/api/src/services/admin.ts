@@ -901,7 +901,8 @@ export function decideCaseCritical(
 
 // ---------- legal and child-safety holds ----------
 
-// Keeps a case's evidence beyond the ordinary seven days, for a documented reason. A hold is
+// Keeps a case's evidence beyond the ordinary retention window (30 days from the decision,
+// product decision 5), for a documented reason. A hold is
 // never implicit and never permanent by accident: it records why, who placed it and when, and
 // releasing it returns the case to the normal retention calculation immediately.
 export function placeHold(
@@ -943,7 +944,7 @@ export function placeHold(
         actorUserId: admin.id,
         actorRole: 'admin',
         reason: trimmed,
-        detail: `${reason} hold; evidence retained beyond the seven-day window`,
+        detail: `${reason} hold; evidence retained beyond the ordinary retention window`,
       },
       now,
     );
@@ -971,7 +972,7 @@ export function releaseHold(ctx: AppContext, admin: AuthUser, caseId: string): A
         subjectUserId: c.senderId,
         actorUserId: admin.id,
         actorRole: 'admin',
-        detail: 'hold released; the case returns to the ordinary seven-day calculation',
+        detail: 'hold released; the case returns to the ordinary retention calculation',
       },
       now,
     );

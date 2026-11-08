@@ -1,21 +1,22 @@
-# Architecture notes — stage 3 foundation
+# Architecture notes
 
-This document records the decisions taken to start implementation from an empty repository. The
-product specification (`docs/SeaYou_Product_Specification.md`) remains the source of truth; where the specification leaves a decision
-open (D01–D13) the code uses a clearly labelled, configurable placeholder and does not pretend the
-decision has been made.
+This document began as the record of the decisions taken to start implementation from an empty
+repository, and is kept current with the code. The product specification
+(`docs/SeaYou_Product_Specification.md`) states the product; the owner's later product decisions
+(D1–D17) and what was built for each are tracked in `docs/REMEDIATION.md`, which wins where the
+specification's older wording disagrees.
 
 ## Decisions
 
 | Area                | Choice                                                | Why                                                                                                                                                                             |
 | ------------------- | ----------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Repository          | pnpm workspace monorepo, TypeScript everywhere        | One typed contract (`@mib/shared`) consumed by both API and client; identical letter validation on both sides.                                                                 |
-| Client              | Vite + React 19, mobile-first, no UI framework yet    | D12 (web/PWA vs native) is open. A responsive web client is the cheapest way to validate flows and is PWA-ready; visual design is a placeholder until the Claude Design phase.  |
+| Client              | Vite + React 19, mobile-first, no UI framework        | One responsive client. On `main` it is served as a web app by the same origin as the API (`docs/DEPLOYMENT.md`); the unmerged branch `feature/android-app` packages the same build as an Android app with Capacitor. |
 | API                 | Hono on Node (`@hono/node-server`)                    | Small, typed, standards-based `fetch` handlers that are trivially testable in-process (`app.request`) and portable to other runtimes if hosting changes.                          |
 | Validation          | zod v4 schemas in `@mib/shared`                       | Shared DTOs, request validation at the HTTP boundary, and runtime parsing of stored JSON (aging profile).                                                                        |
-| Database            | SQLite via `better-sqlite3` + Drizzle ORM             | Zero-service local persistence with real transactions and migrations. Synchronous transactions make the release/arrival/open commits naturally serial. Drizzle keeps a move to PostgreSQL a driver + migration change. |
+| Database            | SQLite via `better-sqlite3` + Drizzle ORM             | Zero-service local persistence with real transactions and migrations. Synchronous transactions make the release/arrival/open commits naturally serial. A move to another database is not planned; it would need a new driver, new migrations and the SQLite-specific locking and backup steps replaced. |
 | Time                | Server `Clock` abstraction (`SystemClock` / `DevClock`) | Spec §11 invariant 7: only server time drives travel. Dev mode persists one shared offset so journeys can be advanced deterministically and survive restarts. It moves forward, except that a developer can confirm "Return to real time" (`POST /api/dev/reset-clock`), which sets the offset to zero for every account and changes nothing else: settled arrivals, losses, notifications and storm rolls stay settled even when their timestamps are ahead of the clock, and a bottle released in the simulated future stays at sea until real time reaches it.               |
-| Worker              | In-process interval calling `runJourneyTick`          | Arrival is a pure function of persisted plan + server time, so a missed or repeated tick is harmless. Can be moved to a separate process without code changes.                   |
+| Worker              | In-process interval calling `runJourneyTick`          | Arrival is a pure function of persisted plan + server time, so a missed or repeated tick is harmless. Each tick reads only arrivals that are due (at most 1000) and accounts whose next storm roll can be due, and processes each bottle, account and storm on its own: one that fails is logged and retried next tick, and `/api/health` reports a degraded or failing worker. One API process per database, enforced by an OS-held lock (`<database>.process-lock`). Actions that end journeys (deletion, restriction, a harbour or zone change) first settle storms and arrivals already due, so outcomes never depend on worker timing. |
 | Auth                | Username + password (+ e-mail for recovery) accounts in the `users` table (salted scrypt hash), opaque hashed session tokens, single-use hashed reset tokens in `password_resets`, provider-neutral mail adapter | No identity provider or e-mail is required for the product; scrypt is in Node's standard library (no dependency), the hash string is self-describing so parameters can be raised later. Sessions are bearer tokens hashed at rest with a TTL; sign-out revokes one token. Sign-in and registration are rate limited in-process. Seed accounts exist only in dev mode. |
 | Geography           | Global shore catalogue (`apps/api/src/db/geo/shores.ts`, ~390 real harbours keyed to Natural Earth geometries) plus the six original fictional shores; versioned sea-route graph, version 2 generated offline (`apps/api/src/tools/geo/build-world.ts`) | Spec §6 (amended 2026-09-14). The graph is a 1° water grid checked against a 0.05° land mask, authored straits/canals and per-shore connectors; lengths are great-circle km (50 km per chart unit ≈ v1 pace). Graphs are immutable and cached per version in memory; route plans record their graph version, so version 1 rows and every released bottle's snapshot stay untouched. Shores carry the dataset's country attribution server-side only (validation, coverage, routing) and expose their sea to clients; country names never reach the UI. Users are never located. |
 | World map           | MapLibre GL JS with day and night land + borders styles; bundled Natural Earth 50m land polygons and admin-0 boundary lines (via `world-atlas` 2.0.2, ISC; data public domain) | Open source, no credentials, offline. The style has a sea background, land fill, coastline and thin border lines only; `assertMapStylePolicy` rejects symbol/label layers and any border drawn as more than a line. Routes are unwrapped across the antimeridian client-side and drawn with rounded corners (`smoothRoute` in `@mib/shared`, manual review round 1): each corner of the one-degree waypoint chain takes the largest curve whose every point keeps about 5 km from land in a 0.05° raster of the map's own land file, a smaller one otherwise, and none where no curve fits; harbour-approach corners get only a tiny blind-safe cut. It is rendering only — the marker rides the drawn line, while progress, route, duration, storms and risk stay the server's — and `db/geo/geo.test.ts` checks it across the shore catalogue against the independent build-time land mask. Private views label the origin ("From") and the destination ("To", a hollow ring) of the journey in focus; the public ocean names no harbour. Day↔night and calm↔storm are per-layer `setPaintProperty` tweens on the live map — never `setStyle`, which would reload sources, drop the markers and blink the camera. The only weather element on the map is the storm-cloud glyph above each bottle at sea while the account's storm lasts at night (restored in manual review round 1); the storm is stated in words, with its end time, only in the bottle's journey card (the floating storm message was removed in round 2); there is no map-wide rain or stripe overlay, no storm regions, no fog patches, and no circle drawn around a bottle marker (selection reads as a size change, and the only ring is the keyboard focus one). A licensed vector source can be supplied via `VITE_MIB_MAP_*`. |
@@ -440,7 +441,13 @@ and the new `risk_decisions` table (one row per bottle per storm night, unique o
   moderation event to an external append-only or immutable log (a deployment dependency; see
   `docs/DEPLOYMENT.md`). Each row is written inside the transaction of the action it describes,
   so there is no path that changes what a person may do without leaving a row —
-  and the trail survives the evidence it describes being redacted.
+  and the trail survives the evidence it describes being redacted. It also records who opened
+  a case's evidence (`evidence_viewed`, at most once per administrator and case per half hour,
+  ids only) and every role grant or revocation made with the operator tool (`role_changed`).
+- **Recusal.** An administrator who is the sender, recipient or a reporter of a case cannot
+  decide it, its appeal or its critical classification, cannot place or release a hold on its
+  evidence, and is not shown the other reporters, their explanations or (unless they wrote it)
+  the appeal text.
 - **No age data.** Nothing in the schema, the API or the interface collects or asserts an age;
   a test walks every production source file to keep it that way.
 
@@ -478,5 +485,6 @@ and the new `risk_decisions` table (one row per bottle per storm night, unique o
 ## Deliberately not implemented (per task scope)
 
 AI writing/rewriting, random recipients, appended notes, chat, GPS-assisted shore suggestion,
-island publication, rescue/discard, push notifications. Draft persistence is client-side (`sessionStorage`), as the
+island publication and push notifications. Rescue and discard of lost bottles are excluded by
+product decision, not deferred. Draft persistence is client-side (`sessionStorage`), as the
 specification's Draft state has no live journey.

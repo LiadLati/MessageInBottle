@@ -95,8 +95,9 @@ async function main(): Promise<void> {
   }, config.ai.tickMs);
   aiWorker.unref();
 
-  // Evidence retention. The published policy says content evidence goes seven days after a case
-  // becomes final, so something has to actually remove it: a plan nobody runs is not a policy.
+  // Evidence retention. The published policy says content evidence goes 30 days after the
+  // decision (or once a timely appeal is decided, if later), so something has to actually
+  // remove it: a plan nobody runs is not a policy.
   // The pass is idempotent and re-checks every case inside its own transaction, so an hourly
   // tick that overlaps a decision, an appeal or a hold does the right thing.
   const retentionWorker = setInterval(() => {

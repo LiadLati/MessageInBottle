@@ -709,6 +709,16 @@ This roadmap is a plan only. The current task ends with the updated specificatio
 
 ## 22. Decisions still requiring confirmation
 
+> **Note (2026-11-08, documentation reconciliation, audit QA-R-009).** This table is kept as the
+> owner wrote it. Several open rows are now answered in practice by what was built and by the
+> owner's product decisions recorded in `docs/REMEDIATION.md` ("Decisions", rows D1–D17, a
+> separate numbering from this table): for example blocking and unblocking (this table's D07;
+> REMEDIATION D8), the finder's single reading (D11; REMEDIATION D12), evidence retention and
+> restricted accounts (D13; REMEDIATION D5 and D14), and the Android packaging on the unmerged
+> branch `feature/android-app` (D12). Moderation staffing and legal review (D13,
+> §16.7) remain open. The rows below have not been rewritten because confirming them is the
+> owner's call.
+
 | ID | Decision | Recommendation or clarification |
 | --- | --- | --- |
 | D01 | Travel speed and duration | **Decided (product decision 15):** keep the current constants (`MIB_MS_PER_CHART_UNIT`, `MIB_MIN_JOURNEY_MS`); same-harbour delivery stays immediate; device time has no effect. **Amended 2026-09-27:** a new journey is scheduled at 70% of the duration those constants produce (the route and the calculation are unchanged); journeys already at sea keep their saved schedule. |

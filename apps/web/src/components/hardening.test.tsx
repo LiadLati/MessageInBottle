@@ -26,6 +26,7 @@ import { BlockedUsersDialog } from './BlockedUsersDialog.js';
 import { DecisionNotice } from './DecisionNotice.js';
 import { DeleteAccountDialog } from './DeleteAccountDialog.js';
 import { ErrorBoundary } from './ErrorBoundary.js';
+import { DeckScreen } from './ui.js';
 
 beforeEach(() => {
   api.presentDecision.mockResolvedValue({});
@@ -219,5 +220,39 @@ describe('the notification history (FE-R-009)', () => {
     rerender(<NotificationsScreen notifications={[note('n7'), note('n6')]} {...props} />);
     const ids = screen.getAllByRole('listitem').map((li) => li.textContent?.match(/n\d/)?.[0]);
     expect(ids).toEqual(['n7', 'n6', 'n5', 'n4', 'n3', 'n2', 'n1']);
+  });
+});
+
+describe('focus on in-place view changes (FE-R-006)', () => {
+  it('moves to the new heading when the view changes, not on first render', () => {
+    const { rerender } = render(
+      <>
+        <button type="button">Next</button>
+        <DeckScreen title="Who is this for?" view="friend">
+          <p>list</p>
+        </DeckScreen>
+      </>,
+    );
+    const next = screen.getByRole('button', { name: 'Next' });
+    next.focus();
+    expect(document.activeElement).toBe(next);
+    rerender(
+      <>
+        <button type="button">Next</button>
+        <DeckScreen title="A letter to Bea" view="compose">
+          <p>compose</p>
+        </DeckScreen>
+      </>,
+    );
+    expect(document.activeElement).toBe(screen.getByRole('heading', { name: 'A letter to Bea' }));
+  });
+
+  it('a view opened as its own screen can take focus on mount', () => {
+    render(
+      <DeckScreen title="Report" focusOnMount>
+        <p>case</p>
+      </DeckScreen>,
+    );
+    expect(document.activeElement).toBe(screen.getByRole('heading', { name: 'Report' }));
   });
 });

@@ -99,6 +99,7 @@ Walkthrough of the vertical slice:
 | `pnpm build`        | Typecheck, build the API into `apps/api/dist`, bundle the web app   |
 | `pnpm start`        | Run the compiled API (`node apps/api/dist/server.js`), production   |
 | `pnpm smoke:artefact` | Start the compiled API on a temporary database and check it       |
+| `pnpm --filter @mib/e2e e2e` | Browser and accessibility smoke (Playwright + axe) of the built app behind the production headers and CSP; run `pnpm build` first. Needs Chromium: `pnpm --filter @mib/e2e exec playwright install chromium` |
 
 Operator tools (`pnpm --filter @mib/api <script>`, or `node dist/<tool>.js` in the artefact; all
 read `MIB_DATABASE_PATH`):
@@ -168,7 +169,11 @@ All variables are optional and documented in `.env.example`. The important ones:
 - `MIB_TRUST_PROXY` / `MIB_TRUSTED_PROXY_HOPS` (default `1`): behind a reverse proxy, the client
   address is read that many entries from the **right** of `X-Forwarded-For`. See
   `docs/DEPLOYMENT.md` for the whole deployment contract (one API process, which the server
-  enforces with a `<database>.lock` file; backups; headers).
+  enforces with an operating-system lock on `<database>.process-lock`; backups; headers).
+- `MIB_HOST`: the interface the API listens on. Unset, it listens on every interface in
+  development (so a phone or emulator on the LAN can reach it) and on `127.0.0.1` in production.
+- `MIB_AI_ENABLED`: automated review of reported letters (recommendations only). Defaults to
+  `true` in development; production refuses to start until it is set to `true` or `false`.
 - `MIB_SESSION_TTL_MS` (default 30 days): lifetime of a sign-in token.
   The in-app dev clock bar is additionally compiled out of production bundles: it renders only
   in `vite` development builds (`import.meta.env.DEV`) and only while the API reports dev mode.
