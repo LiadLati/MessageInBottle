@@ -1,4 +1,4 @@
-# Quality gates for every pull request and every push to main.
+# Quality gates for every pull request, every push to main, and the Android branches.
 #
 # Runs in a clean environment with no application secrets and only temporary databases. It
 # does not deploy anything. Each gate is its own named step, so a red run says which one failed.
@@ -10,7 +10,9 @@ name: CI
 on:
   pull_request:
   push:
-    branches: [main]
+    # The Android work runs here before it is merged, so its own job is proven on GitHub's
+    # runners (this environment cannot download the Android SDK).
+    branches: [main, 'feature/android-app*']
 
 permissions:
   contents: read
@@ -98,3 +100,57 @@ jobs:
       # sign-in work; the audited reset-link takeover chain fails; SIGTERM stops it cleanly.
       - name: Production artefact smoke (dev endpoints absent, seeded credentials refused)
         run: node apps/api/scripts/smoke-artefact.mjs --artefact "$ARTEFACT_DIR" --prod-only
+
+  android:
+    name: Android debug build, lint and release guard
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      CI: 'true'
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install (frozen lockfile)
+        run: pnpm install --frozen-lockfile
+
+      # Android Gradle Plugin 8 needs Java 17 or newer; the runner image provides the SDK.
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+
+      # The development interface (API origin http://10.0.2.2:3001), synced into the project.
+      - name: Build and sync the interface for a debug build
+        run: pnpm --filter @mib/web android:dev
+
+      - name: Debug build and Android lint
+        working-directory: apps/web/android
+        run: ./gradlew --no-daemon --stacktrace assembleDebug lintDebug
+
+      # The release guard (verifySeaYouReleaseAssets) must refuse to package the development
+      # assets synced above. No upload key exists here, so a release can never be produced.
+      - name: The release build refuses development assets
+        working-directory: apps/web/android
+        run: |
+          if ./gradlew --no-daemon bundleRelease > release.log 2>&1; then
+            cat release.log
+            echo "bundleRelease succeeded with development assets: the release guard is not wired"
+            exit 1
+          fi
+          if ! grep -q "built in 'dev' mode" release.log; then
+            cat release.log
+            echo "bundleRelease failed, but not because of the release guard"
+            exit 1
+          fi
+          echo "The release guard refused the development assets, as it must."
