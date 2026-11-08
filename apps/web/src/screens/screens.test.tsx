@@ -188,6 +188,31 @@ describe('blocking a friend (FE-016)', () => {
     expect(confirmSpy).not.toHaveBeenCalled();
   });
 
+  // Audit FE-R-004: someone whose request was denied could simply ask again; the person asked
+  // can now block them from the request itself.
+  it('blocks the sender of an incoming request from the request row', async () => {
+    api.blockUser.mockResolvedValue(undefined);
+    api.friends.mockResolvedValue({
+      friends: [],
+      incomingRequests: [
+        {
+          id: 'frd_1',
+          from: { id: 'usr_c', username: 'cal', displayName: 'Cal' },
+          to: { id: 'usr_me', username: 'me', displayName: 'Me' },
+          createdAt: '2026-09-20T10:00:00.000Z',
+        },
+      ],
+      outgoingRequests: [],
+      pendingIncomingCount: 1,
+    });
+    render(<FriendsScreen />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Block Cal' }));
+    const dialog = screen.getByRole('alertdialog');
+    expect(dialog.textContent).toMatch(/cannot ask again/);
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Block' }));
+    await waitFor(() => expect(api.blockUser).toHaveBeenCalledWith('cal'));
+  });
+
   it('blocks on confirmation and says so', async () => {
     api.blockUser.mockResolvedValue(undefined);
     load();

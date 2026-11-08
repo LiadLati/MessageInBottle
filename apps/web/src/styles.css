@@ -2857,3 +2857,9 @@ button.avatar {
 .world-header .map-clock {
   font-variant-numeric: tabular-nums;
 }
+
+/* Headings take programmatic focus when a view changes in place (FE-R-006); only a keyboard
+   user, for whom :focus-visible applies, sees the ring. */
+h1[tabindex='-1']:focus:not(:focus-visible) {
+  outline: none;
+}

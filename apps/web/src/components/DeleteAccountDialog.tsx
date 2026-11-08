@@ -2,7 +2,7 @@ import { useEffect, useId, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { ApiError, api } from '../api/client.js';
 import { focusableIn } from '../lib/focusTrap.js';
-import { restoreFocus, useModalKeys } from '../lib/modal.js';
+import { inertAll, restoreFocus, useModalKeys } from '../lib/modal.js';
 import { SupportLink } from './SupportLink.js';
 
 // Settings → Delete account. Deletion is permanent, so it asks for the password again (a
@@ -22,7 +22,7 @@ export function DeleteAccountDialog({
   const [failure, setFailure] = useState<string | null>(null);
   const dialogRef = useRef<HTMLDivElement>(null);
   const titleId = useId();
-  const ids = { p: useId() };
+  const ids = { p: useId(), d: useId() };
 
   useEffect(() => {
     const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null;
@@ -30,10 +30,10 @@ export function DeleteAccountDialog({
     // inert would make the dialog unreachable to both pointer and keyboard.
     const layer = dialogRef.current?.parentElement;
     const siblings = [...document.body.children].filter((el) => el !== layer);
-    for (const el of siblings) el.setAttribute('inert', '');
+    const releaseInert = inertAll(siblings);
     (focusableIn(dialogRef.current!)[0] ?? dialogRef.current)?.focus();
     return () => {
-      for (const el of siblings) el.removeAttribute('inert');
+      releaseInert();
       restoreFocus(previous);
     };
   }, []);
@@ -68,12 +68,15 @@ export function DeleteAccountDialog({
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}
+        // The consequences are the point of this dialog: announce them with its name
+        // (audit FE-R-017).
+        aria-describedby={ids.d}
         tabIndex={-1}
       >
         <h2 id={titleId} className="t-card-title">
           Delete your account
         </h2>
-        <p className="secondary">
+        <p className="secondary" id={ids.d}>
           This is permanent and cannot be undone. Every session ends at once. Your profile, email,
           password, preferences, notifications, friendships, blocks and drafts are removed, the
           letters you received are removed, and the text of every letter you wrote is erased —

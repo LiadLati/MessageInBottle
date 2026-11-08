@@ -25,9 +25,22 @@ interface Props {
   onOpenPolicy: (doc: DocumentId) => void;
 }
 
+function failedOnToken(details: unknown): boolean {
+  return (
+    Array.isArray(details) &&
+    details.some(
+      (d: unknown) =>
+        typeof d === 'object' &&
+        d !== null &&
+        Array.isArray((d as { path?: unknown }).path) &&
+        (d as { path: unknown[] }).path[0] === 'token',
+    )
+  );
+}
+
 // Turns an API failure into one sentence for the person; sign-in failures stay generic on
 // purpose (the server never says whether the username or address exists).
-function describeFailure(err: unknown, mode: Mode): string {
+export function describeFailure(err: unknown, mode: Mode): string {
   if (err instanceof ApiError) {
     if (err.code === UNREACHABLE) return err.message;
     if (err.status === 401) return 'Incorrect username or password.';
@@ -46,6 +59,10 @@ function describeFailure(err: unknown, mode: Mode): string {
         ? `Too many attempts. Try again in about ${mins} ${mins === 1 ? 'minute' : 'minutes'}.`
         : 'Too many attempts. Try again in a few minutes.';
     }
+    // A truncated or mangled link fails validation of its token before the server can say
+    // `reset_invalid`; it is the same thing to the person (audit FE-R-018).
+    if (mode === 'reset' && err.status === 400 && failedOnToken(err.details))
+      return 'This reset link is invalid or has expired. Request a new one.';
     if (err.status === 400) return 'Please check the fields and try again.';
     if (err.status >= 500) return 'Something went wrong on the server. Try again in a moment.';
     return err.message;

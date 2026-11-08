@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react';
+import { useEffect, useRef, type ReactNode } from 'react';
 import { ApiError } from '../api/client.js';
 import { initials } from '../lib/format.js';
 import { Icon } from '../design/Icon.js';
@@ -91,25 +91,47 @@ export function OutcomeChip({ reason }: { reason: 'adrift' | 'sunk' }) {
   );
 }
 
+// `view` names the view on screen when one screen swaps its content in place (a step of the
+// letter, a case opened from a list). When it changes, focus moves to the new heading, so a
+// keyboard or screen-reader user lands at the start of what replaced the control they used,
+// instead of on the page body (audit FE-R-006). `focusOnMount` does the same when a view opens
+// as its own component.
 export function DeckScreen({
   title,
   subtitle,
   actions,
   children,
   wide = false,
+  view,
+  focusOnMount = false,
 }: {
   title: ReactNode;
   subtitle?: ReactNode;
   actions?: ReactNode;
   children: ReactNode;
   wide?: boolean;
+  view?: string;
+  focusOnMount?: boolean;
 }) {
+  const headingRef = useRef<HTMLHeadingElement>(null);
+  const shownView = useRef(view);
+  useEffect(() => {
+    if (focusOnMount) headingRef.current?.focus();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  useEffect(() => {
+    if (view === shownView.current) return;
+    shownView.current = view;
+    headingRef.current?.focus();
+  }, [view]);
   return (
     <section className="deck-screen">
       <div className="deck-column" style={wide ? { maxWidth: 760 } : undefined}>
         <header className="deck-header">
           <div>
-            <h1 className="t-title">{title}</h1>
+            <h1 className="t-title" ref={headingRef} tabIndex={-1}>
+              {title}
+            </h1>
             {subtitle ? <p className="t-meta">{subtitle}</p> : null}
           </div>
           {actions}

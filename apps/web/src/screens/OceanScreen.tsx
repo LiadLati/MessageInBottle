@@ -322,6 +322,14 @@ export function OceanScreen({
     };
   }, [leaveRef, acknowledgeSeen]);
 
+  // Without a map, a sunk bottle is seen in the list instead: shown there counts as seen, so
+  // leaving the screen acknowledges it as leaving the map would (FE-R-014). Otherwise sunk
+  // entries would stay in the list for good.
+  useEffect(() => {
+    if (mapDrawable || isPublic || !showList) return;
+    for (const id of sunkIds) onSeen(id);
+  }, [mapDrawable, isPublic, showList, sunkIds, onSeen]);
+
   const reloadPublic = publicOcean.reload;
   // The sender's own read: never claims the bottle, never takes it off the map.
   const readOwn = async (id: string) => {
@@ -545,7 +553,11 @@ export function OceanScreen({
         </button>
       </div>
 
-      {view.kind === 'clean' && (isPublic ? publicList.length : list.length) > 0 && !viewing ? (
+      {/* Pointer instructions only where there is a map to point at (FE-R-014). */}
+      {mapDrawable &&
+      view.kind === 'clean' &&
+      (isPublic ? publicList.length : list.length) > 0 &&
+      !viewing ? (
         <p className="hint-pill" aria-hidden>
           {isPublic ? 'Tap a bottle adrift' : 'Tap a bottle to follow its journey'}
         </p>

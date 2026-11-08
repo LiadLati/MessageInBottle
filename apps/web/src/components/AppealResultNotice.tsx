@@ -5,7 +5,7 @@ import { api } from '../api/client.js';
 import { SupportLink } from './SupportLink.js';
 import { formatDate } from '../lib/format.js';
 import { focusableIn } from '../lib/focusTrap.js';
-import { useModalKeys } from '../lib/modal.js';
+import { inertAll, useModalKeys } from '../lib/modal.js';
 
 interface Props {
   result: NotificationDto;
@@ -39,9 +39,9 @@ export function AppealResultNotice({ result, onDismissed }: Props) {
 
   useEffect(() => {
     const siblings = [...document.body.children].filter((el) => el !== ref.current?.parentElement);
-    for (const el of siblings) el.setAttribute('inert', '');
+    const releaseInert = inertAll(siblings);
     return () => {
-      for (const el of siblings) el.removeAttribute('inert');
+      releaseInert();
     };
   }, []);
   useEffect(() => {

@@ -4,7 +4,7 @@ import type { OpenedLetterDto } from '@mib/shared';
 import { api } from '../api/client.js';
 import { Icon } from '../design/Icon.js';
 import { focusableIn } from '../lib/focusTrap.js';
-import { restoreFocus, useModalKeys } from '../lib/modal.js';
+import { inertAll, restoreFocus, useModalKeys } from '../lib/modal.js';
 import { formatDuration, prefersReducedMotion } from '../lib/format.js';
 import { LetterPaper } from './LetterPaper.js';
 import { ReportSheet } from './ReportSheet.js';
@@ -69,13 +69,13 @@ export function LetterModal({
     const siblings = [...document.body.children].filter(
       (el) => el !== dialogRef.current?.parentElement,
     );
-    for (const el of siblings) el.setAttribute('inert', '');
+    const releaseInert = inertAll(siblings);
     const bodyOverflow = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
     const focusables = focusableIn(dialogRef.current!);
     (focusables[0] ?? dialogRef.current)?.focus();
     return () => {
-      for (const el of siblings) el.removeAttribute('inert');
+      releaseInert();
       document.body.style.overflow = bodyOverflow;
       restoreFocus(previous);
     };

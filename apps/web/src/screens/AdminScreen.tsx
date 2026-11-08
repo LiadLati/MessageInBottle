@@ -125,6 +125,8 @@ function ReportsSection({
   onBack: () => void;
 }) {
   const list = useAsync(() => api.adminCases(status), [status], 15_000);
+  // Back from a case: the list's heading takes focus (FE-R-006).
+  const [returned, setReturned] = useState(false);
   // Older pages, loaded on request (audit SEC-R-018). The first page keeps polling.
   const older = useOlderPages((cursor) =>
     api.adminCases(status, cursor).then((p) => ({ items: p.cases, next: p.nextCursor ?? null })),
@@ -136,7 +138,10 @@ function ReportsSection({
     return (
       <CaseView
         id={selected}
-        onBack={() => onSelect(null)}
+        onBack={() => {
+          setReturned(true);
+          onSelect(null);
+        }}
         onChanged={async () => {
           onDecided?.();
           await list.reload();
@@ -150,6 +155,7 @@ function ReportsSection({
       subtitle="Reported letters, as cases"
       actions={<BackButton onClick={onBack} />}
       wide
+      focusOnMount={returned}
     >
       {tabs}
       <div
@@ -286,6 +292,7 @@ function CaseView({
       subtitle={c ? `Case ${c.status}` : ''}
       actions={<BackButton onClick={onBack} />}
       wide
+      focusOnMount
     >
       {res.loading || !c ? <Skeleton /> : <CaseBody c={c} />}
       {c?.recused ? (
@@ -612,6 +619,7 @@ function AppealsSection({
   onBack: () => void;
 }) {
   const list = useAsync(() => api.adminAppeals(status), [status], 15_000);
+  const [returned, setReturned] = useState(false);
   const older = useOlderPages((cursor) =>
     api
       .adminAppeals(status, cursor)
@@ -624,7 +632,10 @@ function AppealsSection({
     return (
       <AppealView
         appeal={current}
-        onBack={() => onSelect(null)}
+        onBack={() => {
+          setReturned(true);
+          onSelect(null);
+        }}
         onChanged={async () => {
           onDecided?.();
           await list.reload();
@@ -639,6 +650,7 @@ function AppealsSection({
       subtitle="Decisions the writer asked to be reconsidered"
       actions={<BackButton onClick={onBack} />}
       wide
+      focusOnMount={returned}
     >
       {tabs}
       <div
@@ -782,6 +794,7 @@ function AppealView({
       subtitle={`Appeal ${a.status}`}
       actions={<BackButton onClick={onBack} />}
       wide
+      focusOnMount
     >
       <div className="stack">
         <div className="glass-panel stack">

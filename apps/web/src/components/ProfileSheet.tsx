@@ -5,7 +5,7 @@ import { SupportLink } from './SupportLink.js';
 import { useSession } from '../state/session.js';
 import { Avatar } from './ui.js';
 import { Icon } from '../design/Icon.js';
-import { restoreFocus, useModalKeys } from '../lib/modal.js';
+import { inertAll, restoreFocus, useModalKeys } from '../lib/modal.js';
 import { formatDay } from '../lib/format.js';
 
 interface Props {
@@ -61,10 +61,10 @@ export function ProfileSheet({
     const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     const layer = dialogRef.current?.parentElement;
     const siblings = [...document.body.children].filter((el) => el !== layer);
-    for (const el of siblings) el.setAttribute('inert', '');
+    const releaseInert = inertAll(siblings);
     first.current?.focus();
     return () => {
-      for (const el of siblings) el.removeAttribute('inert');
+      releaseInert();
       restoreFocus(previous);
     };
   }, []);
