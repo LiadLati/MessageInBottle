@@ -136,10 +136,16 @@ const Ok = z.object({ ok: z.boolean() });
 const BottlesList = z.object({ bottles: z.array(SentBottleSummarySchema) });
 const OneBottle = z.object({ bottle: SentBottleSchema });
 const Visibility = z.object({ visibility: OutcomeVisibilitySchema });
-const Cases = z.object({ cases: z.array(AdminCaseSummarySchema) });
+const Cases = z.object({
+  cases: z.array(AdminCaseSummarySchema),
+  nextCursor: z.string().nullable().optional(),
+});
 const OneCase = z.object({ case: AdminCaseDetailSchema });
 const DecidedCase = z.object({ case: AdminCaseDetailSchema, changed: z.boolean() });
-const Appeals = z.object({ appeals: z.array(AdminAppealSchema) });
+const Appeals = z.object({
+  appeals: z.array(AdminAppealSchema),
+  nextCursor: z.string().nullable().optional(),
+});
 const DecidedAppeal = z.object({ appeal: AdminAppealSchema, changed: z.boolean() });
 const Outbox = z.object({
   provider: z.string(),
@@ -284,8 +290,13 @@ export const api = {
   waiveAppeal: (violationId: string) =>
     request('POST', '/moderation/appeals/waive', { violationId }, ViolationNoticeSchema),
   // Admin console. Every one of these is refused by the server unless the account's role says so.
-  adminCases: (status: 'pending' | 'accepted' | 'rejected' | 'all') =>
-    request('GET', `/admin/reports?status=${status}`, undefined, Cases),
+  adminCases: (status: 'pending' | 'accepted' | 'rejected' | 'all', before?: string | null) =>
+    request(
+      'GET',
+      `/admin/reports?status=${status}${before ? `&before=${encodeURIComponent(before)}` : ''}`,
+      undefined,
+      Cases,
+    ),
   adminCase: (id: string) => request('GET', `/admin/reports/${id}`, undefined, OneCase),
   // Deciding echoes the digest of the evidence on screen, so a stale screen cannot decide a case
   // that changed after it was opened.
@@ -311,8 +322,13 @@ export const api = {
   // The moderation badge: undecided work this administrator can act on.
   adminPendingCounts: () =>
     request('GET', '/admin/pending-counts', undefined, AdminPendingCountsSchema),
-  adminAppeals: (status: 'pending' | 'accepted' | 'rejected' | 'all') =>
-    request('GET', `/admin/appeals?status=${status}`, undefined, Appeals),
+  adminAppeals: (status: 'pending' | 'accepted' | 'rejected' | 'all', before?: string | null) =>
+    request(
+      'GET',
+      `/admin/appeals?status=${status}${before ? `&before=${encodeURIComponent(before)}` : ''}`,
+      undefined,
+      Appeals,
+    ),
   adminDecideAppeal: (id: string, outcome: 'accept' | 'reject', reason: string) =>
     request('POST', `/admin/appeals/${id}/${outcome}`, { reason }, DecidedAppeal),
   devStatus: () => request('GET', '/dev/status', undefined, DevStatusSchema),

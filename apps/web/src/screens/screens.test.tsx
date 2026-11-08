@@ -37,7 +37,12 @@ const VIOLATION: ViolationNoticeDto = {
   revokedAt: null,
   acknowledgedAt: null,
   severity: 'standard',
-  bottle: { id: 'btl_1', recipientDisplayName: 'Bea', releasedAt: '2026-09-20T10:00:00.000Z' },
+  bottle: {
+    id: 'btl_1',
+    recipientDisplayName: 'Bea',
+    releasedAt: '2026-09-20T10:00:00.000Z',
+    readByFinder: false,
+  },
   appeal: null,
   appealAvailable: true,
   appealWaivedAt: null,

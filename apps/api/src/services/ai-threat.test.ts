@@ -171,7 +171,7 @@ describe('a reported threat always reaches a person as urgent, and is never deci
     expect(c.decision).toBeNull();
     expect(c.urgentAt).not.toBeNull();
     expect(c.urgentReason).toBe('threat');
-    expect(listCases(w.ctx, 'pending')[0]!.id).toBe(caseId);
+    expect(listCases(w.ctx, 'pending').cases[0]!.id).toBe(caseId);
     const audit = w.db
       .select({ action: t.moderationAudit.action, role: t.moderationAudit.actorRole })
       .from(t.moderationAudit)

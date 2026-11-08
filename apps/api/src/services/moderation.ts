@@ -306,6 +306,14 @@ export function isRestricted(db: DbOrTx, userId: string, now: number): Standing 
   return s.standing === 'suspended' || s.standing === 'banned' ? s : null;
 }
 
+function caseContext(db: DbOrTx, caseId: string): 'shore' | 'public' | undefined {
+  return db
+    .select({ context: t.moderationCases.context })
+    .from(t.moderationCases)
+    .where(eq(t.moderationCases.id, caseId))
+    .get()?.context;
+}
+
 function noticeOf(db: DbOrTx, v: ViolationRow, ordinal: number, now: number): ViolationNoticeDto {
   const bottle = db.select().from(t.bottles).where(eq(t.bottles.id, v.bottleId)).get()!;
   const appeal = db.select().from(t.appeals).where(eq(t.appeals.violationId, v.id)).get();
@@ -326,6 +334,7 @@ function noticeOf(db: DbOrTx, v: ViolationRow, ordinal: number, now: number): Vi
     bottle: {
       id: bottle.id,
       recipientDisplayName: bottle.recipientNameSnapshot,
+      readByFinder: caseContext(db, v.caseId) === 'public',
       releasedAt: iso(bottle.releasedAt),
     },
     appeal: appeal
@@ -576,11 +585,16 @@ function accountZone(tx: DbOrTx, userId: string): string | null {
 export function notifyStanding(
   tx: DbOrTx,
   userId: string,
-  violation: { id: string; recipientName: string; critical?: boolean },
+  violation: { id: string; recipientName: string; readByFinder?: boolean; critical?: boolean },
   standing: Standing,
   now: number,
 ): void {
-  const base = `Your letter to ${violation.recipientName} was reported and, after review, removed for breaking the community rules.`;
+  // A letter reported by a public-ocean finder was never read by its intended recipient, so the
+  // notice must not point the sender at them (audit SEC-R-013).
+  const letter = violation.readByFinder
+    ? `Your letter to ${violation.recipientName}, which was lost at sea and read by a finder,`
+    : `Your letter to ${violation.recipientName}`;
+  const base = `${letter} was reported and, after review, removed for breaking the community rules.`;
   if (violation.critical) {
     enqueueNotification(tx, {
       userId,
@@ -588,7 +602,7 @@ export function notifyStanding(
       kind: 'moderation_banned',
       bottleId: null,
       dedupeKey: `banned:${violation.id}`,
-      message: `Your letter to ${violation.recipientName} was reviewed by a person and confirmed as a critical child-safety violation. Your account is permanently banned. You can still sign in to read this decision, appeal it once within 30 days, contact support, or delete your account.`,
+      message: `${letter} was reviewed by a person and confirmed as a critical child-safety violation. Your account is permanently banned. You can still sign in to read this decision, appeal it once within 30 days, contact support, or delete your account.`,
       now,
     });
   } else if (standing.standing === 'banned') {

@@ -191,8 +191,9 @@ export function blockUser(ctx: AppContext, blockerId: string, username: string):
 }
 
 // A finder blocking the anonymous writer of the bottle they are reading (product decision 12).
-// Only while their one reading is open (not yet finished); the writer's identity is never
-// returned, and the
+// While their one reading is open, or after it was closed by their own report of that letter:
+// reporting with "hide" ends the reading, and it must not also take away the block that D8/D12
+// promise during the session (audit SEC-R-012). The writer's identity is never returned, and the
 // block works like any other from then on (no bottles either way, no public-ocean encounters).
 export function blockFoundWriter(ctx: AppContext, finderId: string, bottleId: string): void {
   const now = ctx.clock.now();
@@ -202,8 +203,21 @@ export function blockFoundWriter(ctx: AppContext, finderId: string, bottleId: st
     .innerJoin(t.bottles, eq(t.bottles.id, t.publicOpenings.bottleId))
     .where(and(eq(t.publicOpenings.bottleId, bottleId), eq(t.publicOpenings.openedById, finderId)))
     .get();
-  if (!row || row.opening.closedAt !== null || row.senderId === finderId) {
-    throw notFound('reading');
+  if (!row || row.senderId === finderId) throw notFound('reading');
+  if (row.opening.closedAt !== null) {
+    const reported = ctx.db
+      .select({ id: t.letterReports.id })
+      .from(t.letterReports)
+      .innerJoin(t.moderationCases, eq(t.moderationCases.id, t.letterReports.caseId))
+      .where(
+        and(
+          eq(t.moderationCases.bottleId, bottleId),
+          eq(t.letterReports.reporterId, finderId),
+          eq(t.letterReports.context, 'public'),
+        ),
+      )
+      .get();
+    if (!reported) throw notFound('reading');
   }
   ctx.db
     .insert(t.blocks)

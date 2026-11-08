@@ -102,8 +102,9 @@ export function LetterModal({
       finishRef.current?.focus();
     }
   }, [confirmingFinish]);
-  const reportDone = ({ hidden }: { hidden: boolean }) => {
+  const reportDone = ({ hidden, blocked }: { hidden: boolean; blocked?: boolean }) => {
     setReporting(false);
+    if (blocked !== undefined) setBlockStage(blocked ? 'done' : 'failed');
     if (hidden) {
       onHidden?.();
       // Hiding a letter ends its reading; nothing is left to confirm.
@@ -211,7 +212,12 @@ export function LetterModal({
         </div>
         {reporting ? (
           <div className="letter-chrome letter-modal-report">
-            <ReportSheet bottleId={b.id} onDone={reportDone} onCancel={() => setReporting(false)} />
+            <ReportSheet
+              bottleId={b.id}
+              onDone={reportDone}
+              onCancel={() => setReporting(false)}
+              offerBlock={oneTime && blockStage !== 'done'}
+            />
           </div>
         ) : null}
         {blockStage === 'confirm' || blockStage === 'busy' ? (

@@ -150,4 +150,29 @@ describe('granting a role', () => {
     expect(res.out).toMatch(/already has the admin role/);
     expect(roleOf('rosa')).toBe('admin');
   });
+
+  it('keeps every grant and revocation in the audit trail, and warns below two admins', () => {
+    const granted = run('grant-admin', ['--username', 'rosa', '--confirm', ids.rosa!]);
+    expect(granted.out).toMatch(/Active administrators now: 1\./);
+    expect(granted.out).toMatch(/fewer than two administrators/);
+    const second = run('grant-admin', ['--username', 'sam', '--confirm', ids.sam!]);
+    expect(second.out).toMatch(/Active administrators now: 2\./);
+    expect(second.out).not.toMatch(/fewer than two/);
+    run('grant-admin', ['--revoke', ids.rosa!]);
+    const trail = db
+      .select()
+      .from(t.moderationAudit)
+      .where(eq(t.moderationAudit.action, 'role_changed'))
+      .all()
+      .map((r) => ({
+        who: r.subjectUserId,
+        ...(JSON.parse(r.detail!) as { from: string; to: string; by: string }),
+      }));
+    expect(trail).toEqual([
+      expect.objectContaining({ who: ids.rosa, from: 'member', to: 'admin' }),
+      expect.objectContaining({ who: ids.sam, from: 'member', to: 'admin' }),
+      expect.objectContaining({ who: ids.rosa, from: 'admin', to: 'member' }),
+    ]);
+    expect(trail.every((r) => /^cli:/.test(r.by))).toBe(true);
+  });
 });

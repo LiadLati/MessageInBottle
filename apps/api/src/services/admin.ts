@@ -43,8 +43,11 @@ function person(db: DbOrTx, userId: string): PersonDto {
   return u ?? { id: userId, username: '(deleted)', displayName: 'Deleted user' };
 }
 
-function aiOf(c: CaseRow): AiReviewDto {
+function aiOf(c: CaseRow, aiEnabled: boolean): AiReviewDto {
   return {
+    // Whether the review model runs on this server at all (MIB_AI_ENABLED). When it does not, a
+    // queued case is not "waiting for the model": nothing will ever answer (audit FE-R-005).
+    enabled: aiEnabled,
     status: c.aiStatus,
     verdict: c.aiVerdict,
     reason: c.aiReason,
@@ -60,7 +63,7 @@ function aiOf(c: CaseRow): AiReviewDto {
   };
 }
 
-function summaryOf(db: DbOrTx, c: CaseRow): AdminCaseSummaryDto {
+function summaryOf(db: DbOrTx, c: CaseRow, aiEnabled: boolean): AdminCaseSummaryDto {
   const reports = db
     .select()
     .from(t.letterReports)
@@ -86,7 +89,7 @@ function summaryOf(db: DbOrTx, c: CaseRow): AdminCaseSummaryDto {
     reasons: [...new Set(reports.map((r) => r.reason as ReportReason))],
     firstReportedAt: iso(reports[0]?.createdAt ?? c.createdAt),
     latestReportAt: iso(reports.at(-1)?.createdAt ?? c.updatedAt),
-    ai: aiOf(c),
+    ai: aiOf(c, aiEnabled),
     decision:
       c.decidedOutcome && c.decidedAt && c.decidedBy
         ? {
@@ -107,6 +110,7 @@ function detailOf(
   afterDecisionMs: number,
   viewerId: string | null,
   now: number,
+  aiEnabled: boolean,
 ): AdminCaseDetailDto {
   const bottle = db.select().from(t.bottles).where(eq(t.bottles.id, c.bottleId)).get()!;
   const reports = db
@@ -119,8 +123,12 @@ function detailOf(
   const appeal = violation
     ? db.select().from(t.appeals).where(eq(t.appeals.violationId, violation.id)).get()
     : undefined;
+  // An administrator who is a party to the case (sender, recipient or reporter) may not decide
+  // it, and is not shown who else reported it, what they wrote, or the sender's appeal text
+  // (audit SEC-R-003). They still see their own report and, as the sender, their own appeal.
+  const recused = viewerId !== null && partiesOf(db, c).has(viewerId);
   return {
-    ...summaryOf(db, c),
+    ...summaryOf(db, c, aiEnabled),
     letter: {
       text: c.evidenceText,
       font: c.evidenceFont as LetterFont,
@@ -128,20 +136,23 @@ function detailOf(
       redactedAt: c.evidenceRedactedAt === null ? null : iso(c.evidenceRedactedAt),
     },
     releasedAt: iso(bottle.releasedAt),
-    reports: reports.map((r) => ({
-      id: r.id,
-      reason: r.reason as ReportReason,
-      explanation: r.explanation,
-      context: r.context,
-      hidden: r.hidden,
-      createdAt: iso(r.createdAt),
-      reporter: person(db, r.reporterId),
-    })),
+    reports: reports.map((r) => {
+      const shown = !recused || r.reporterId === viewerId;
+      return {
+        id: r.id,
+        reason: r.reason as ReportReason,
+        explanation: shown ? r.explanation : null,
+        context: r.context,
+        hidden: r.hidden,
+        createdAt: iso(r.createdAt),
+        reporter: shown ? person(db, r.reporterId) : null,
+      };
+    }),
     appeal: appeal
       ? {
           id: appeal.id,
           status: appeal.status,
-          text: appeal.text,
+          text: !recused || appeal.userId === viewerId ? appeal.text : '',
           createdAt: iso(appeal.createdAt),
         }
       : null,
@@ -176,7 +187,7 @@ function detailOf(
       : null,
     evidenceDigest: sha256(c.evidenceText),
     consequence: consequenceOf(db, c.senderId),
-    recused: viewerId !== null && partiesOf(db, c).has(viewerId),
+    recused,
   };
 }
 
@@ -197,7 +208,7 @@ function assertNotParty(db: DbOrTx, admin: AuthUser | null, c: CaseRow): void {
     throw new AppError(
       403,
       'recused',
-      'You are the sender, the recipient or a reporter on this case, so another administrator must decide it.',
+      'You are the sender, the recipient or a reporter on this case, so another administrator must act on it.',
     );
 }
 
@@ -219,16 +230,45 @@ function consequenceOf(
   return { violationsInForce: inForce.length, ifUpheld };
 }
 
-export function listCases(ctx: AppContext, status: CaseStatus | 'all'): AdminCaseSummaryDto[] {
+// One page of the queue (audit SEC-R-018): urgent reviews first (product decision 2), then the
+// most recent activity, as before; `before` continues after the last case of the previous page,
+// so a queue longer than one page is never silently cut off.
+export const ADMIN_PAGE_SIZE = 100;
+
+function parseCursor(raw: string | undefined, parts: number): string[] | null {
+  if (!raw) return null;
+  const bits = raw.split('.');
+  if (bits.length !== parts || bits.some((b) => !/^[A-Za-z0-9_-]+$/.test(b)))
+    throw badRequest('bad_cursor', 'unrecognised page cursor');
+  return bits;
+}
+
+export function listCases(
+  ctx: AppContext,
+  status: CaseStatus | 'all',
+  page: { before?: string | undefined; limit?: number | undefined } = {},
+): { cases: AdminCaseSummaryDto[]; nextCursor: string | null } {
+  const limit = Math.min(Math.max(page.limit ?? ADMIN_PAGE_SIZE, 1), ADMIN_PAGE_SIZE);
+  const cursor = parseCursor(page.before, 3);
+  const urgentLast = sql<number>`(${t.moderationCases.urgentAt} is null)`;
+  const after = cursor
+    ? sql`(${urgentLast} > ${Number(cursor[0])} or (${urgentLast} = ${Number(cursor[0])} and (${t.moderationCases.updatedAt} < ${Number(cursor[1])} or (${t.moderationCases.updatedAt} = ${Number(cursor[1])} and ${t.moderationCases.id} < ${cursor[2]}))))`
+    : undefined;
   const rows = ctx.db
     .select()
     .from(t.moderationCases)
-    .where(status === 'all' ? undefined : eq(t.moderationCases.status, status))
-    // Urgent child-safety reviews first (product decision 2), then the most recent activity.
-    .orderBy(sql`${t.moderationCases.urgentAt} is null`, desc(t.moderationCases.updatedAt))
-    .limit(200)
+    .where(and(status === 'all' ? undefined : eq(t.moderationCases.status, status), after))
+    .orderBy(urgentLast, desc(t.moderationCases.updatedAt), desc(t.moderationCases.id))
+    .limit(limit + 1)
     .all();
-  return rows.map((c) => summaryOf(ctx.db, c));
+  const more = rows.length > limit;
+  const shown = rows.slice(0, limit);
+  const last = shown.at(-1);
+  return {
+    cases: shown.map((c) => summaryOf(ctx.db, c, ctx.config.ai.enabled)),
+    nextCursor:
+      more && last ? `${last.urgentAt === null ? 1 : 0}.${last.updatedAt}.${last.id}` : null,
+  };
 }
 
 export function getCase(
@@ -244,7 +284,53 @@ export function getCase(
     ctx.config.retention.afterDecisionMs,
     viewer?.id ?? null,
     ctx.realClock.now(),
+    ctx.config.ai.enabled,
   );
+}
+
+// Evidence reads are logged (audit SEC-R-003): who opened which case's letter, reports and
+// appeal, and when. One row per administrator and case per half hour, so a screen that is
+// re-read while it stays open does not flood the trail. The row holds ids only.
+const EVIDENCE_VIEW_WINDOW_MS = 30 * 60 * 1000;
+
+export function recordEvidenceViews(ctx: AppContext, admin: AuthUser, caseIds: string[]): void {
+  if (caseIds.length === 0) return;
+  const now = ctx.realClock.now();
+  ctx.db.transaction((tx) => {
+    for (const caseId of new Set(caseIds)) {
+      const recent = tx
+        .select({ id: t.moderationAudit.id })
+        .from(t.moderationAudit)
+        .where(
+          and(
+            eq(t.moderationAudit.caseId, caseId),
+            eq(t.moderationAudit.action, 'evidence_viewed'),
+            eq(t.moderationAudit.actorUserId, admin.id),
+            sql`${t.moderationAudit.createdAt} > ${now - EVIDENCE_VIEW_WINDOW_MS}`,
+          ),
+        )
+        .get();
+      if (recent) continue;
+      const c = tx
+        .select({ senderId: t.moderationCases.senderId })
+        .from(t.moderationCases)
+        .where(eq(t.moderationCases.id, caseId))
+        .get();
+      if (!c) continue;
+      writeAudit(
+        tx,
+        {
+          action: 'evidence_viewed',
+          caseId,
+          subjectUserId: c.senderId,
+          actorUserId: admin.id,
+          actorRole: 'admin',
+          detail: 'case evidence opened in the moderation console',
+        },
+        now,
+      );
+    }
+  });
 }
 
 // Decides a pending case. `admin` is null when the model decides under MIB_AI_AUTO_DECIDE.
@@ -359,7 +445,11 @@ export function decideCase(
     notifyStanding(
       tx,
       c.senderId,
-      { id: violationId, recipientName: bottle.recipientNameSnapshot },
+      {
+        id: violationId,
+        recipientName: bottle.recipientNameSnapshot,
+        readByFinder: c.context === 'public',
+      },
       standing,
       now,
     );
@@ -400,13 +490,17 @@ function appealOf(
   a: typeof t.appeals.$inferSelect,
   afterDecisionMs: number,
   now: number,
+  viewerId: string | null,
+  aiEnabled: boolean,
 ): AdminAppealDto {
   const v = db.select().from(t.violations).where(eq(t.violations.id, a.violationId)).get()!;
   const c = db.select().from(t.moderationCases).where(eq(t.moderationCases.id, v.caseId)).get()!;
+  const detail = detailOf(db, c, afterDecisionMs, viewerId, now, aiEnabled);
   return {
     id: a.id,
     status: a.status,
-    text: a.text,
+    // Hidden from a party administrator other than the appellant (audit SEC-R-003).
+    text: detail.recused && a.userId !== viewerId ? '' : a.text,
     createdAt: iso(a.createdAt),
     appellant: person(db, a.userId),
     violation: {
@@ -415,7 +509,7 @@ function appealOf(
       decidedAt: iso(v.decidedAt),
       revokedAt: isoOrNull(v.revokedAt),
     },
-    case: detailOf(db, c, afterDecisionMs, null, now),
+    case: detail,
     decision:
       a.decidedAt && a.decidedByUserId && a.status !== 'pending'
         ? {
@@ -431,21 +525,55 @@ function appealOf(
 export function listAppeals(
   ctx: AppContext,
   status: 'pending' | 'accepted' | 'rejected' | 'all',
-): AdminAppealDto[] {
-  return ctx.db
+  viewer: AuthUser | null = null,
+  page: { before?: string | undefined; limit?: number | undefined } = {},
+): { appeals: AdminAppealDto[]; nextCursor: string | null } {
+  const limit = Math.min(Math.max(page.limit ?? ADMIN_PAGE_SIZE, 1), ADMIN_PAGE_SIZE);
+  const cursor = parseCursor(page.before, 2);
+  const after = cursor
+    ? sql`(${t.appeals.createdAt} < ${Number(cursor[0])} or (${t.appeals.createdAt} = ${Number(cursor[0])} and ${t.appeals.id} < ${cursor[1]}))`
+    : undefined;
+  const rows = ctx.db
     .select()
     .from(t.appeals)
-    .where(status === 'all' ? undefined : eq(t.appeals.status, status))
-    .orderBy(desc(t.appeals.createdAt))
-    .limit(200)
-    .all()
-    .map((a) => appealOf(ctx.db, a, ctx.config.retention.afterDecisionMs, ctx.realClock.now()));
+    .where(and(status === 'all' ? undefined : eq(t.appeals.status, status), after))
+    .orderBy(desc(t.appeals.createdAt), desc(t.appeals.id))
+    .limit(limit + 1)
+    .all();
+  const more = rows.length > limit;
+  const shown = rows.slice(0, limit);
+  const last = shown.at(-1);
+  const now = ctx.realClock.now();
+  return {
+    appeals: shown.map((a) =>
+      appealOf(
+        ctx.db,
+        a,
+        ctx.config.retention.afterDecisionMs,
+        now,
+        viewer?.id ?? null,
+        ctx.config.ai.enabled,
+      ),
+    ),
+    nextCursor: more && last ? `${last.createdAt}.${last.id}` : null,
+  };
 }
 
-export function getAppeal(ctx: AppContext, appealId: string): AdminAppealDto {
+export function getAppeal(
+  ctx: AppContext,
+  appealId: string,
+  viewer: AuthUser | null = null,
+): AdminAppealDto {
   const a = ctx.db.select().from(t.appeals).where(eq(t.appeals.id, appealId)).get();
   if (!a) throw notFound('appeal');
-  return appealOf(ctx.db, a, ctx.config.retention.afterDecisionMs, ctx.realClock.now());
+  return appealOf(
+    ctx.db,
+    a,
+    ctx.config.retention.afterDecisionMs,
+    ctx.realClock.now(),
+    viewer?.id ?? null,
+    ctx.config.ai.enabled,
+  );
 }
 
 // The appeal result, as the appellant reads it in the notification and the one-time popup
@@ -673,6 +801,11 @@ export function decideCaseCritical(
     if (violation.revokedAt !== null)
       throw conflict('already_revoked', 'This violation was revoked on appeal.');
     const escalated = c.status === 'accepted';
+    // Already confirmed critical: a replay (a double submit, a retried request, a second
+    // administrator confirming the same case) changes nothing. It must not write new audit
+    // rows, restart the appeal window, clear the notice state or move the retention anchor
+    // (audit SEC-R-005). The first confirmation and its reason stand.
+    if (escalated && violation.severity === 'critical') return;
     // Escalating an ordinary violation changes its consequence to a permanent ban. When no
     // appeal was ever filed — it was waived, or its window lapsed, or it is still open — the
     // person gets one appeal opportunity against the ban, with a fresh 30-day window from
@@ -743,13 +876,18 @@ export function decideCaseCritical(
     notifyStanding(
       tx,
       c.senderId,
-      { id: violation.id, recipientName: bottle.recipientNameSnapshot, critical: true },
+      {
+        id: violation.id,
+        recipientName: bottle.recipientNameSnapshot,
+        readByFinder: c.context === 'public',
+        critical: true,
+      },
       standingOf(tx, c.senderId, now),
       now,
     );
     applyStandingEffects(ctx, tx, c.senderId, now);
   });
-  return getCase(ctx, caseId);
+  return getCase(ctx, caseId, admin);
 }
 
 // ---------- legal and child-safety holds ----------
@@ -770,6 +908,8 @@ export function placeHold(
   ctx.db.transaction((tx) => {
     const c = tx.select().from(t.moderationCases).where(eq(t.moderationCases.id, caseId)).get();
     if (!c) throw notFound('case');
+    // A party may not decide how long the evidence about them is kept (audit SEC-R-003).
+    assertNotParty(tx, admin, c);
     if (c.evidenceRedactedAt !== null)
       throw conflict('already_redacted', 'This case’s evidence has already been redacted.');
     tx.update(t.moderationCases)
@@ -799,7 +939,7 @@ export function placeHold(
       now,
     );
   });
-  return getCase(ctx, caseId);
+  return getCase(ctx, caseId, admin);
 }
 
 export function releaseHold(ctx: AppContext, admin: AuthUser, caseId: string): AdminCaseDetailDto {
@@ -807,6 +947,7 @@ export function releaseHold(ctx: AppContext, admin: AuthUser, caseId: string): A
   ctx.db.transaction((tx) => {
     const c = tx.select().from(t.moderationCases).where(eq(t.moderationCases.id, caseId)).get();
     if (!c) throw notFound('case');
+    assertNotParty(tx, admin, c);
     if (c.holdReason === null || c.holdReleasedAt !== null)
       throw conflict('no_hold', 'This case is not under a hold.');
     tx.update(t.moderationCases)
@@ -826,5 +967,5 @@ export function releaseHold(ctx: AppContext, admin: AuthUser, caseId: string): A
       now,
     );
   });
-  return getCase(ctx, caseId);
+  return getCase(ctx, caseId, admin);
 }

@@ -18,12 +18,14 @@
 // `admin` and `developer` are disjoint: granting one replaces the other rather than adding to
 // it, and the tool says so before it does it.
 import os from 'node:os';
-import { eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import { normalizeEmail, normalizeUsername } from '@mib/shared';
 import { loadEnvFiles } from '../lib/env.js';
 import { loadConfig } from '../config.js';
 import { createDb, runMigrations } from '../db/client.js';
 import * as t from '../db/schema.js';
+import type { DbOrTx } from '../db/client.js';
+import { writeAudit } from '../services/audit.js';
 
 export type GrantableRole = 'admin' | 'developer';
 
@@ -33,6 +35,47 @@ const DESCRIPTION: Record<GrantableRole, string> = {
     'use the DEV simulation panel, and only outside production. It grants NO moderation\n' +
     '  authority whatsoever: admin routes answer 403 for it.',
 };
+
+// Every grant and revocation is kept in the append-only moderation audit trail, so the history
+// of who held a role, and who changed it, survives the next change to the users row (audit
+// SEC-R-016). The operator is recorded in `detail`; there is no administrator account behind
+// a shell command, so the actor is the system.
+function recordRoleChange(
+  db: DbOrTx,
+  userId: string,
+  from: string,
+  to: string,
+  by: string,
+  now: number,
+): void {
+  writeAudit(
+    db,
+    {
+      action: 'role_changed',
+      subjectUserId: userId,
+      actorRole: 'system',
+      detail: JSON.stringify({ from, to, by }),
+    },
+    now,
+  );
+}
+
+// A single administrator cannot decide any case they are a party to, so such a case would wait
+// for ever (audit SEC-R-004). The tool says how many active administrators there are after
+// every change, and warns below two. It does not refuse: how many to appoint is the owner's call.
+function reportAdminCount(db: DbOrTx): void {
+  const n = db
+    .select({ id: t.users.id })
+    .from(t.users)
+    .where(and(eq(t.users.role, 'admin'), eq(t.users.status, 'active')))
+    .all().length;
+  console.log(`Active administrators now: ${n}.`);
+  if (n < 2)
+    console.log(
+      'Warning: with fewer than two administrators, a report the administrator is a party to\n' +
+        '  (as sender, recipient or reporter) cannot be decided by anyone. See docs/DEPLOYMENT.md §6.',
+    );
+}
 
 function arg(name: string): string | undefined {
   const i = process.argv.indexOf(`--${name}`);
@@ -67,11 +110,15 @@ export function runGrantCli(role: GrantableRole): void {
       );
       process.exit(0);
     }
-    db.update(t.users)
-      .set({ role: 'member', roleGrantedAt: now, roleGrantedBy: by })
-      .where(eq(t.users.id, revoke))
-      .run();
+    db.transaction((tx) => {
+      tx.update(t.users)
+        .set({ role: 'member', roleGrantedAt: now, roleGrantedBy: by })
+        .where(eq(t.users.id, revoke))
+        .run();
+      recordRoleChange(tx, row.id, role, 'member', by, now);
+    });
     console.log(`The ${role} role was revoked from ${row.username} (${row.id}) by ${by}.`);
+    if (role === 'admin') reportAdminCount(db);
     process.exit(0);
   }
 
@@ -126,11 +173,15 @@ export function runGrantCli(role: GrantableRole): void {
     process.exit(0);
   }
   const replaced = user.role !== 'member' ? ` (replacing ${user.role})` : '';
-  db.update(t.users)
-    .set({ role, roleGrantedAt: now, roleGrantedBy: by })
-    .where(eq(t.users.id, user.id))
-    .run();
+  db.transaction((tx) => {
+    tx.update(t.users)
+      .set({ role, roleGrantedAt: now, roleGrantedBy: by })
+      .where(eq(t.users.id, user.id))
+      .run();
+    recordRoleChange(tx, user.id, user.role, role, by, now);
+  });
   console.log(
     `\nThe ${role} role was granted to ${user.username} (${user.id})${replaced} by ${by}.`,
   );
+  if (role === 'admin' || user.role === 'admin') reportAdminCount(db);
 }

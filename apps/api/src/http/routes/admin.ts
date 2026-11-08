@@ -15,6 +15,7 @@ import {
   listCases,
   pendingCounts,
   placeHold,
+  recordEvidenceViews,
   releaseHold,
 } from '../../services/admin.js';
 import { readAudit } from '../../services/audit.js';
@@ -49,11 +50,19 @@ export function adminRoutes() {
     return c.json(pendingCounts(c.get('ctx'), c.get('user')));
   });
   r.get('/reports', (c) =>
-    c.json({ cases: listCases(c.get('ctx'), statusOf(c.req.query('status'))) }),
+    c.json(
+      listCases(c.get('ctx'), statusOf(c.req.query('status')), {
+        before: c.req.query('before') || undefined,
+      }),
+    ),
   );
-  r.get('/reports/:id', (c) =>
-    c.json({ case: getCase(c.get('ctx'), c.req.param('id'), c.get('user')) }),
-  );
+  // Opening a case shows its evidence, so the read is recorded (audit SEC-R-003).
+  r.get('/reports/:id', (c) => {
+    const ctx = c.get('ctx');
+    const found = getCase(ctx, c.req.param('id'), c.get('user'));
+    recordEvidenceViews(ctx, c.get('user'), [found.id]);
+    return c.json({ case: found });
+  });
   r.post('/reports/:id/accept', jsonBody(CaseDecisionRequestSchema), (c) => {
     const ctx = c.get('ctx');
     const body = c.req.valid('json');
@@ -114,10 +123,25 @@ export function adminRoutes() {
       throw badRequest('filter_required', 'give ?subject=<user id> or ?case=<case id>');
     return c.json({ entries: readAudit(c.get('ctx').db, { subjectUserId, caseId }) });
   });
-  r.get('/appeals', (c) =>
-    c.json({ appeals: listAppeals(c.get('ctx'), statusOf(c.req.query('status'))) }),
-  );
-  r.get('/appeals/:id', (c) => c.json({ appeal: getAppeal(c.get('ctx'), c.req.param('id')) }));
+  // Each listed appeal carries its case's evidence, so listing records a view of each case.
+  r.get('/appeals', (c) => {
+    const ctx = c.get('ctx');
+    const page = listAppeals(ctx, statusOf(c.req.query('status')), c.get('user'), {
+      before: c.req.query('before') || undefined,
+    });
+    recordEvidenceViews(
+      ctx,
+      c.get('user'),
+      page.appeals.map((a) => a.case.id),
+    );
+    return c.json(page);
+  });
+  r.get('/appeals/:id', (c) => {
+    const ctx = c.get('ctx');
+    const found = getAppeal(ctx, c.req.param('id'), c.get('user'));
+    recordEvidenceViews(ctx, c.get('user'), [found.case.id]);
+    return c.json({ appeal: found });
+  });
   r.post('/appeals/:id/accept', jsonBody(DecisionRequestSchema), (c) => {
     const ctx = c.get('ctx');
     const changed = decideAppeal(
@@ -127,7 +151,7 @@ export function adminRoutes() {
       'accepted',
       requireReason(c.req.valid('json').reason, 'Accepting an appeal'),
     );
-    return c.json({ appeal: getAppeal(ctx, c.req.param('id')), changed });
+    return c.json({ appeal: getAppeal(ctx, c.req.param('id'), c.get('user')), changed });
   });
   r.post('/appeals/:id/reject', jsonBody(DecisionRequestSchema), (c) => {
     const ctx = c.get('ctx');
@@ -138,7 +162,7 @@ export function adminRoutes() {
       'rejected',
       requireReason(c.req.valid('json').reason, 'Rejecting an appeal'),
     );
-    return c.json({ appeal: getAppeal(ctx, c.req.param('id')), changed });
+    return c.json({ appeal: getAppeal(ctx, c.req.param('id'), c.get('user')), changed });
   });
   return r;
 }

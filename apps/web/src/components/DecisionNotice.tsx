@@ -110,9 +110,10 @@ export function DecisionNotice({ notice, onResolved }: Props) {
             <div id={bodyId} className="stack">
               <p className="secondary">
                 Your letter to {notice.bottle.recipientDisplayName}, released{' '}
-                {formatDate(notice.bottle.releasedAt)}, was reported for{' '}
-                <strong>{REPORT_REASON_LABELS[notice.category].toLowerCase()}</strong> and, after
-                review by a person, removed for breaking the Community Rules.
+                {formatDate(notice.bottle.releasedAt)}
+                {notice.bottle.readByFinder ? ', lost at sea and read by a finder,' : ','} was
+                reported for <strong>{REPORT_REASON_LABELS[notice.category].toLowerCase()}</strong>{' '}
+                and, after review by a person, removed for breaking the Community Rules.
               </p>
               <p className="secondary">{ladder}</p>
               <p className="note amber">
@@ -140,9 +141,10 @@ export function DecisionNotice({ notice, onResolved }: Props) {
             <div id={bodyId} className="stack">
               <p className="secondary">
                 Your letter to {notice.bottle.recipientDisplayName}, released{' '}
-                {formatDate(notice.bottle.releasedAt)}, was reported for{' '}
-                <strong>{REPORT_REASON_LABELS[notice.category].toLowerCase()}</strong> and, after
-                review by a person, removed for breaking the Community Rules.
+                {formatDate(notice.bottle.releasedAt)}
+                {notice.bottle.readByFinder ? ', lost at sea and read by a finder,' : ','} was
+                reported for <strong>{REPORT_REASON_LABELS[notice.category].toLowerCase()}</strong>{' '}
+                and, after review by a person, removed for breaking the Community Rules.
               </p>
               <p className="secondary">{ladder}</p>
               {notice.appealReopenedAt ? (
