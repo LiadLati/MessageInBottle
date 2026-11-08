@@ -13,6 +13,8 @@ dist/
 *.sqlite-journal
 *.sqlite-wal
 *.sqlite-shm
+*.sqlite.lock
+*.sqlite.process-lock
 apps/api/data/
 
 # logs and test artifacts

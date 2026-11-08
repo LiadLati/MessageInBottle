@@ -1,51 +1,58 @@
-import fs from 'node:fs';
+import Database from 'better-sqlite3';
 
-// One API process per database file (audit ARCH-004). The journey, AI-review and retention
-// workers run inside the API, and rate limits live in its memory; a second process on the same
-// file would run every worker twice and double every limit. The server therefore takes an
-// exclusive lock file beside the database and refuses to start while another live process holds
-// it. A lock left by a process that died is recognised by its PID and taken over.
+// One API process per database file (audit ARCH-004, re-audit ARCH-R-003). The journey,
+// AI-review and retention workers run inside the API, and rate limits live in its memory; a
+// second process on the same file would run every worker twice and double every limit.
+//
+// The lock is an exclusive SQLite lock on a small companion file, `<database>.process-lock`,
+// held open for the life of the process. The operating system holds it, not a PID written in a
+// file, so:
+//   • it is released the moment the holding process exits or is killed, with nothing stale to
+//     clean up;
+//   • it is honoured between containers that mount the same volume on one host, where PIDs are
+//     meaningless (two containers can both be PID 1), which the earlier PID file was not;
+//   • it is honoured between two openings in the same process too (SQLite tracks its own locks
+//     per file), which is what the tests rely on.
+// Like SQLite itself it relies on working file locks, so the database must not be on a network
+// file system; docs/DEPLOYMENT.md requires a local volume and one replica.
 //
 // Command-line tools (grants, backups, retention) do not take it: they are safe alongside the
-// server through SQLite's own locking.
+// server through SQLite's own locking on the database file.
 export class ProcessLockError extends Error {
   override readonly name = 'ProcessLockError';
 }
 
-function alive(pid: number): boolean {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (err) {
-    // EPERM: it exists but belongs to someone else — still alive.
-    return (err as NodeJS.ErrnoException).code === 'EPERM';
-  }
+export function processLockPath(databasePath: string): string {
+  return `${databasePath}.process-lock`;
 }
 
-export function acquireProcessLock(databasePath: string, pid = process.pid): () => void {
+export function acquireProcessLock(databasePath: string): () => void {
   if (databasePath === ':memory:') return () => {};
-  const file = `${databasePath}.lock`;
-  for (let attempt = 0; attempt < 2; attempt++) {
-    try {
-      fs.writeFileSync(file, String(pid), { flag: 'wx' });
-      return () => {
-        try {
-          if (fs.readFileSync(file, 'utf8').trim() === String(pid)) fs.rmSync(file);
-        } catch {
-          /* already gone */
-        }
-      };
-    } catch (err) {
-      if ((err as NodeJS.ErrnoException).code !== 'EEXIST') throw err;
-      const holder = Number(fs.readFileSync(file, 'utf8').trim());
-      if (Number.isInteger(holder) && holder > 0 && holder !== pid && alive(holder))
-        throw new ProcessLockError(
-          `Another SeaYou API process (pid ${holder}) is already running on ${databasePath}. ` +
-            'Run exactly one API process per database file.',
-        );
-      // Stale: the process that held it is gone. Remove it and try once more.
-      fs.rmSync(file, { force: true });
-    }
+  const file = processLockPath(databasePath);
+  const lock = new Database(file, { timeout: 0 });
+  try {
+    lock.pragma('journal_mode = DELETE');
+    lock.pragma('locking_mode = EXCLUSIVE');
+    // Takes the exclusive file lock now and keeps it: the transaction is never committed.
+    lock.exec('BEGIN EXCLUSIVE');
+  } catch (err) {
+    lock.close();
+    if ((err as { code?: string }).code?.startsWith('SQLITE_BUSY'))
+      throw new ProcessLockError(
+        `Another SeaYou API process is already running on ${databasePath}. ` +
+          'Run exactly one API process per database file.',
+      );
+    throw err;
   }
-  throw new ProcessLockError(`Could not take the process lock ${file}.`);
+  let released = false;
+  return () => {
+    if (released) return;
+    released = true;
+    try {
+      lock.exec('ROLLBACK');
+    } catch {
+      /* nothing open */
+    }
+    lock.close();
+  };
 }
