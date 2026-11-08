@@ -24,9 +24,10 @@ const ids: Record<string, string> = {};
 
 function run(script: 'grant-admin' | 'grant-developer', args: string[]) {
   try {
+    // Node itself with tsx as a loader: one process per command, not a wrapper and a child.
     const stdout = execFileSync(
-      path.join(API_ROOT, 'node_modules', '.bin', 'tsx'),
-      [path.join(API_ROOT, 'src', 'tools', `${script}.ts`), ...args],
+      process.execPath,
+      ['--import', 'tsx', path.join(API_ROOT, 'src', 'tools', `${script}.ts`), ...args],
       { cwd: API_ROOT, env: { ...process.env, MIB_DATABASE_PATH: dbPath }, encoding: 'utf8' },
     );
     return { code: 0, out: stdout };
@@ -78,7 +79,10 @@ afterEach(() => {
   fs.rmSync(dir, { recursive: true, force: true });
 });
 
-describe('granting a role', () => {
+// Each command is a real Node process (about 0.8 s to start and migrate at idle, two to three
+// times that while the other packages' suites run alongside), and a test runs up to four of
+// them. The budget is for those processes, stated here, not a margin for slow assertions.
+describe('granting a role', { timeout: 30_000 }, () => {
   it('only reports the account when asked to look it up, and changes nothing', () => {
     const res = run('grant-admin', ['--email', 'rosa@example.test']);
     expect(res.code).toBe(0);
