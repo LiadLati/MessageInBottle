@@ -12,6 +12,7 @@ const api = vi.hoisted(() => ({
   blockedUsers: vi.fn(),
   presentDecision: vi.fn(),
   notifications: vi.fn(),
+  adminAppeals: vi.fn(),
 }));
 vi.mock('../api/client.js', async (actual) => ({
   ...(await actual<typeof ClientModule>()),
@@ -21,6 +22,7 @@ vi.mock('../api/client.js', async (actual) => ({
 import { ApiError } from '../api/client.js';
 import { inertAll } from '../lib/modal.js';
 import { describeFailure } from '../screens/LoginScreen.js';
+import { AdminScreen } from '../screens/AdminScreen.js';
 import { NotificationsScreen } from '../screens/NotificationsScreen.js';
 import { BlockedUsersDialog } from './BlockedUsersDialog.js';
 import { DecisionNotice } from './DecisionNotice.js';
@@ -254,5 +256,83 @@ describe('focus on in-place view changes (FE-R-006)', () => {
       </DeckScreen>,
     );
     expect(document.activeElement).toBe(screen.getByRole('heading', { name: 'Report' }));
+  });
+});
+
+// SEC-R-003 in the console: an administrator who is part of the case sees why the appeal text
+// is missing, and is not offered a decision the server would refuse.
+describe('an appeal the viewing administrator is part of', () => {
+  it('explains the hidden text and offers no decision', async () => {
+    const person = (id: string) => ({ id, username: id, displayName: id.toUpperCase() });
+    api.adminAppeals.mockResolvedValue({
+      appeals: [
+        {
+          id: 'apl_1',
+          status: 'pending',
+          text: '',
+          createdAt: '2026-09-20T10:00:00.000Z',
+          appellant: person('ada'),
+          violation: {
+            id: 'vio_1',
+            category: 'harassment',
+            decidedAt: '2026-09-19T10:00:00.000Z',
+            revokedAt: null,
+          },
+          case: {
+            id: 'cas_1',
+            status: 'accepted',
+            urgentAt: null,
+            urgentReason: null,
+            bottleId: 'btl_1',
+            context: 'shore',
+            sender: person('ada'),
+            intendedRecipient: person('bo'),
+            reportCount: 1,
+            reasons: ['harassment'],
+            firstReportedAt: '2026-09-18T10:00:00.000Z',
+            latestReportAt: '2026-09-18T10:00:00.000Z',
+            ai: {
+              enabled: false,
+              status: 'queued',
+              verdict: null,
+              reason: null,
+              uncertainty: null,
+              translation: null,
+              language: null,
+              model: null,
+              attempts: 0,
+              completedAt: null,
+              nextAttemptAt: null,
+              lastError: null,
+              childSafety: false,
+            },
+            decision: null,
+            violationId: 'vio_1',
+            letter: { text: 'x', font: 'serif', characters: 1, redactedAt: null },
+            releasedAt: '2026-09-17T10:00:00.000Z',
+            reports: [],
+            appeal: {
+              id: 'apl_1',
+              status: 'pending',
+              text: '',
+              createdAt: '2026-09-20T10:00:00.000Z',
+            },
+            retention: { finalAt: null, redactableAt: null, hold: 'appeal_pending' },
+            hold: null,
+            violation: null,
+            evidenceDigest: 'a'.repeat(64),
+            consequence: { violationsInForce: 1, ifUpheld: 'warning' },
+            recused: true,
+          },
+          decision: null,
+        },
+      ],
+      nextCursor: null,
+    });
+    render(<AdminScreen section="appeals" onSection={vi.fn()} onBack={vi.fn()} />);
+    fireEvent.click(await screen.findByRole('button', { name: /ADA/ }));
+    expect(await screen.findByText(/the appeal text is hidden from you/)).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Accept appeal' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Reject appeal' })).toBeNull();
   });
 });

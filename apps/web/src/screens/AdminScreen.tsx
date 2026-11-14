@@ -144,6 +144,7 @@ function ReportsSection({
         }}
         onChanged={async () => {
           onDecided?.();
+          older.reset();
           await list.reload();
         }}
       />
@@ -638,6 +639,7 @@ function AppealsSection({
         }}
         onChanged={async () => {
           onDecided?.();
+          older.reset();
           await list.reload();
           onSelect(null);
         }}
@@ -730,7 +732,15 @@ function useOlderPages<T>(
       setBusy(false);
     }
   };
-  return { items, next, started, busy, error, load };
+  // After a decision the queue has moved: older pages are dropped and loaded again on request,
+  // so a decided item never lingers under the wrong status.
+  const reset = () => {
+    setItems([]);
+    setNext(null);
+    setStarted(false);
+    setError(null);
+  };
+  return { items, next, started, busy, error, load, reset };
 }
 
 function mergeById<T extends { id: string }>(first: T[], rest: T[]): T[] {
@@ -807,9 +817,16 @@ function AppealView({
               <div className="t-meta">Appealed {formatDayTime(a.createdAt)}</div>
             </div>
           </div>
-          <p className="secondary" dir="auto">
-            “{a.text}”
-          </p>
+          {a.case.recused && a.text === '' ? (
+            <p className="note amber">
+              You are part of this case, so the appeal text is hidden from you and another
+              administrator must decide the appeal.
+            </p>
+          ) : (
+            <p className="secondary" dir="auto">
+              “{a.text}”
+            </p>
+          )}
           {a.decision ? (
             <p className="note">
               <strong>Appeal {a.decision.outcome}</strong> by {a.decision.admin.displayName} on{' '}
@@ -823,7 +840,8 @@ function AppealView({
           <CaseBody c={a.case} />
         </section>
       </div>
-      {a.status === 'pending' ? (
+      {/* A party cannot decide the appeal (the server refuses it too). */}
+      {a.status === 'pending' && !a.case.recused ? (
         <div className="row" style={{ justifyContent: 'flex-end', gap: 8 }}>
           <button type="button" className="btn-secondary" onClick={() => setConfirm('reject')}>
             Reject appeal
