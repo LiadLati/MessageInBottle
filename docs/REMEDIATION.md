@@ -15,7 +15,7 @@ The work, all merged to `main` unless said otherwise:
 - `fix/audit-remediation` — Batches 1–4 of `05-remediation-plan.md`.
 - `fix/product-decisions` — the owner's decisions D1–D17.
 - `fix/final-release-blockers` — the re-audit's P1s and the first P2s.
-- `fix/backlog-remediation` (not merged) — the remaining re-audit findings.
+- `fix/backlog-remediation` (merged as `6367546`, PR #1) — the remaining re-audit findings.
 
 **Status words.** *Fixed* — changed and verified by the named test or check. *Fixed by f89e35c*
 — closed by Stage 1; re-checked against current code, not reimplemented. *Partly fixed* — the

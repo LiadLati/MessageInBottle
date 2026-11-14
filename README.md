@@ -103,7 +103,7 @@ Walkthrough of the vertical slice:
 | `pnpm build`        | Typecheck, build the API into `apps/api/dist`, bundle the web app   |
 | `pnpm start`        | Run the compiled API (`node apps/api/dist/server.js`), production   |
 | `pnpm smoke:artefact` | Start the compiled API on a temporary database and check it       |
-| `pnpm --filter @mib/e2e e2e` | Browser and accessibility smoke (Playwright + axe) of the built app behind the production headers and CSP; run `pnpm build` first. Needs Chromium: `pnpm --filter @mib/e2e exec playwright install chromium` |
+| `pnpm --filter @mib/e2e e2e` | Browser and accessibility smoke (Playwright + axe) of the built interface against the compiled API, under a strict CSP; run `pnpm build` first. Needs Chromium: `pnpm --filter @mib/e2e exec playwright install chromium` |
 
 Operator tools (`pnpm --filter @mib/api <script>`, or `node dist/<tool>.js` in the artefact; all
 read `MIB_DATABASE_PATH`):

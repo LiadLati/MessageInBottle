@@ -68,18 +68,33 @@ interface contains only the public API origin.
 
 ## Running the development app in the emulator
 
-In one PowerShell window, the API in development mode, accepting the app's origin:
+Run everything against a **separate, disposable database**, never your usual development
+database: `MIB_DATABASE_PATH` set in the shell wins over any `.env` file, and the development
+server creates and seeds the file on its first start (migrations, the sea chart and the four
+development accounts `ada`, `bo`, `cy`, `dee`). Delete the file afterwards to start over.
+
+In one PowerShell window, at the repository root, the API in development mode, accepting the
+app's origin:
 
 ```powershell
-cd apps\api
+$env:MIB_DATABASE_PATH = "$env:TEMP\seayou-android-check.sqlite"
 $env:MIB_DEV_MODE = 'true'
 $env:MIB_CORS_ORIGIN = 'http://localhost:5173,https://localhost'
 $env:MIB_APP_URL = 'http://localhost:3001'
-pnpm db:seed          # only for a fresh development database
-pnpm dev
+pnpm dev:api
 ```
 
-In a second window, build the interface for the emulator and install the app:
+To use the DEV panel (moving the journey clock), one account needs the developer role. In a
+second window, with the same `MIB_DATABASE_PATH`, look the account up, then confirm with the id
+it prints:
+
+```powershell
+$env:MIB_DATABASE_PATH = "$env:TEMP\seayou-android-check.sqlite"
+pnpm --filter @mib/api developer:grant -- --username bo
+pnpm --filter @mib/api developer:grant -- --username bo --confirm <the id it printed>
+```
+
+In a third window, build the interface for the emulator and install the app:
 
 ```powershell
 pnpm --filter @mib/web android:dev
@@ -89,13 +104,26 @@ cd apps\web\android
 & "$env:ANDROID_HOME\platform-tools\adb.exe" install -r app\build\outputs\apk\debug\app-debug.apk
 ```
 
+On a **physical phone** (USB debugging on, `adb devices` lists it), the debug build may reach the
+computer only as `localhost`, through `adb reverse`:
+
+```powershell
+& "$env:ANDROID_HOME\platform-tools\adb.exe" reverse tcp:3001 tcp:3001
+$env:VITE_MIB_API_ORIGIN = 'http://localhost:3001'
+pnpm --filter @mib/web android:dev
+```
+
+then build and install as above.
+
 Then open **SeaYou** on the emulator. What to check, in order:
 
 1. **Sign in** with a development account (or register), choose a harbour.
 2. **Send a letter** to a friend.
-3. **Receive a letter**: sign out, sign in as the friend (or use a second emulator). In a desktop
-   browser at `http://localhost:5173`, sign in as a developer and use the DEV panel to move the
-   clock past the arrival. Pick the bottle up on My Shore.
+3. **Receive a letter**: sign out, sign in as the friend (or use a second emulator). Move the
+   clock past the arrival with the DEV panel, which exists only in the development web app: run
+   `pnpm dev:web` in another window (same API) and open `http://localhost:5173` in a desktop
+   browser, signed in as the account given the developer role. The Android build never contains
+   the DEV panel. Pick the bottle up on My Shore.
 4. **Support**: Profile → Help & Support opens `/support` in the browser; its buttons open the mail
    app.
 5. **Password reset**: Forgot password? on the sign-in screen. In development the message is in
@@ -106,7 +134,7 @@ Then open **SeaYou** on the emulator. What to check, in order:
    letter stays). Type a letter and check the field stays above the keyboard. Check nothing hides
    under the status bar, the camera cut-out or the gesture bar, in both orientations.
 8. **Lifecycle**: switch to another app and back (the letter is still there); swipe SeaYou away
-   and reopen it (you are asked to sign in again — see "Sessions on Android" below).
+   and reopen it (you are asked to sign in again — see "Sessions and storage on Android" below).
 
 `adb logcat -s Capacitor chromium` shows the WebView console. `chrome://inspect` on the PC
 attaches Chrome DevTools to the debug app (debug builds only).

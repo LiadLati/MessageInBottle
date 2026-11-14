@@ -1,8 +1,9 @@
 // A production-shaped SeaYou for the browser tests: the compiled API (node dist/server.js, in
-// production mode) on a fresh temporary database, behind a small proxy that does what the
-// reference Caddyfile does (docs/deploy/Caddyfile): the API owns /api, /legal and /support,
-// everything else is the built web app with the same security headers and CSP, and unknown
-// paths fall back to index.html.
+// production mode) on a fresh temporary database, behind a small proxy: the API owns /api,
+// /legal, /support and /reset-password, and everything else is the built interface (the one the
+// Android app bundles) served with a strict CSP and security headers, falling back to
+// index.html. No web app is deployed in production; serving the interface this way is a test
+// harness, and the strict CSP makes the test stricter than the app's WebView.
 //
 //   node apps/e2e/serve.mjs            (needs `pnpm build` first)
 //
@@ -59,7 +60,7 @@ const api = spawn(process.execPath, [path.join(apiDist, 'server.js')], {
   stdio: ['ignore', 'inherit', 'inherit'],
 });
 
-// The reference Caddyfile's headers for the web app.
+// A strict CSP and the usual security headers (the ones the earlier web deployment used).
 const WEB_HEADERS = {
   'content-security-policy':
     "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self'; worker-src 'self' blob:; frame-ancestors 'none'; base-uri 'none'; form-action 'self'",
@@ -84,7 +85,11 @@ const TYPES = {
   '.txt': 'text/plain; charset=utf-8',
 };
 const isApi = (p) =>
-  p.startsWith('/api/') || p === '/legal' || p.startsWith('/legal/') || p === '/support';
+  p.startsWith('/api/') ||
+  p === '/legal' ||
+  p.startsWith('/legal/') ||
+  p === '/support' ||
+  p.startsWith('/reset-password');
 
 const server = http.createServer((req, res) => {
   const url = new URL(req.url ?? '/', 'http://localhost');
