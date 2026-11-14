@@ -5,25 +5,25 @@ platform that can run one Node 22 process with a persistent disk satisfies it. *
 provider and the domain are open decisions** (see the end of this file). Password-reset mail goes
 through Gmail from `seayou.support@gmail.com` (section 2a).
 
-**Scope.** This file describes `main`: the API plus the web app served as static files by the
-same origin. The Android packaging work (Capacitor, on the unmerged branch
-`feature/android-app`) changes how the client is shipped and serves no web app; its own
-`docs/ANDROID.md` and its version of this file apply only once that branch is merged.
+**Scope.** The client is the Android app (`docs/ANDROID.md`); this file covers the server it
+talks to. No web app is served.
 
 ## 1. The artefact
 
 ```bash
 pnpm install --frozen-lockfile
-pnpm build                                              # API → apps/api/dist, web → apps/web/dist
+pnpm build                                              # API → apps/api/dist
 pnpm --filter @mib/api deploy --prod --legacy /srv/seayou-api
-cp -r apps/web/dist /srv/seayou-web
 ```
 
 `/srv/seayou-api` holds the compiled API, its migrations and production dependencies — no
-TypeScript runtime, no source, no `.env`, no database. `/srv/seayou-web` is static files.
+TypeScript runtime, no source, no `.env`, no database. **No web app is deployed**: SeaYou's
+interface is bundled inside the Android app (`docs/ANDROID.md`), which calls this server over
+HTTPS. The server itself publishes only the API and the public pages (`/support`, `/legal`,
+`/legal/delete-account`, `/reset-password`).
 CI proves the artefact on every pull request (`apps/api/scripts/smoke-artefact.mjs`), and runs
-the built web app against it in a browser behind this file's proxy headers and CSP
-(`apps/e2e`, Playwright and axe).
+the built interface (the one the Android app bundles) against it in a browser, with Playwright
+and axe (`apps/e2e`).
 
 ### 1a. A fresh database
 
@@ -43,7 +43,8 @@ is changed. Migrations are append-only: CI pins the content of every released mi
 | Variable | Requirement |
 | --- | --- |
 | `MIB_DATABASE_PATH` | **Required, absolute**, on persistent storage outside `/srv/seayou-api` (a redeploy replaces that directory). The server refuses to start otherwise. |
-| `MIB_APP_URL` | **Required, `https://`** — the public origin. Reset links are built from it. The server refuses `http://` in production. |
+| `MIB_APP_URL` | **Required, `https://`** — the public origin of this server. Password-reset e-mails link to `MIB_APP_URL/reset-password`. The server refuses `http://` in production. The Android app is built with the same origin (`VITE_MIB_API_ORIGIN`). |
+| `MIB_CORS_ORIGIN` | Leave unset: in production it defaults to `https://localhost`, the origin the Android app's WebView serves the interface from. Only https origins are accepted; `*` is refused. |
 | `MIB_DEV_MODE` | Unset or `false`. `true` is refused by the compiled server. |
 | `MIB_TRUST_PROXY` | `true` behind the reverse proxy below; the API must then be reachable only through the proxy (see `MIB_HOST`). |
 | `MIB_HOST` | The interface the API listens on. Production default `127.0.0.1` (proxy on the same host). A container deployment whose proxy reaches the API over a container network sets `0.0.0.0` and must **not** publish the API port. |
@@ -86,7 +87,7 @@ The App Password is a credential: it lives only in the host's secret store (or a
    ```
 
 4. Restart the API, request a reset for an account you control, and check the message arrives
-   and its link opens `MIB_APP_URL`. Links expire after 30 minutes and work once; using one
+   and its link opens `MIB_APP_URL/reset-password`. Links expire after 30 minutes and work once; using one
    revokes every session and every other reset link.
 5. To rotate: create a new App Password, update the secret, restart, then revoke the old one in
    the Google Account. Revoke it immediately if it may have leaked.
@@ -120,17 +121,17 @@ versions wrote a PID to `<database>.lock`; that file is ignored and can be delet
 needed; they are safe alongside the server (SQLite locking plus `busy_timeout`) but add write
 load.
 
-## 4. Reverse proxy, TLS and the web app
+## 4. Reverse proxy and TLS
 
-One origin serves everything:
+One origin, the API's:
 
-- `https://<domain>/` → the static web app (`/srv/seayou-web`), falling back to `index.html`;
-- `/api/*`, `/legal`, `/legal/*`, `/support` → the API on `127.0.0.1:3001`.
+- `/api/*`, `/legal`, `/legal/*`, `/support`, `/reset-password` → the API on `127.0.0.1:3001`;
+- `/` → a redirect to `/support`; every other path → 404. There is no web app to serve.
 
 The proxy terminates TLS, redirects `http://` to `https://`, appends the client address to
 `X-Forwarded-For`, and limits request bodies (the API also refuses bodies over 64 KB itself).
 The API sets its own security headers (CSP, `X-Frame-Options`, `nosniff`, `Referrer-Policy`,
-and HSTS when `MIB_APP_URL` is https). The static web app needs its own headers from the proxy.
+and HSTS when `MIB_APP_URL` is https).
 `docs/deploy/Caddyfile` is a complete reference configuration; any proxy that does the same is
 fine.
 
@@ -200,7 +201,8 @@ Every grant and revocation is recorded in the moderation audit trail (`role_chan
    existing database is carried into production; a fresh production database (section 1a) has
    nothing to backfill.
 8. Enabling GitHub branch protection so CI blocks merges.
-9. Store packaging and the Play Console Data Safety form (`docs/LEGAL_DOCUMENTS.md`).
+9. The Android release, its signing key and the Play Console listing and Data Safety form
+   (`docs/ANDROID.md`, `docs/LEGAL_DOCUMENTS.md`).
 10. The external append-only or immutable log for moderation events (section 2b), chosen with
     the hosting and logging provider. This is a production deployment dependency, not an open
     product decision; the local table is not tamper-evident by itself.

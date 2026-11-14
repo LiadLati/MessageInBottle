@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- SeaYou's night sea: the app's theme colour (index.html theme-color). -->
+    <color name="seayou_night">#092331</color>
+    <color name="colorPrimary">#092331</color>
+    <color name="colorPrimaryDark">#071520</color>
+    <color name="colorAccent">#7FD4D8</color>
+</resources>

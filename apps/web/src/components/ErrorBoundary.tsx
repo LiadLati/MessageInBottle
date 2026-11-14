@@ -1,4 +1,6 @@
 import { Component, type ErrorInfo, type ReactNode } from 'react';
+import { SUPPORT_PATH } from '@mib/shared';
+import { publicPageUrl } from '../lib/endpoints.js';
 
 // Without a boundary React unmounts the whole root on any render error — including the
 // "Failed to fetch dynamically imported module" a lazy chunk throws after a deploy replaced
@@ -50,7 +52,12 @@ export function AppCrashed() {
           <button type="button" className="btn-primary" onClick={reload}>
             Reload SeaYou
           </button>
-          <a className="btn-secondary" href="/support">
+          <a
+            className="btn-secondary"
+            href={publicPageUrl(SUPPORT_PATH)}
+            target="_blank"
+            rel="noreferrer noopener"
+          >
             Help &amp; Support
           </a>
         </div>

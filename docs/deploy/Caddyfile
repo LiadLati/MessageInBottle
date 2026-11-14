@@ -2,8 +2,10 @@
 # does the same is fine. Replace seayou.example with the real domain. Caddy obtains and renews
 # the TLS certificate and redirects http:// to https:// on its own.
 seayou.example {
-	# The API owns these paths; everything else is the static web app.
-	@api path /api/* /legal /legal/* /support
+	# SeaYou's interface is the Android app (docs/ANDROID.md); no web app is published. The API
+	# owns every path that exists: the API itself and the public pages a store listing, a
+	# reset e-mail or a support reply links to.
+	@api path /api/* /legal /legal/* /support /reset-password
 	handle @api {
 		request_body {
 			max_size 64KB
@@ -12,21 +14,11 @@ seayou.example {
 		reverse_proxy 127.0.0.1:3001
 	}
 
+	# The bare domain leads to support, which links to the legal pages; nothing else exists.
+	handle / {
+		redir /support 302
+	}
 	handle {
-		root * /srv/seayou-web
-		try_files {path} /index.html
-		file_server
-		header {
-			# MapLibre builds its worker from a blob: URL; tiles and fonts are bundled. If a tile
-			# provider is configured (VITE_MIB_MAP_TILES_URL), add its origin to connect-src and
-			# img-src, or the map will stay blank.
-			Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self'; worker-src 'self' blob:; frame-ancestors 'none'; base-uri 'none'; form-action 'self'"
-			X-Content-Type-Options nosniff
-			X-Frame-Options DENY
-			Referrer-Policy no-referrer
-			Strict-Transport-Security "max-age=31536000; includeSubDomains"
-		}
-		@immutable path /assets/*
-		header @immutable Cache-Control "public, max-age=31536000, immutable"
+		respond "Not found" 404
 	}
 }

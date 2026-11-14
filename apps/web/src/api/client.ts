@@ -32,6 +32,7 @@ import {
   type ReportReason,
   AdminPendingCountsSchema,
 } from '@mib/shared';
+import { apiUrl, isNativeApp } from '../lib/endpoints.js';
 
 export class ApiError extends Error {
   constructor(
@@ -57,8 +58,9 @@ export interface HealthResponse {
 }
 
 export const UNREACHABLE = 'unreachable';
-export const UNREACHABLE_MESSAGE =
-  'Cannot reach the SeaYou server. Check that the API is running, then try again.';
+export const UNREACHABLE_MESSAGE = isNativeApp
+  ? 'Cannot reach the SeaYou server. Check your internet connection, then try again.'
+  : 'Cannot reach the SeaYou server. Check that the API is running, then try again.';
 
 // A 200 whose body is not what this version of the app understands (a version-skewed API, a
 // proxy that rewrote the body) becomes an ordinary, recoverable error instead of a crash deep
@@ -94,7 +96,7 @@ async function request<T>(
   if (body !== undefined) init.body = JSON.stringify(body);
   let res: Response;
   try {
-    res = await fetch(`/api${path}`, init);
+    res = await fetch(apiUrl(path), init);
   } catch (cause) {
     // Network-level failure: no server, DNS, TLS, or the request was cut off.
     throw new ApiError(0, UNREACHABLE, UNREACHABLE_MESSAGE, cause);

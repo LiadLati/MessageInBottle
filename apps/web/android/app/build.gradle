@@ -1,0 +1,107 @@
+import groovy.json.JsonSlurper
+
+apply plugin: 'com.android.application'
+
+// ---- version: android/version.properties (committed) --------------------------------------
+def versionProps = new Properties()
+file('../version.properties').withInputStream { versionProps.load(it) }
+
+// ---- upload key: never in Git ------------------------------------------------------------
+// Read from android/keystore.properties (ignored by Git) or from the environment. Keys:
+//   storeFile, storePassword, keyAlias, keyPassword
+//   SEAYOU_UPLOAD_STORE_FILE, SEAYOU_UPLOAD_STORE_PASSWORD, SEAYOU_UPLOAD_KEY_ALIAS,
+//   SEAYOU_UPLOAD_KEY_PASSWORD
+// See docs/ANDROID.md. Without them a release build stops with an explanation.
+def keystoreProps = new Properties()
+def keystorePropsFile = rootProject.file('keystore.properties')
+if (keystorePropsFile.exists()) keystorePropsFile.withInputStream { keystoreProps.load(it) }
+def signingValue = { String prop, String env -> keystoreProps.getProperty(prop) ?: System.getenv(env) }
+def uploadStoreFile = signingValue('storeFile', 'SEAYOU_UPLOAD_STORE_FILE')
+def hasUploadKey = uploadStoreFile && signingValue('storePassword', 'SEAYOU_UPLOAD_STORE_PASSWORD') &&
+    signingValue('keyAlias', 'SEAYOU_UPLOAD_KEY_ALIAS') && signingValue('keyPassword', 'SEAYOU_UPLOAD_KEY_PASSWORD')
+
+android {
+    namespace = "io.github.liadlati.seayou"
+    compileSdk = rootProject.ext.compileSdkVersion
+    defaultConfig {
+        applicationId "io.github.liadlati.seayou"
+        minSdkVersion rootProject.ext.minSdkVersion
+        targetSdkVersion rootProject.ext.targetSdkVersion
+        versionCode Integer.parseInt(versionProps.getProperty('versionCode'))
+        versionName versionProps.getProperty('versionName')
+        testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
+        aaptOptions {
+             // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
+             // Default: https://android.googlesource.com/platform/frameworks/base/+/282e181b58cf72b6ca770dc7ca5f91f135444502/tools/aapt/AaptAssets.cpp#61
+            ignoreAssetsPattern = '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
+        }
+    }
+    signingConfigs {
+        if (hasUploadKey) {
+            upload {
+                storeFile rootProject.file(uploadStoreFile)
+                storePassword signingValue('storePassword', 'SEAYOU_UPLOAD_STORE_PASSWORD')
+                keyAlias signingValue('keyAlias', 'SEAYOU_UPLOAD_KEY_ALIAS')
+                keyPassword signingValue('keyPassword', 'SEAYOU_UPLOAD_KEY_PASSWORD')
+            }
+        }
+    }
+    buildTypes {
+        debug {
+            // Installs beside the Play version, so testing never replaces the real app.
+            applicationIdSuffix '.dev'
+            versionNameSuffix '-dev'
+        }
+        release {
+            minifyEnabled false
+            proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
+            if (hasUploadKey) signingConfig signingConfigs.upload
+        }
+    }
+}
+
+repositories {
+    flatDir{
+        dirs '../capacitor-cordova-android-plugins/src/main/libs', 'libs'
+    }
+}
+
+dependencies {
+    implementation fileTree(include: ['*.jar'], dir: 'libs')
+    implementation "androidx.appcompat:appcompat:$androidxAppCompatVersion"
+    implementation "androidx.coordinatorlayout:coordinatorlayout:$androidxCoordinatorLayoutVersion"
+    implementation "androidx.core:core-splashscreen:$coreSplashScreenVersion"
+    implementation project(':capacitor-android')
+    testImplementation "junit:junit:$junitVersion"
+    androidTestImplementation "androidx.test.ext:junit:$androidxJunitVersion"
+    androidTestImplementation "androidx.test.espresso:espresso-core:$androidxEspressoCoreVersion"
+    implementation project(':capacitor-cordova-android-plugins')
+}
+
+apply from: 'capacitor.build.gradle'
+
+// ---- release guard ------------------------------------------------------------------------
+// A release must contain the interface built for release: HTTPS API origin, no mixed content,
+// no remote server.url. scripts/android-build.mjs writes seayou-build.json; syncing a dev build
+// and then running bundleRelease would otherwise ship a development endpoint.
+def verifySeaYouReleaseAssets = tasks.register('verifySeaYouReleaseAssets') {
+    doLast {
+        def assets = file('src/main/assets')
+        def buildInfo = new File(assets, 'public/seayou-build.json')
+        if (!buildInfo.exists())
+            throw new GradleException('No seayou-build.json in the bundled web assets. Build with: pnpm --filter @mib/web android:release')
+        def info = new JsonSlurper().parse(buildInfo)
+        if (info.mode != 'release')
+            throw new GradleException("The bundled web assets were built in '${info.mode}' mode. Rebuild with: pnpm --filter @mib/web android:release")
+        if (!(info.apiOrigin instanceof String) || !info.apiOrigin.startsWith('https://'))
+            throw new GradleException("The bundled API origin is not HTTPS: ${info.apiOrigin}")
+        def cap = new JsonSlurper().parse(new File(assets, 'capacitor.config.json'))
+        if (cap.android?.allowMixedContent)
+            throw new GradleException('capacitor.config.json allows mixed content (a dev sync). Rebuild with: pnpm --filter @mib/web android:release')
+        if (cap.server?.url)
+            throw new GradleException('capacitor.config.json loads a remote server.url; the release must bundle its interface.')
+        if (!hasUploadKey)
+            throw new GradleException('No upload key configured. Create android/keystore.properties or set the SEAYOU_UPLOAD_* variables (docs/ANDROID.md).')
+    }
+}
+tasks.matching { it.name == 'preReleaseBuild' }.configureEach { dependsOn verifySeaYouReleaseAssets }
