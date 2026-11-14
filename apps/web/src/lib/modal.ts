@@ -48,6 +48,17 @@ export function useModalKeys(
 }
 
 /**
+ * Android Back, while a dialog is open: it does exactly what Escape does to the topmost dialog
+ * (closes it, steps back out of its confirmation, or nothing at all for a dialog that must be
+ * answered). Returns whether a dialog was open, so Back never also leaves the screen under it.
+ */
+export function backOutOfTopModal(): boolean {
+  if (stack.length === 0) return false;
+  document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+  return true;
+}
+
+/**
  * Return focus to where it was before a dialog opened. When that control has gone (picking a
  * bottle up removes the button that opened it), focus goes to the screen's heading instead of
  * being dropped on <body> (audit A11Y-013).

@@ -452,7 +452,7 @@ export const PRIVACY_POLICY: PolicyDocument = {
     { type: 'h2', text: '1. Scope' },
     {
       type: 'p',
-      text: `This policy describes what ${PRODUCT_NAME} stores about you, why, and for how long. It covers the app and the public pages at ${SUPPORT_PATH} and /legal.`,
+      text: `This policy describes what ${PRODUCT_NAME} stores about you, why, and for how long. It covers the Android app and the public pages at ${SUPPORT_PATH}, /legal and /reset-password.`,
     },
     { type: 'h2', text: '2. What is stored' },
     {
@@ -498,15 +498,19 @@ export const PRIVACY_POLICY: PolicyDocument = {
     { type: 'h2', text: '5. What is on your device' },
     {
       type: 'p',
-      text: 'Nothing is stored in your browser except these three things:',
+      text: `Nothing is stored on your device except these three things, kept in the app’s private web storage, which no other app can read:`,
     },
     {
       type: 'ul',
       items: [
-        'Your session token, in sessionStorage. It is removed when you sign out, when the server rejects it, and by the browser when the tab is closed.',
-        'The letter you are still writing and have not sent, in sessionStorage, so that a reload does not lose it. It is removed as soon as the letter is sent, and by the browser when the tab is closed.',
+        `Your session token, in sessionStorage. It is removed when you sign out, when the server rejects it, and when ${PRODUCT_NAME} is closed — including when you swipe it away or Android ends it in the background, after which you sign in again.`,
+        `The letter you are still writing and have not sent, in sessionStorage, so that switching away from ${PRODUCT_NAME} for a moment does not lose it. It is removed as soon as the letter is sent, when you sign out, and when ${PRODUCT_NAME} is closed in the same way.`,
         'Your account’s time zone as last received from the server, in localStorage, so the map shows the right day or night before the server answers. It is removed when you sign out.',
       ],
+    },
+    {
+      type: 'p',
+      text: `None of it is included in Android backups or copied when you move to a new phone: signing in on the new phone restores everything, because your account lives on the server.`,
     },
     {
       type: 'p',
@@ -517,6 +521,10 @@ export const PRIVACY_POLICY: PolicyDocument = {
       text: 'If analytics, crash reporting or any other tracking is added later, this policy and the store Data Safety declaration will be reviewed and updated before it is switched on.',
     },
     { type: 'h2', text: '6. Network and hosting data' },
+    {
+      type: 'p',
+      text: `${PRODUCT_NAME} is sold through Google Play. The purchase, and any refund, is handled by Google under Google’s own terms and privacy policy. ${PRODUCT_NAME} receives no payment details and does not link a purchase to a ${PRODUCT_NAME} account.`,
+    },
     {
       type: 'p',
       text: `Network addresses may be processed for security and rate limiting. ${PRODUCT_NAME} does not intentionally store them in its application database, although hosting and security providers may retain limited technical logs under their own retention controls.`,
@@ -532,7 +540,7 @@ export const PRIVACY_POLICY: PolicyDocument = {
     },
     {
       type: 'p',
-      text: `Password-reset emails are sent from ${SUPPORT_EMAIL} through its email provider, which therefore handles your email address and the message. The message contains a single-use link that expires after 30 minutes.`,
+      text: `Password-reset emails are sent from ${SUPPORT_EMAIL} through its email provider, which therefore handles your email address and the message. The message contains a single-use link to a page on the ${PRODUCT_NAME} server where you choose a new password. It expires after 30 minutes.`,
     },
     { type: 'h2', text: '8. Deleting your account' },
     {

@@ -13,6 +13,8 @@ const apiProxy = {
   '/api': { target: apiTarget, changeOrigin: true },
   '/legal': { target: apiTarget, changeOrigin: true },
   '/support': { target: apiTarget, changeOrigin: true },
+  // The page a password-reset e-mail links to (served by the API, not the app).
+  '/reset-password': { target: apiTarget, changeOrigin: true },
 };
 
 export default defineConfig({

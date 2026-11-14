@@ -213,7 +213,9 @@ export function requestPasswordReset(ctx: AppContext, email: string): Promise<vo
       expiresAt: now + RESET_TOKEN_TTL_MS,
     })
     .run();
-  const link = `${ctx.config.appUrl.replace(/\/$/, '')}/?reset=${token}`;
+  // The link opens the server's own reset page (http/routes/reset-page.ts): SeaYou's interface
+  // lives in the app, so there is no web page of the app to send it to.
+  const link = `${ctx.config.appUrl.replace(/\/$/, '')}/reset-password?token=${token}`;
   let sending: Promise<void>;
   try {
     sending = ctx.mailer.send({
@@ -269,6 +271,22 @@ export function requestPasswordReset(ctx: AppContext, email: string): Promise<vo
 
 // Consumes one valid token: sets the password, marks the token used, supersedes every other
 // open token for the account and revokes all of its sessions.
+// Whether a reset link can still be used, so the page it opens can say at once that it has
+// expired instead of letting the person type a new password for nothing.
+export function resetTokenUsable(ctx: AppContext, token: string): boolean {
+  const row = ctx.db
+    .select()
+    .from(t.passwordResets)
+    .where(eq(t.passwordResets.tokenHash, sha256(token)))
+    .get();
+  return (
+    row !== undefined &&
+    row.usedAt === null &&
+    row.invalidatedAt === null &&
+    row.expiresAt > ctx.realClock.now()
+  );
+}
+
 export async function resetPassword(
   ctx: AppContext,
   input: { token: string; password: string },

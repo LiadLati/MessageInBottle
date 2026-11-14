@@ -1,8 +1,8 @@
 import { expect, test, type Page, type TestInfo } from '@playwright/test';
 import AxeBuilder from '@axe-core/playwright';
 
-// The production bundle, behind the reference proxy's headers and CSP, against the compiled
-// API in production mode (serve.mjs). Re-audit QA-R-002 (no browser or accessibility suite)
+// The production interface bundle (the one the Android app ships), under a strict CSP, against
+// the compiled API in production mode (serve.mjs). Re-audit QA-R-002 (no browser or accessibility suite)
 // and the browser half of QA-R-003 (a failed lazy chunk must not blank the app).
 
 const PASSWORD = 'A-long-test-password-1';
@@ -102,7 +102,7 @@ test('a map chunk that fails to load is contained, and the app keeps working', a
   await expect(page.getByRole('heading', { name: 'Friends', exact: true })).toBeVisible();
 });
 
-test('the web app is served with the production security headers', async ({ request }) => {
+test('the test server applies a strict CSP and security headers', async ({ request }) => {
   const res = await request.get('/');
   expect(res.headers()['content-security-policy']).toContain("script-src 'self'");
   expect(res.headers()['x-frame-options']).toBe('DENY');

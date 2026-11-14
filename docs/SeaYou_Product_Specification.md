@@ -714,8 +714,8 @@ This roadmap is a plan only. The current task ends with the updated specificatio
 > owner's product decisions recorded in `docs/REMEDIATION.md` ("Decisions", rows D1–D17, a
 > separate numbering from this table): for example blocking and unblocking (this table's D07;
 > REMEDIATION D8), the finder's single reading (D11; REMEDIATION D12), evidence retention and
-> restricted accounts (D13; REMEDIATION D5 and D14), and the Android packaging on the unmerged
-> branch `feature/android-app` (D12). Moderation staffing and legal review (D13,
+> restricted accounts (D13; REMEDIATION D5 and D14), and the Android packaging (D12,
+> `docs/ANDROID.md`). Moderation staffing and legal review (D13,
 > §16.7) remain open. The rows below have not been rewritten because confirming them is the
 > owner's call.
 

@@ -6,6 +6,8 @@ import {
   supportMailto,
   type PolicyBlock,
   type PolicyDocument,
+  PASSWORD_MAX_LENGTH,
+  PASSWORD_MIN_LENGTH,
 } from '@mib/shared';
 
 // The public legal pages: plain server-rendered HTML at stable URLs, with no sign-in, no
@@ -50,6 +52,9 @@ input[type=text], input[type=password] { width:100%; padding:.6rem .7rem; font:i
 button { margin-top:1rem; width:100%; padding:.75rem 1rem; font:inherit; font-weight:600;
   color:#fff; background:#b3372f; border:0; border-radius:999px; cursor:pointer; }
 button:hover { background:#992f28; }
+button.primary { background:var(--accent); }
+button.primary:hover { filter:brightness(1.08); background:var(--accent); }
+@media (prefers-color-scheme: dark) { button.primary { color:#06222c; } }
 .notice { border-left:4px solid var(--accent); padding:.6rem .9rem; background:var(--panel);
   border-radius:0 8px 8px 0; margin:1rem 0; }
 .error { border-left-color:#b3372f; }
@@ -229,6 +234,59 @@ export function deletionDonePage(): string {
 <div class="notice"><p>The account is gone and every session has ended. You can close this page.</p></div>
 ${WHAT_HAPPENS}
 <p>If you want to use SeaYou again, you are welcome to create a new account at any time.</p>`,
+  });
+}
+
+// ---------- choosing a new password from a reset e-mail ----------
+
+// SeaYou is an app, not a website, so the link in a password-reset e-mail cannot open the
+// interface. It opens this page on the server instead: one plain form, no JavaScript, posting
+// back to the same address. The token travels in a hidden field and is never shown.
+export function resetPasswordPage(options: { token: string; error?: string | undefined }): string {
+  const error = options.error
+    ? `<div class="notice error" role="alert"><p>${esc(options.error)}</p></div>`
+    : '';
+  return page({
+    title: 'Choose a new password',
+    description: 'Choose a new password for your SeaYou account.',
+    slug: '',
+    robots: 'noindex, nofollow',
+    body: `<h1>Choose a new password</h1>
+<p>This link came from the password-reset e-mail you asked for. It works once, for 30 minutes. Setting a new password signs out every device that is signed in to the account.</p>
+<div class="card">
+${error}
+<form method="post" action="/reset-password">
+<input type="hidden" name="token" value="${esc(options.token)}">
+<label for="p">New password</label>
+<input id="p" name="password" type="password" autocomplete="new-password" minlength="${PASSWORD_MIN_LENGTH}" maxlength="${PASSWORD_MAX_LENGTH}" required>
+<label for="c">New password again</label>
+<input id="c" name="confirm" type="password" autocomplete="new-password" minlength="${PASSWORD_MIN_LENGTH}" maxlength="${PASSWORD_MAX_LENGTH}" required>
+<button type="submit" class="primary">Set new password</button>
+</form>
+</div>`,
+  });
+}
+
+export function resetPasswordDonePage(): string {
+  return page({
+    title: 'Password changed',
+    description: 'Your SeaYou password has been changed.',
+    slug: '',
+    robots: 'noindex, nofollow',
+    body: `<h1>Your password has been changed</h1>
+<div class="notice"><p>Open SeaYou on your phone and sign in with your new password. Every device that was signed in has been signed out.</p></div>`,
+  });
+}
+
+export function resetLinkInvalidPage(): string {
+  return page({
+    title: 'This link cannot be used',
+    description: 'This SeaYou password-reset link is invalid or has expired.',
+    slug: '',
+    robots: 'noindex, nofollow',
+    body: `<h1>This link cannot be used</h1>
+<div class="notice error"><p>This password-reset link has already been used, has been replaced by a newer one, or is more than 30 minutes old.</p></div>
+<p>In SeaYou, choose <strong>Forgot password?</strong> on the sign-in screen to get a new link.</p>`,
   });
 }
 

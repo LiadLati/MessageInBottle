@@ -286,14 +286,22 @@ describe('the published documents', () => {
     expect(privacy).toMatch(/text of every letter you wrote is erased/i);
     expect(privacy).toMatch(/letters you received are removed/i);
     expect(privacy).toMatch(/password-reset link is revoked/i);
-    expect(privacy).toMatch(/single-use link that expires after 30 minutes/i);
+    expect(privacy).toMatch(/single-use link to a page on the SeaYou server/i);
+    expect(privacy).toMatch(/It expires after 30 minutes/i);
   });
 
   it('describe browser storage exactly, and claim no more', () => {
     const privacy = textOf(PRIVACY_POLICY);
     // Every mechanism the implementation uses, named, with when it is cleared.
     expect(privacy).toMatch(/session token, in sessionStorage/i);
-    expect(privacy).toMatch(/in sessionStorage, so that a reload does not lose it/i);
+    expect(privacy).toMatch(/in sessionStorage, so that switching away from SeaYou/i);
+    // The Android lifecycle, stated as it is: closing or the system ending the app clears both.
+    expect(privacy).toMatch(/Android ends it in the background, after which you sign in again/i);
+    expect(privacy).toMatch(
+      /None of it is included in Android backups or copied when you move to a new phone/i,
+    );
+    // The purchase is Google's; SeaYou sees no payment data.
+    expect(privacy).toMatch(/receives no payment details and does not link a purchase/i);
     expect(privacy).toMatch(/time zone as last received from the server, in localStorage/i);
     expect(privacy).toMatch(/removed when you sign out/i);
     // And the ones it does not.
