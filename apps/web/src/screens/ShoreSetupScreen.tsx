@@ -1,7 +1,8 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import type { ShoreDto } from '@mib/shared';
 import { api } from '../api/client.js';
 import { OceanMap } from '../components/lazy.js';
+import { isWebGLAvailable } from '../lib/webgl.js';
 import type { MapAnchor } from '../components/OceanMap.js';
 import { ErrorNote, Skeleton } from '../components/ui.js';
 import { Icon } from '../design/Icon.js';
@@ -42,13 +43,19 @@ export function ShoreSetupScreen({ onDone, onCancel }: Props) {
   const chosen = shores.find((s) => s.id === choice) ?? null;
   const searching = query.trim().length > 0;
 
+  // Picking a search result closes the results, which held the focused control. On a phone the
+  // shore's card replaces them, so focus moves to its Anchor action instead of falling to the
+  // page (audit FE-R-012). On a wide screen the card is hidden and the list stays focused.
+  const focusAnchor = useRef(false);
+  const [mapDrawable] = useState(isWebGLAvailable);
   const pick = (id: string) => {
     setChoice(id);
     setFocus(id);
     setQuery('');
+    focusAnchor.current = true;
   };
 
-  const onRadioKey = (e: React.KeyboardEvent<HTMLUListElement>) => {
+  const onRadioKey = (e: React.KeyboardEvent<HTMLDivElement>) => {
     const radios = [...e.currentTarget.querySelectorAll<HTMLElement>('[role="radio"]')];
     const at = radios.indexOf(document.activeElement as HTMLElement);
     const next =
@@ -127,30 +134,31 @@ export function ShoreSetupScreen({ onDone, onCancel }: Props) {
   const shoreRow = (s: ShoreDto, index: number, all: ShoreDto[]) => {
     const selected = choice === s.id;
     const tabStop = selected || (index === 0 && !all.some((x) => x.id === choice));
+    // The radios sit directly in the radiogroup: a list item between them breaks the group for
+    // assistive technology (audit FE-R-012), so the group is a div, not a list.
     return (
-      <li key={s.id}>
-        <button
-          type="button"
-          role="radio"
-          aria-checked={selected}
-          tabIndex={tabStop ? 0 : -1}
-          data-shore-id={s.id}
-          className={`row-item selectable${selected ? ' selected' : ''}`}
-          onClick={() => pick(s.id)}
-        >
-          <span className="grow">
-            <span className="t-card-title" style={{ display: 'block' }}>
-              {s.name}
-            </span>
-            <span className="t-meta">{describeShore(s)}</span>
+      <button
+        key={s.id}
+        type="button"
+        role="radio"
+        aria-checked={selected}
+        tabIndex={tabStop ? 0 : -1}
+        data-shore-id={s.id}
+        className={`row-item selectable${selected ? ' selected' : ''}`}
+        onClick={() => pick(s.id)}
+      >
+        <span className="grow">
+          <span className="t-card-title" style={{ display: 'block' }}>
+            {s.name}
           </span>
-          {selected ? (
-            <span className="check-circle" aria-hidden>
-              <Icon name="check" size={14} />
-            </span>
-          ) : null}
-        </button>
-      </li>
+          <span className="t-meta">{describeShore(s)}</span>
+        </span>
+        {selected ? (
+          <span className="check-circle" aria-hidden>
+            <Icon name="check" size={14} />
+          </span>
+        ) : null}
+      </button>
     );
   };
 
@@ -174,7 +182,10 @@ export function ShoreSetupScreen({ onDone, onCancel }: Props) {
       <header className="world-header">
         <div>
           <h1 className="t-title">{changing ? 'Change your shore' : 'Choose your shore'}</h1>
-          <p className="t-meta">Tap a coast or search · nothing about you is located</p>
+          <p className="t-meta">
+            {mapDrawable ? 'Tap a coast or search' : 'Search for a harbour or sea'} · nothing about
+            you is located
+          </p>
         </div>
         {onCancel ? (
           <button type="button" className="glass-control" aria-label="Cancel" onClick={onCancel}>
@@ -187,18 +198,20 @@ export function ShoreSetupScreen({ onDone, onCancel }: Props) {
       <div className="shore-search phone-only">
         {searchField('shore-search-phone')}
         {searching ? (
-          <ul
-            className="list shore-results"
-            role="radiogroup"
-            aria-label="Matching shores"
-            onKeyDown={onRadioKey}
-          >
-            {filtered.slice(0, 8).map(shoreRow)}
-            {filtered.length === 0 ? <li className="t-meta empty">No shore matches.</li> : null}
+          <div className="list shore-results">
+            <div
+              className="list"
+              role="radiogroup"
+              aria-label="Matching shores"
+              onKeyDown={onRadioKey}
+            >
+              {filtered.slice(0, 8).map(shoreRow)}
+            </div>
+            {filtered.length === 0 ? <p className="t-meta empty">No shore matches.</p> : null}
             {filtered.length > 8 ? (
-              <li className="t-meta empty">{filtered.length - 8} more · keep typing</li>
+              <p className="t-meta empty">{filtered.length - 8} more · keep typing</p>
             ) : null}
-          </ul>
+          </div>
         ) : null}
       </div>
 
@@ -219,7 +232,16 @@ export function ShoreSetupScreen({ onDone, onCancel }: Props) {
               <Icon name="close" size={16} />
             </button>
           </div>
-          <div style={{ marginTop: 12 }}>{anchorButton}</div>
+          <div
+            style={{ marginTop: 12 }}
+            ref={(el) => {
+              if (!el || !focusAnchor.current) return;
+              focusAnchor.current = false;
+              el.querySelector('button')?.focus();
+            }}
+          >
+            {anchorButton}
+          </div>
           <p className="t-meta" style={{ marginTop: 8 }}>
             A shore is only an anchor in the app. Changing it affects future bottles only.
           </p>
@@ -244,15 +266,19 @@ export function ShoreSetupScreen({ onDone, onCancel }: Props) {
                 ? `${filtered.length} of ${shores.length} shores`
                 : `${shores.length} shores across every coast`}
             </p>
-            <ul
+            <div
               className="list shore-list"
               role="radiogroup"
               aria-label="Available shores"
               onKeyDown={onRadioKey}
             >
               {filtered.map(shoreRow)}
-              {filtered.length === 0 ? <li className="t-meta empty">No shore matches.</li> : null}
-            </ul>
+            </div>
+            {filtered.length === 0 ? (
+              <p className="t-meta empty" style={{ padding: '12px 14px' }}>
+                No shore matches.
+              </p>
+            ) : null}
             {anchorButton}
             <p className="t-meta">
               A shore is only an anchor in the app. It says nothing about where you live, and

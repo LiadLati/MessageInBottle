@@ -11,9 +11,10 @@ async function main(): Promise<void> {
   // SMTP credentials, so it has to be in process.env by the time loadConfig runs.
   const { loadEnvFiles } = await import('./lib/env.js');
   const loadedEnv = loadEnvFiles();
-  const { loadConfig, PRODUCTION_BUILD } = await import('./config.js');
+  const { loadConfig, PRODUCTION_BUILD, isProductionRuntime, requireAiDecision } =
+    await import('./config.js');
   const { createDb } = await import('./db/client.js');
-  const { prepareDatabase } = await import('./db/seed.js');
+  const { assertNoOpenSeedAccounts, prepareDatabase } = await import('./db/seed.js');
   const { createApp } = await import('./http/app.js');
   const { DevClock, SystemClock } = await import('./lib/clock.js');
   const { createMailer } = await import('./lib/mail.js');
@@ -28,6 +29,8 @@ async function main(): Promise<void> {
   const { assertPolicySetServeable } = await import('./services/policies.js');
 
   const config = loadConfig();
+  const production = isProductionRuntime(process.env);
+  requireAiDecision(config, production);
   // A released document set that still carries an unresolved field must never be served.
   assertPolicySetServeable();
   const { acquireProcessLock } = await import('./lib/process-lock.js');
@@ -35,6 +38,10 @@ async function main(): Promise<void> {
   process.once('exit', releaseLock);
   const { db, sqlite } = createDb(config.databasePath);
   prepareDatabase(db, config, Date.now());
+  // A promoted development database is refused before anything listens (audit ARCH-R-001).
+  if (production) assertNoOpenSeedAccounts(db);
+  const { activeAdministratorCount } = await import('./services/admin.js');
+  const admins = activeAdministratorCount(db);
   // One API process per database: any review still marked running was interrupted by the last
   // stop, whether or not AI review is enabled now.
   const interrupted = releaseStaleAiClaims(db, Date.now(), 0);
@@ -55,11 +62,18 @@ async function main(): Promise<void> {
   if (activated > 0) console.log(`Public listing deadline set for ${activated} legacy bottle(s).`);
   const app = createApp(ctx);
 
-  // In-process journey worker. Deterministic catch-up means a missed tick is harmless.
+  // In-process journey worker. Deterministic catch-up means a missed tick is harmless. Its
+  // state is kept for the readiness check (/api/health, audit ARCH-R-009).
+  ctx.workers = { journey: { lastTickAt: null, lastTickFailures: 0, failedTicks: 0 } };
+  const journeyStatus = ctx.workers.journey;
   const worker = setInterval(() => {
     try {
-      runJourneyTick(ctx);
+      const result = runJourneyTick(ctx);
+      journeyStatus.lastTickAt = Date.now();
+      journeyStatus.lastTickFailures = result.failures;
+      journeyStatus.failedTicks = 0;
     } catch (err) {
+      journeyStatus.failedTicks++;
       console.error('journey tick failed', err);
     }
   }, config.journeyTickMs);
@@ -81,8 +95,9 @@ async function main(): Promise<void> {
   }, config.ai.tickMs);
   aiWorker.unref();
 
-  // Evidence retention. The published policy says content evidence goes seven days after a case
-  // becomes final, so something has to actually remove it: a plan nobody runs is not a policy.
+  // Evidence retention. The published policy says content evidence goes 30 days after the
+  // decision (or once a timely appeal is decided, if later), so something has to actually
+  // remove it: a plan nobody runs is not a policy.
   // The pass is idempotent and re-checks every case inside its own transaction, so an hourly
   // tick that overlaps a decision, an appeal or a hold does the right thing.
   const retentionWorker = setInterval(() => {
@@ -105,11 +120,22 @@ async function main(): Promise<void> {
   }, config.retentionTickMs);
   retentionWorker.unref();
 
-  const server = serve({ fetch: app.fetch, port: config.port }, (info) => {
+  const listen = {
+    fetch: app.fetch,
+    port: config.port,
+    ...(config.host ? { hostname: config.host } : {}),
+  };
+  const server = serve(listen, (info) => {
     for (const file of loadedEnv) console.log(`Loaded environment from ${file}`);
     console.log(
-      `SeaYou API listening on http://localhost:${info.port} (devMode=${config.devMode}, mail=${config.mail.provider})`,
+      `SeaYou API listening on ${config.host ?? 'every interface'}, port ${info.port} (devMode=${config.devMode}, mail=${config.mail.provider})`,
     );
+    // A case the only administrator is a party to can be decided by nobody (audit SEC-R-004).
+    if (!config.devMode && admins < 2)
+      console.log(
+        `  Moderation: ${admins} active administrator(s). With fewer than two, a report about ` +
+          'an administrator, or by one, cannot be decided. See docs/DEPLOYMENT.md §6.',
+      );
     console.log(
       config.ai.enabled
         ? `  AI review: ${config.ai.model} at ${config.ai.endpoint} (recommendations only); reports queue while it is offline.`
@@ -162,6 +188,8 @@ function fatal(err: unknown, port?: number): never {
     console.error(
       '  Stop the other process first. This API keeps its workers and limits in memory.',
     );
+  } else if ((err as { name?: string } | null)?.name === 'SeededDatabaseError') {
+    console.error('  Nothing was started and the database was not changed.');
   } else if ((err as { name?: string } | null)?.name === 'ConfigError') {
     console.error('  The configuration is invalid, so nothing was started. See .env.example.');
   } else if (code === 'ERR_MODULE_NOT_FOUND' || /Cannot find (module|package)/i.test(message)) {

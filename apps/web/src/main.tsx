@@ -1,3 +1,5 @@
+// Before anything that defines or parses a schema.
+import './zod-config.js';
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 // Self-hosted OFL faces (FONTS.md): interface + display are eager, letter faces load with the

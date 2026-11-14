@@ -101,6 +101,19 @@ const relative = spawnSync(node, [dist('server.js')], {
   timeout: 20_000,
 });
 check('a relative MIB_DATABASE_PATH is refused', relative.status !== 0, `exit ${relative.status}`);
+// Whether reported letters go to a review model is written down, never defaulted (SEC-R-015).
+const noAiSetting = Object.fromEntries(Object.entries(env).filter(([k]) => k !== 'MIB_AI_ENABLED'));
+const aiUnset = spawnSync(node, [dist('server.js')], {
+  cwd: tmp,
+  env: noAiSetting,
+  encoding: 'utf8',
+  timeout: 20_000,
+});
+check(
+  'an unset MIB_AI_ENABLED is refused at startup',
+  aiUnset.status !== 0 && /MIB_AI_ENABLED must be set/.test(aiUnset.stderr),
+  `exit ${aiUnset.status}`,
+);
 
 // 3. Fresh migration with the compiled migrator.
 const migrated = spawnSync(node, [dist('migrate.js')], { cwd: tmp, env, encoding: 'utf8' });
@@ -176,6 +189,8 @@ try {
     h.ok === true && !('devMode' in h) && !('mail' in h),
   );
   check('startup log says devMode=false', /devMode=false/.test(output));
+  // Production listens on loopback unless MIB_HOST says otherwise (ARCH-R-004).
+  check('it listens on 127.0.0.1 by default', /listening on 127\.0\.0\.1,/.test(output));
   const second = spawnSync(node, [dist('server.js')], {
     cwd: tmp,
     env: { ...env, MIB_PORT: String(port + 1) },

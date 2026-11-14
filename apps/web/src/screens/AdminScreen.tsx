@@ -13,7 +13,14 @@ import { ConfirmDialog } from '../components/ConfirmDialog.js';
 import { TabList, tabId } from '../components/Tabs.js';
 import { LetterPaper } from '../components/LetterPaper.js';
 import { REPORT_REASON_LABELS } from '../components/ReportSheet.js';
-import { Avatar, BackButton, DeckScreen, ErrorNote, Skeleton } from '../components/ui.js';
+import {
+  Avatar,
+  BackButton,
+  DeckScreen,
+  ErrorNote,
+  LoadFailed,
+  Skeleton,
+} from '../components/ui.js';
 import { formatDate, formatDay, formatDayTime } from '../lib/format.js';
 import { useAsync } from '../lib/useAsync.js';
 
@@ -73,8 +80,10 @@ export function AdminScreen({ section, pending = null, onSection, onChanged, onB
       />
     </div>
   );
+  // Keyed by status, so older pages loaded for one status never show under another.
   return section === 'reports' ? (
     <ReportsSection
+      key={status}
       status={status}
       tabs={tabs}
       selected={selected}
@@ -84,6 +93,7 @@ export function AdminScreen({ section, pending = null, onSection, onChanged, onB
     />
   ) : (
     <AppealsSection
+      key={status}
       status={status}
       tabs={tabs}
       selected={selected}
@@ -115,14 +125,26 @@ function ReportsSection({
   onBack: () => void;
 }) {
   const list = useAsync(() => api.adminCases(status), [status], 15_000);
-  const cases = list.data?.cases ?? [];
+  // Back from a case: the list's heading takes focus (FE-R-006).
+  const [returned, setReturned] = useState(false);
+  // Older pages, loaded on request (audit SEC-R-018). The first page keeps polling.
+  const older = useOlderPages((cursor) =>
+    api.adminCases(status, cursor).then((p) => ({ items: p.cases, next: p.nextCursor ?? null })),
+  );
+  const firstPage = list.data?.cases ?? [];
+  const cases = mergeById(firstPage, older.items);
+  const nextCursor = older.started ? older.next : (list.data?.nextCursor ?? null);
   if (selected) {
     return (
       <CaseView
         id={selected}
-        onBack={() => onSelect(null)}
+        onBack={() => {
+          setReturned(true);
+          onSelect(null);
+        }}
         onChanged={async () => {
           onDecided?.();
+          older.reset();
           await list.reload();
         }}
       />
@@ -134,6 +156,7 @@ function ReportsSection({
       subtitle="Reported letters, as cases"
       actions={<BackButton onClick={onBack} />}
       wide
+      focusOnMount={returned}
     >
       {tabs}
       <div
@@ -146,6 +169,8 @@ function ReportsSection({
       >
         {list.loading && !list.data ? (
           <Skeleton />
+        ) : list.error && !list.data ? (
+          <LoadFailed error={list.error} onRetry={() => void list.reload()} />
         ) : cases.length === 0 ? (
           <div className="glass-panel stack">
             <h2 className="t-display-sm">No {status} cases</h2>
@@ -182,7 +207,12 @@ function ReportsSection({
             ))}
           </ul>
         )}
-        <ErrorNote error={list.error} />
+        <OlderButton
+          cursor={nextCursor}
+          busy={older.busy}
+          onMore={(cursor) => void older.load(cursor)}
+        />
+        {list.data ? <ErrorNote error={list.error ?? older.error} /> : null}
       </div>
     </DeckScreen>
   );
@@ -199,6 +229,9 @@ function UrgentChip({ reason }: { reason: 'child_safety' | 'threat' | null }) {
 }
 
 function AiChip({ ai }: { ai: AdminCaseSummaryDto['ai'] }) {
+  // With automated review switched off, nothing will answer: say so instead of "waiting".
+  if (!ai.enabled && ai.status !== 'done')
+    return <span className="status-chip status-at_sea">Automated review off</span>;
   const label =
     ai.status === 'done'
       ? ai.verdict === 'accept'
@@ -260,12 +293,14 @@ function CaseView({
       subtitle={c ? `Case ${c.status}` : ''}
       actions={<BackButton onClick={onBack} />}
       wide
+      focusOnMount
     >
       {res.loading || !c ? <Skeleton /> : <CaseBody c={c} />}
       {c?.recused ? (
         <p className="note amber" role="status">
           You are the sender, the recipient or a reporter on this case, so another administrator
-          must decide it, its appeal and any critical classification.
+          must decide it, its appeal, any critical classification and any hold on its evidence.
+          Other reporters and their explanations are hidden from you.
         </p>
       ) : null}
       {/* The three decisions (product decision 2): reject, uphold an ordinary violation, or
@@ -294,7 +329,8 @@ function CaseView({
           </button>
         </div>
       ) : null}
-      {c ? (
+      {/* A party may not place or release a hold on the evidence about them (SEC-R-003). */}
+      {c && !c.recused ? (
         <div className="row" style={{ justifyContent: 'flex-end', gap: 8 }}>
           {c.hold && c.hold.releasedAt === null ? (
             <button
@@ -485,14 +521,16 @@ function CaseBody({ c }: { c: AdminCaseDetailDto }) {
         <ul className="list">
           {c.reports.map((r) => (
             <li key={r.id} className="row-item" style={{ alignItems: 'flex-start' }}>
-              <Avatar name={r.reporter.displayName} tone="foam" />
+              <Avatar name={r.reporter?.displayName ?? '?'} tone="foam" />
               <span className="grow">
                 <span className="t-card-title" style={{ display: 'block' }}>
                   {REPORT_REASON_LABELS[r.reason]}
                 </span>
                 <span className="t-meta">
-                  by {r.reporter.displayName} (@{r.reporter.username}) ·{' '}
-                  {r.context === 'public' ? 'as a finder' : 'as the recipient'} ·{' '}
+                  {r.reporter
+                    ? `by ${r.reporter.displayName} (@${r.reporter.username})`
+                    : 'by a reporter hidden from you'}{' '}
+                  · {r.context === 'public' ? 'as a finder' : 'as the recipient'} ·{' '}
                   {formatDayTime(r.createdAt)}
                   {r.hidden ? ' · hid the letter' : ''}
                 </span>
@@ -545,6 +583,10 @@ function CaseBody({ c }: { c: AdminCaseDetailDto }) {
                 </div>
               ) : null}
             </>
+          ) : !c.ai.enabled ? (
+            <p className="secondary">
+              Automated review is switched off on this server. An administrator decides this case.
+            </p>
           ) : (
             <p className="secondary">
               {c.ai.status === 'running'
@@ -578,15 +620,26 @@ function AppealsSection({
   onBack: () => void;
 }) {
   const list = useAsync(() => api.adminAppeals(status), [status], 15_000);
-  const appeals = list.data?.appeals ?? [];
+  const [returned, setReturned] = useState(false);
+  const older = useOlderPages((cursor) =>
+    api
+      .adminAppeals(status, cursor)
+      .then((p) => ({ items: p.appeals, next: p.nextCursor ?? null })),
+  );
+  const appeals = mergeById(list.data?.appeals ?? [], older.items);
+  const nextCursor = older.started ? older.next : (list.data?.nextCursor ?? null);
   const current = selected ? (appeals.find((a) => a.id === selected) ?? null) : null;
   if (current) {
     return (
       <AppealView
         appeal={current}
-        onBack={() => onSelect(null)}
+        onBack={() => {
+          setReturned(true);
+          onSelect(null);
+        }}
         onChanged={async () => {
           onDecided?.();
+          older.reset();
           await list.reload();
           onSelect(null);
         }}
@@ -599,6 +652,7 @@ function AppealsSection({
       subtitle="Decisions the writer asked to be reconsidered"
       actions={<BackButton onClick={onBack} />}
       wide
+      focusOnMount={returned}
     >
       {tabs}
       <div
@@ -611,6 +665,8 @@ function AppealsSection({
       >
         {list.loading && !list.data ? (
           <Skeleton />
+        ) : list.error && !list.data ? (
+          <LoadFailed error={list.error} onRetry={() => void list.reload()} />
         ) : appeals.length === 0 ? (
           <div className="glass-panel stack">
             <h2 className="t-display-sm">No {status} appeals</h2>
@@ -639,9 +695,80 @@ function AppealsSection({
             ))}
           </ul>
         )}
-        <ErrorNote error={list.error} />
+        <OlderButton
+          cursor={nextCursor}
+          busy={older.busy}
+          onMore={(cursor) => void older.load(cursor)}
+        />
+        {list.data ? <ErrorNote error={list.error ?? older.error} /> : null}
       </div>
     </DeckScreen>
+  );
+}
+
+// ---------- paging ----------
+
+// Pages after the first, appended on request. The first page is polled separately, so an item
+// can appear on both while the queue moves; mergeById keeps the first copy.
+function useOlderPages<T>(
+  fetchPage: (cursor: string) => Promise<{ items: T[]; next: string | null }>,
+) {
+  const [items, setItems] = useState<T[]>([]);
+  const [next, setNext] = useState<string | null>(null);
+  const [started, setStarted] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<Error | null>(null);
+  const load = async (cursor: string) => {
+    setBusy(true);
+    setError(null);
+    try {
+      const page = await fetchPage(cursor);
+      setItems((prev) => [...prev, ...page.items]);
+      setNext(page.next);
+      setStarted(true);
+    } catch (err) {
+      setError(err instanceof Error ? err : new Error(String(err)));
+    } finally {
+      setBusy(false);
+    }
+  };
+  // After a decision the queue has moved: older pages are dropped and loaded again on request,
+  // so a decided item never lingers under the wrong status.
+  const reset = () => {
+    setItems([]);
+    setNext(null);
+    setStarted(false);
+    setError(null);
+  };
+  return { items, next, started, busy, error, load, reset };
+}
+
+function mergeById<T extends { id: string }>(first: T[], rest: T[]): T[] {
+  const seen = new Set(first.map((x) => x.id));
+  return [...first, ...rest.filter((x) => !seen.has(x.id))];
+}
+
+function OlderButton({
+  cursor,
+  busy,
+  onMore,
+}: {
+  cursor: string | null;
+  busy: boolean;
+  onMore: (cursor: string) => void;
+}) {
+  if (!cursor) return null;
+  return (
+    <div className="row" style={{ justifyContent: 'center' }}>
+      <button
+        type="button"
+        className="btn-secondary"
+        disabled={busy}
+        onClick={() => onMore(cursor)}
+      >
+        {busy ? 'Loading…' : 'Show older'}
+      </button>
+    </div>
   );
 }
 
@@ -677,6 +804,7 @@ function AppealView({
       subtitle={`Appeal ${a.status}`}
       actions={<BackButton onClick={onBack} />}
       wide
+      focusOnMount
     >
       <div className="stack">
         <div className="glass-panel stack">
@@ -689,9 +817,16 @@ function AppealView({
               <div className="t-meta">Appealed {formatDayTime(a.createdAt)}</div>
             </div>
           </div>
-          <p className="secondary" dir="auto">
-            “{a.text}”
-          </p>
+          {a.case.recused && a.text === '' ? (
+            <p className="note amber">
+              You are part of this case, so the appeal text is hidden from you and another
+              administrator must decide the appeal.
+            </p>
+          ) : (
+            <p className="secondary" dir="auto">
+              “{a.text}”
+            </p>
+          )}
           {a.decision ? (
             <p className="note">
               <strong>Appeal {a.decision.outcome}</strong> by {a.decision.admin.displayName} on{' '}
@@ -705,7 +840,8 @@ function AppealView({
           <CaseBody c={a.case} />
         </section>
       </div>
-      {a.status === 'pending' ? (
+      {/* A party cannot decide the appeal (the server refuses it too). */}
+      {a.status === 'pending' && !a.case.recused ? (
         <div className="row" style={{ justifyContent: 'flex-end', gap: 8 }}>
           <button type="button" className="btn-secondary" onClick={() => setConfirm('reject')}>
             Reject appeal

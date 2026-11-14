@@ -4,7 +4,7 @@ import type { OpenedLetterDto } from '@mib/shared';
 import { api } from '../api/client.js';
 import { Icon } from '../design/Icon.js';
 import { focusableIn } from '../lib/focusTrap.js';
-import { restoreFocus, useModalKeys } from '../lib/modal.js';
+import { inertAll, restoreFocus, useModalKeys } from '../lib/modal.js';
 import { formatDuration, prefersReducedMotion } from '../lib/format.js';
 import { LetterPaper } from './LetterPaper.js';
 import { ReportSheet } from './ReportSheet.js';
@@ -69,13 +69,13 @@ export function LetterModal({
     const siblings = [...document.body.children].filter(
       (el) => el !== dialogRef.current?.parentElement,
     );
-    for (const el of siblings) el.setAttribute('inert', '');
+    const releaseInert = inertAll(siblings);
     const bodyOverflow = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
     const focusables = focusableIn(dialogRef.current!);
     (focusables[0] ?? dialogRef.current)?.focus();
     return () => {
-      for (const el of siblings) el.removeAttribute('inert');
+      releaseInert();
       document.body.style.overflow = bodyOverflow;
       restoreFocus(previous);
     };
@@ -102,8 +102,9 @@ export function LetterModal({
       finishRef.current?.focus();
     }
   }, [confirmingFinish]);
-  const reportDone = ({ hidden }: { hidden: boolean }) => {
+  const reportDone = ({ hidden, blocked }: { hidden: boolean; blocked?: boolean }) => {
     setReporting(false);
+    if (blocked !== undefined) setBlockStage(blocked ? 'done' : 'failed');
     if (hidden) {
       onHidden?.();
       // Hiding a letter ends its reading; nothing is left to confirm.
@@ -211,7 +212,12 @@ export function LetterModal({
         </div>
         {reporting ? (
           <div className="letter-chrome letter-modal-report">
-            <ReportSheet bottleId={b.id} onDone={reportDone} onCancel={() => setReporting(false)} />
+            <ReportSheet
+              bottleId={b.id}
+              onDone={reportDone}
+              onCancel={() => setReporting(false)}
+              offerBlock={oneTime && blockStage !== 'done'}
+            />
           </div>
         ) : null}
         {blockStage === 'confirm' || blockStage === 'busy' ? (

@@ -16,17 +16,26 @@ export const REPORT_REASON_LABELS: Record<ReportReason, string> = {
 interface Props {
   bottleId: string;
   // Called after a successful report; `hidden` says the reporter asked for the letter to go.
-  onDone: (result: { hidden: boolean; alreadyReported: boolean }) => void;
+  onDone: (result: {
+    hidden: boolean;
+    alreadyReported: boolean;
+    // Set when the reporter also asked to block the writer: whether that worked.
+    blocked?: boolean;
+  }) => void;
   onCancel: () => void;
+  // A finder's one-time public reading: offer to block the anonymous writer in the same step,
+  // since hiding the letter ends the reading (audit SEC-R-012).
+  offerBlock?: boolean;
 }
 
 // Reporting a letter from inside the reader (spec §16). One request; the reporter chooses a
 // reason, may explain, and may hide the letter for themselves at once. Nothing is scanned or
 // judged here — the report opens a case that a person (helped by the local model) reviews.
-export function ReportSheet({ bottleId, onDone, onCancel }: Props) {
+export function ReportSheet({ bottleId, onDone, onCancel, offerBlock = false }: Props) {
   const [reason, setReason] = useState<ReportReason>('harassment');
   const [explanation, setExplanation] = useState('');
   const [hide, setHide] = useState(true);
+  const [block, setBlock] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<Error | null>(null);
 
@@ -41,7 +50,18 @@ export function ReportSheet({ bottleId, onDone, onCancel }: Props) {
         ...(explanation.trim() ? { explanation: explanation.trim() } : {}),
         hide,
       });
-      onDone({ hidden: r.hidden, alreadyReported: r.alreadyReported });
+      let blocked: boolean | undefined;
+      if (offerBlock && block) {
+        blocked = await api.blockFoundWriter(bottleId).then(
+          () => true,
+          () => false,
+        );
+      }
+      onDone({
+        hidden: r.hidden,
+        alreadyReported: r.alreadyReported,
+        ...(blocked === undefined ? {} : { blocked }),
+      });
     } catch (err) {
       setError(err instanceof Error ? err : new Error(String(err)));
       setBusy(false);
@@ -91,6 +111,17 @@ export function ReportSheet({ bottleId, onDone, onCancel }: Props) {
         />
         <span>Hide this letter from me right away</span>
       </label>
+      {offerBlock ? (
+        <label className="row" style={{ gap: 10 }}>
+          <input
+            type="checkbox"
+            checked={block}
+            onChange={(e) => setBlock(e.target.checked)}
+            disabled={busy}
+          />
+          <span>Also block the writer (they are not told)</span>
+        </label>
+      ) : null}
       <ErrorNote error={error} />
       <div className="row report-actions" style={{ justifyContent: 'flex-end', gap: 8 }}>
         <button type="button" className="btn-ghost" onClick={onCancel} disabled={busy}>

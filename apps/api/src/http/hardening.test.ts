@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import { createApp, MAX_REQUEST_BYTES } from './app.js';
 import { FORGOT_PER_ADDRESS } from './routes/auth.js';
-import { createTestWorld } from '../test/harness.js';
+import { createTestWorld, loginAs } from '../test/harness.js';
 
 // Batch 1 of the audit remediation plan: the request edge of the API.
 
@@ -135,5 +135,39 @@ describe('validation errors never echo input (ARCH-022)', () => {
     const text = await res.text();
     expect(text).not.toContain('hunter2-secret');
     expect(JSON.parse(text)).toMatchObject({ error: { code: 'validation' } });
+  });
+});
+
+// Audit SEC-R-010: a body that is not JSON is the client's mistake: 400, no stack trace logged.
+describe('malformed request bodies', () => {
+  it('answers 400 malformed_request and logs nothing', async () => {
+    const w = createTestWorld();
+    const app = createApp(w.ctx);
+    const { token } = await loginAs(app, 'ada');
+    const errors: unknown[] = [];
+    const original = console.error;
+    console.error = (...args: unknown[]) => errors.push(args);
+    try {
+      for (const [method, path, auth] of [
+        ['POST', '/api/auth/login', false],
+        ['PUT', '/api/auth/time-zone', true],
+      ] as const) {
+        const res = await app.request(path, {
+          method,
+          headers: {
+            'content-type': 'application/json',
+            ...(auth ? { authorization: `Bearer ${token}` } : {}),
+          },
+          body: '{"username": "ada", "password": ',
+        });
+        expect(res.status, path).toBe(400);
+        const body = (await res.json()) as { error: { code: string; message: string } };
+        expect(body.error.code).toBe('malformed_request');
+        expect(body.error.message).not.toContain('password');
+      }
+    } finally {
+      console.error = original;
+    }
+    expect(errors).toEqual([]);
   });
 });

@@ -23,7 +23,11 @@ export type AuditAction =
   | 'urgent_threat_review'
   | 'hold_placed'
   | 'hold_released'
-  | 'evidence_redacted';
+  | 'evidence_redacted'
+  // An administrator opened a case's evidence (audit SEC-R-003); ids only, no content.
+  | 'evidence_viewed'
+  // A role granted or removed with the operator tool (audit SEC-R-016).
+  | 'role_changed';
 
 export interface AuditEntry {
   action: AuditAction;

@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import { PUBLISHED_DOCUMENTS, type DocumentId } from '@mib/shared';
 import { Icon } from '../design/Icon.js';
 import { focusableIn } from '../lib/focusTrap.js';
-import { restoreFocus, useModalKeys } from '../lib/modal.js';
+import { inertAll, restoreFocus, useModalKeys } from '../lib/modal.js';
 import { PolicyDocumentView } from './PolicyDocumentView.js';
 import { TabList, tabPanelProps } from './Tabs.js';
 
@@ -22,12 +22,12 @@ export function PolicyDialog({ initial, onClose }: { initial: DocumentId; onClos
     const previous = document.activeElement as HTMLElement | null;
     // The dialog is portaled straight into <body>, so everything beside it goes inert.
     const siblings = [...document.body.children].filter((el) => el !== dialogRef.current);
-    for (const el of siblings) el.setAttribute('inert', '');
+    const releaseInert = inertAll(siblings);
     const bodyOverflow = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
     (focusableIn(dialogRef.current!)[0] ?? dialogRef.current)?.focus();
     return () => {
-      for (const el of siblings) el.removeAttribute('inert');
+      releaseInert();
       document.body.style.overflow = bodyOverflow;
       restoreFocus(previous);
     };

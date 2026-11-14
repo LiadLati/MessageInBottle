@@ -25,7 +25,7 @@ interface Props {
 // solely by "Pick it up".
 export function MyShoreScreen({ onOpenProfile, onChooseShore }: Props) {
   const { user } = useSession();
-  const { storm, shoreStormOverride } = useWeather();
+  const { storm, shoreStormOverride, phase } = useWeather();
   const shore = useAsync(() => api.myShore(), [], POLL_MS);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [opened, setOpened] = useState<OpenedLetterDto | null>(null);
@@ -90,7 +90,9 @@ export function MyShoreScreen({ onOpenProfile, onChooseShore }: Props) {
         <div>
           <h1 className="t-title">My Shore</h1>
           <p className="t-meta">
-            {shore.data?.shore?.name ?? '…'} · {weather === 'storm' ? 'storm · high water' : 'dusk'}
+            {/* The account's own day or night, as on the map (audit FE-R-015). */}
+            {shore.data?.shore?.name ?? '…'} ·{' '}
+            {weather === 'storm' ? 'storm · high water' : phase === 'night' ? 'night' : 'day'}
             {sealed.length > 0 ? ` · ${sealed.length} sealed` : ''}
           </p>
         </div>
@@ -122,7 +124,8 @@ export function MyShoreScreen({ onOpenProfile, onChooseShore }: Props) {
         ) : !featured ? (
           <div className="stack">
             <h2 className="t-display-sm">The tide has brought nothing yet</h2>
-            <p className="t-meta" style={{ fontSize: 12.5 }}>
+            {/* Secondary text colour: the muted meta colour measured 4.30:1 over the scene. */}
+            <p className="secondary" style={{ fontSize: 12.5 }}>
               Bottles appear here only once they have truly landed. Nothing on the way is ever
               shown. Letters you have opened wait under Letters → Received.
             </p>

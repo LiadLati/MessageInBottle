@@ -136,11 +136,27 @@ export function WeatherProvider({ children }: { children: ReactNode }) {
       .catch(() => {});
   }, [userId]);
 
+  // Paused while the tab is hidden, with one catch-up read when it is shown again, like every
+  // other poll in the app (lib/useAsync.ts; audit FE-R-016).
   useEffect(() => {
     if (!userId) return;
     void refresh();
-    const id = setInterval(() => void refresh(), WEATHER_POLL_MS);
-    return () => clearInterval(id);
+    let missed = false;
+    const id = setInterval(() => {
+      if (document.hidden) missed = true;
+      else void refresh();
+    }, WEATHER_POLL_MS);
+    const onVisibility = () => {
+      if (!document.hidden && missed) {
+        missed = false;
+        void refresh();
+      }
+    };
+    document.addEventListener('visibilitychange', onVisibility);
+    return () => {
+      clearInterval(id);
+      document.removeEventListener('visibilitychange', onVisibility);
+    };
   }, [userId, refresh]);
 
   // Report the device's zone after sign-in, on start, on returning to the foreground and when

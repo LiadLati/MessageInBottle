@@ -45,6 +45,7 @@ export const T0 = Date.parse('2026-09-06T12:00:00.000Z');
 export function testConfig(overrides: Partial<AppConfig> = {}): AppConfig {
   return {
     port: 0,
+    host: undefined,
     databasePath: ':memory:',
     devMode: true,
     logRequests: false,
@@ -64,13 +65,14 @@ export function testConfig(overrides: Partial<AppConfig> = {}): AppConfig {
     mail: {
       provider: 'outbox',
       from: 'test <no-reply@test>',
-      smtp: { host: '', port: 587, secure: false, user: '', pass: '' },
+      smtp: { host: '', port: 587, secure: false, requireTls: true, user: '', pass: '' },
     },
     riskPolicyVersion: RISK_POLICY_VERSION,
     // The same status production runs with: the shipped documents decide it.
     policies: { status: policySetStatus(POLICY_DOCUMENTS) },
     ai: {
       enabled: true,
+      explicit: true,
       endpoint: 'http://ai.test',
       model: 'test-model',
       timeoutMs: 1000,

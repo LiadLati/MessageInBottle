@@ -63,3 +63,31 @@ export function restoreFocus(previous: HTMLElement | null): void {
   if (!fallback.hasAttribute('tabindex')) fallback.setAttribute('tabindex', '-1');
   fallback.focus();
 }
+
+// How many open dialogs have made each element inert. Dialogs can stack (a confirmation over
+// the decision notice, the delete dialog over the standing screen): each one inerts what is
+// outside it and, on closing, must give back only its own claim, or it would re-enable the
+// page under a dialog that is still open (audit FE-R-017). The attribute stays while any claim
+// is left.
+const inertClaims = new Map<Element, number>();
+
+export function inertAll(elements: Iterable<Element>): () => void {
+  const claimed = [...elements];
+  for (const el of claimed) {
+    inertClaims.set(el, (inertClaims.get(el) ?? 0) + 1);
+    el.setAttribute('inert', '');
+  }
+  let released = false;
+  return () => {
+    if (released) return;
+    released = true;
+    for (const el of claimed) {
+      const left = (inertClaims.get(el) ?? 1) - 1;
+      if (left > 0) inertClaims.set(el, left);
+      else {
+        inertClaims.delete(el);
+        el.removeAttribute('inert');
+      }
+    }
+  };
+}

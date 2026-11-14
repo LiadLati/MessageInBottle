@@ -16,7 +16,7 @@ import {
 import { GLOBAL_SHORES } from './geo/shores.js';
 import { chartXY, loadSeaGraph } from './geo/sea-graph.js';
 import { newId } from '../lib/ids.js';
-import { hashPassword } from '../lib/password.js';
+import { hashPassword, verifyPassword } from '../lib/password.js';
 import { canonicalPair } from '../services/friends.js';
 
 // Databases created before geographic anchors existed get them filled in without a new graph
@@ -226,6 +226,24 @@ export function seedUsers(db: Db, now: number): void {
   });
 }
 
+// Development accounts that still open with the published development password: the sign of a
+// development database promoted to production (audit ARCH-R-001). Only the seed usernames are
+// checked, so it costs four password checks at start; an unrelated person who registered one of
+// those names with their own password is not matched.
+export function seededAccountsStillOpen(db: Db): string[] {
+  const open: string[] = [];
+  for (const u of SEED_USERS) {
+    const row = db
+      .select({ hash: t.users.passwordHash, status: t.users.status })
+      .from(t.users)
+      .where(eq(t.users.username, u.username))
+      .get();
+    if (row && row.status !== 'deleted' && verifyPassword(DEV_SEED_PASSWORD, row.hash))
+      open.push(u.username);
+  }
+  return open;
+}
+
 // What the API does to its database on every start: apply migrations, make sure the chart is
 // present, and — only in explicit development mode — create the development accounts. A
 // production database therefore never gains an account the operator did not create.
@@ -237,4 +255,22 @@ export function prepareDatabase(
   runMigrations(db);
   seedChart(db, config.defaultShoreCapacity, now);
   if (config.devMode) seedUsers(db, now);
+}
+
+// The production start check (server.ts): refuses a database whose development accounts still
+// open with the published password. Development runs without MIB_DEV_MODE are not checked, so
+// a developer's own database keeps working whichever way the switch is set.
+export function assertNoOpenSeedAccounts(db: Db): void {
+  const open = seededAccountsStillOpen(db);
+  if (open.length > 0)
+    throw new SeededDatabaseError(
+      `This database has development accounts that still sign in with the published ` +
+        `development password (${open.join(', ')}). It looks like a development database, and ` +
+        'it must not be served in production. Start production from a fresh database created ' +
+        'with dist/migrate.js (docs/DEPLOYMENT.md).',
+    );
+}
+
+export class SeededDatabaseError extends Error {
+  override readonly name = 'SeededDatabaseError';
 }

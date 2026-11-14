@@ -165,6 +165,8 @@ function Shell() {
     setShownFor(userId);
     setProfileOpen(false);
     setDeletingAccount(false);
+    // The Blocked users list is per account too (audit FE-R-010).
+    setBlockedOpen(false);
     setChoosingShore(false);
     setImmersive(false);
     setInboxOpen(false);
@@ -316,13 +318,16 @@ function Shell() {
           onDeleteAccount={() => setDeletingAccount(true)}
           onSuspensionEnded={reloadStanding}
         />
-        {pendingDecision ? (
+        {/* Hidden while the delete dialog is open over it; it comes back if that is cancelled. */}
+        {pendingDecision && !deletingAccount ? (
           <DecisionNotice
             // One component per notice: a second notice owed after the first is answered starts
             // fresh instead of inheriting the first one's busy state.
             key={pendingDecision.id}
             notice={pendingDecision}
             onResolved={reloadStanding}
+            onSignOut={() => void logout()}
+            onDeleteAccount={() => setDeletingAccount(true)}
           />
         ) : null}
         {appealResultDialog}
@@ -479,13 +484,15 @@ function Shell() {
           }}
         />
       ) : null}
-      {pendingDecision && !immersive ? (
+      {pendingDecision && !immersive && !deletingAccount ? (
         <DecisionNotice
           // One component per notice: a second notice owed after the first is answered starts
           // fresh instead of inheriting the first one's busy state.
           key={pendingDecision.id}
           notice={pendingDecision}
           onResolved={reloadStanding}
+          onSignOut={() => void logout()}
+          onDeleteAccount={() => setDeletingAccount(true)}
         />
       ) : null}
       {immersive ? null : appealResultDialog}

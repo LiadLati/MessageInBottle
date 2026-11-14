@@ -102,6 +102,29 @@ describe('an ended session returns to sign-in (FE-002)', () => {
   });
 });
 
+// Audit QA-R-006: the same on startup, when the stored token is already rejected by the
+// first request the app makes.
+describe('a session that ended while the app was closed (FE-002, startup)', () => {
+  it('starts signed out, with the explanation, and forgets the token', async () => {
+    sessionStorage.setItem('mib.session.token', 'tok');
+    sessionStorage.setItem('mib.draft', 'x');
+    vi.stubGlobal('fetch', () =>
+      reply(401, { error: { code: 'unauthorized', message: 'authentication required' } }),
+    );
+    render(
+      <SessionProvider>
+        <Probe />
+      </SessionProvider>,
+    );
+    await waitFor(() =>
+      expect(screen.getByTestId('notice').textContent).toBe(SESSION_ENDED_NOTICE),
+    );
+    expect(screen.getByTestId('user').textContent).toBe('none');
+    expect(sessionStorage.getItem('mib.session.token')).toBeNull();
+    expect(sessionStorage.getItem('mib.draft')).toBeNull();
+  });
+});
+
 describe('an unreachable server does not sign anyone out (FE-003)', () => {
   it('keeps the stored token and retries until the server answers', async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });

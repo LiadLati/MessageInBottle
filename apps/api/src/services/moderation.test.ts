@@ -101,7 +101,7 @@ describe('reports and cases', () => {
     expect(detail.intendedRecipient.username).toBe('bo');
     expect(detail.context).toBe('shore');
     expect(detail.ai.status).toBe('queued');
-    expect(listCases(w.ctx, 'pending').map((c) => c.id)).toEqual([first.caseId]);
+    expect(listCases(w.ctx, 'pending').cases.map((c) => c.id)).toEqual([first.caseId]);
   });
 
   it('refuses reports from anyone who does not hold the letter, including its sender', () => {
@@ -114,7 +114,7 @@ describe('reports and cases', () => {
     expect(() =>
       reportLetter(w.ctx, w.user('bo'), { bottleId: 'btl_nope', reason: 'hate', hide: true }),
     ).toThrow(AppError);
-    expect(listCases(w.ctx, 'all')).toEqual([]);
+    expect(listCases(w.ctx, 'all').cases).toEqual([]);
   });
 
   it('hides the letter for the reporter at once, and only for them', () => {
@@ -175,7 +175,7 @@ describe('reports and cases', () => {
     closeReading(w.ctx, w.user('dee'), b);
     reportLetter(w.ctx, w.user('bo'), { bottleId: a, reason: 'harassment', hide: false });
     const x = reportLetter(w.ctx, w.user('dee'), { bottleId: b, reason: 'spam', hide: false });
-    expect(listCases(w.ctx, 'pending')).toHaveLength(2);
+    expect(listCases(w.ctx, 'pending').cases).toHaveLength(2);
     // A letter is held by exactly one reader — its recipient on the shore, or the one finder of
     // an adrift bottle — so a second, different reporter of `a` or `b` cannot be produced. The
     // same reader reporting again is covered by the first test in this block.
@@ -324,7 +324,7 @@ describe('the local AI review queue', () => {
       hide: false,
     }).caseId;
     // Visible to the administrator before the model has said anything.
-    expect(listCases(w.ctx, 'pending').map((x) => x.id)).toEqual(
+    expect(listCases(w.ctx, 'pending').cases.map((x) => x.id)).toEqual(
       expect.arrayContaining([ordinary, cid]),
     );
     // The model flags only the case reported for sexual content.
@@ -351,7 +351,7 @@ describe('the local AI review queue', () => {
     };
     await runAiReviewTick(w.ctx, flagged);
     expect(getCase(w.ctx, ordinary).urgentAt).toBeNull();
-    const queue = listCases(w.ctx, 'pending');
+    const queue = listCases(w.ctx, 'pending').cases;
     expect(queue[0]!.id).toBe(cid);
     expect(queue[0]!.urgentAt).not.toBeNull();
     const c = getCase(w.ctx, cid);
@@ -487,8 +487,8 @@ describe('decisions, violations and account standing', () => {
     expect(readOwnLetter(w.ctx, ada(), id).letter.text.length).toBeGreaterThan(0);
     expect(moderationNotes(w, ada().id)).toEqual([]);
     // Still visible in the resolved list.
-    expect(listCases(w.ctx, 'rejected').map((x) => x.id)).toEqual([caseId]);
-    expect(listCases(w.ctx, 'pending')).toEqual([]);
+    expect(listCases(w.ctx, 'rejected').cases.map((x) => x.id)).toEqual([caseId]);
+    expect(listCases(w.ctx, 'pending').cases).toEqual([]);
   });
 
   it('an accepted report creates exactly one violation, removes the letter and warns the sender once', () => {
@@ -607,7 +607,7 @@ describe('appeals', () => {
     expect(() => submitAppeal(w.ctx, w.user('ada'), { violationId, text: 'again' })).toThrow(
       /already been appealed/,
     );
-    const list = listAppeals(w.ctx, 'pending');
+    const list = listAppeals(w.ctx, 'pending').appeals;
     expect(list).toHaveLength(1);
     expect(list[0]!.appellant.username).toBe('ada');
     expect(list[0]!.case.letter.text.length).toBeGreaterThan(0);
@@ -643,7 +643,7 @@ describe('appeals', () => {
     // apply, but Bo did not hide it.
     expect(readOwnLetter(w.ctx, w.user('ada'), bottleId).letter.text.length).toBeGreaterThan(0);
     expect(readOpenedLetter(w.ctx, w.user('bo'), bottleId).letter.text.length).toBeGreaterThan(0);
-    expect(listAppeals(w.ctx, 'accepted')[0]!.decision).toMatchObject({
+    expect(listAppeals(w.ctx, 'accepted').appeals[0]!.decision).toMatchObject({
       outcome: 'accepted',
       reason: 'Agreed: quoted, not endorsed.',
     });
@@ -733,7 +733,7 @@ describe('report budgets', () => {
     expect(err!.code).toBe('rate_limited');
     expect((err!.details as { retryAfterSeconds: number }).retryAfterSeconds).toBeGreaterThan(0);
     // The refused report left nothing behind.
-    expect(listCases(w.ctx, 'all')).toHaveLength(REPORTS_PER_HOUR.limit);
+    expect(listCases(w.ctx, 'all').cases).toHaveLength(REPORTS_PER_HOUR.limit);
   });
 
   it('frees the window as the oldest reports fall out of it', () => {

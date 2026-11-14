@@ -127,7 +127,11 @@ describe(`automatic storm outcomes (policy v${RISK_POLICY_VERSION})`, () => {
     // A journey released before activation (null version): a month of nights, never a decision.
     w.db.update(t.bottles).set({ riskPolicyVersion: null }).where(eq(t.bottles.id, fresh)).run();
     w.clock.advance(30 * DAY);
-    expect(processRiskDecisions(w.ctx, w.clock.now())).toEqual({ decided: 0, lost: 0 });
+    expect(processRiskDecisions(w.ctx, w.clock.now())).toEqual({
+      decided: 0,
+      lost: 0,
+      failures: 0,
+    });
     expect(decisions(fresh)).toEqual([]);
     // With the policy disabled by configuration, new journeys carry no version either.
     const off = slowWorld({ riskPolicyVersion: 0 });
@@ -308,7 +312,11 @@ describe(`automatic storm outcomes (policy v${RISK_POLICY_VERSION})`, () => {
     expect(heldReservations(w.db, 'shore_driftmoor_strand')).toBe(0);
     expect(listNotifications(w.ctx, ada().id).filter((n) => n.bottleId === id)).toHaveLength(1);
     // Again: nothing more happens, to anyone.
-    expect(processRiskDecisions(w.ctx, w.clock.now())).toEqual({ decided: 0, lost: 0 });
+    expect(processRiskDecisions(w.ctx, w.clock.now())).toEqual({
+      decided: 0,
+      lost: 0,
+      failures: 0,
+    });
     expect(commitArrivalIfDue(w.ctx, id, w.clock.now() + 100 * DAY)).toBe(false);
     expect(getMyShore(w.ctx, bo()).bottles).toEqual([]);
   });
@@ -326,7 +334,19 @@ describe('a losing decision and its loss are one commit (ARCH-007)', () => {
     client.exec(`CREATE TRIGGER fail_loss BEFORE UPDATE OF state ON bottles
       WHEN NEW.state = 'lost' BEGIN SELECT RAISE(ABORT, 'loss write failed'); END`);
     w.clock.set(storm.storm!.decisionAt + HOUR);
-    expect(() => processRiskDecisions(w.ctx, w.clock.now())).toThrow(/loss write failed/);
+    // The worker isolates the failure (ARCH-R-009): it is logged and counted, not thrown, and
+    // the rest of the tick goes on.
+    const logged: unknown[] = [];
+    const original = console.error;
+    console.error = (...args: unknown[]) => logged.push(args);
+    let failed: ReturnType<typeof processRiskDecisions>;
+    try {
+      failed = processRiskDecisions(w.ctx, w.clock.now());
+    } finally {
+      console.error = original;
+    }
+    expect(failed).toEqual({ decided: 0, lost: 0, failures: 1 });
+    expect(String((logged[0] as unknown[])[1])).toMatch(/loss write failed/);
     // No decision row claims a loss that never happened, and the storm is still undecided, so
     // nothing blocks a retry.
     expect(
@@ -532,6 +552,7 @@ describe('immediate arrival at the same harbour', () => {
       cancelled: 0,
       risk: { decided: 0, lost: 0 },
       expired: 0,
+      failures: 0,
     });
     // And an ordinary different-harbour journey still sails.
     const cy = w.user('cy');

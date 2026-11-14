@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { prefersReducedMotion } from '../lib/format.js';
+import { isWebGLAvailable } from '../lib/webgl.js';
 
 export type SceneMode = 'shore' | 'throw' | 'sea';
 
@@ -218,6 +219,12 @@ export function ShoreScene({
     if (!host) return;
     // The canvas belongs to this effect run, not to React: the cleanup below deliberately loses
     // its GL context, and a re-run (StrictMode, a mode change) must start from a fresh canvas.
+    // No WebGL at all: show the fallback without asking three.js to try, which logs errors
+    // to the console on every visit (audit FE-R-014).
+    if (!isWebGLAvailable()) {
+      queueMicrotask(() => setFailed(true));
+      return;
+    }
     const canvas = document.createElement('canvas');
     host.insertBefore(canvas, host.querySelector('.scene-fallback'));
     let renderer: THREE.WebGLRenderer;

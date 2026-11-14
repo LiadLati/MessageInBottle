@@ -1,8 +1,7 @@
 import { useState, type FormEvent } from 'react';
-import type { FriendDto } from '@mib/shared';
 import { api } from '../api/client.js';
 import { ConfirmDialog } from '../components/ConfirmDialog.js';
-import { Avatar, DeckScreen, ErrorNote, Skeleton } from '../components/ui.js';
+import { Avatar, DeckScreen, ErrorNote, LoadFailed, Skeleton } from '../components/ui.js';
 import { Icon } from '../design/Icon.js';
 import { useAsync } from '../lib/useAsync.js';
 
@@ -23,7 +22,13 @@ export function FriendsScreen({ onChanged }: Props) {
   const [notice, setNotice] = useState<string | null>(null);
   // Blocking cuts off correspondence at once and cancels bottles on their way: it gets the same
   // real dialog as every other consequential action, never a browser confirm() (audit FE-016).
-  const [blocking, setBlocking] = useState<FriendDto | null>(null);
+  // A friend, or someone whose request is waiting (audit FE-R-004: denying alone let the same
+  // person ask again and again; blocking stops that and hides the request).
+  const [blocking, setBlocking] = useState<{
+    username: string;
+    displayName: string;
+    request: boolean;
+  } | null>(null);
   const [blockBusy, setBlockBusy] = useState(false);
   const [blockError, setBlockError] = useState<Error | null>(null);
 
@@ -84,8 +89,10 @@ export function FriendsScreen({ onChanged }: Props) {
       <p className="note" role="status" hidden={!notice}>
         {notice}
       </p>
-      <ErrorNote error={error ?? friends.error} />
-      {friends.loading || !d ? (
+      <ErrorNote error={error ?? (d ? friends.error : null)} />
+      {friends.error && !d ? (
+        <LoadFailed error={friends.error} onRetry={() => void friends.reload()} />
+      ) : friends.loading || !d ? (
         <Skeleton />
       ) : (
         <>
@@ -130,6 +137,17 @@ export function FriendsScreen({ onChanged }: Props) {
                         <Icon name="check" size={14} />
                         Accept
                       </button>
+                      <button
+                        type="button"
+                        className="btn-text btn-destructive"
+                        aria-label={`Block ${r.from.displayName}`}
+                        onClick={() => {
+                          setBlockError(null);
+                          setBlocking({ ...r.from, request: true });
+                        }}
+                      >
+                        Block
+                      </button>
                     </span>
                   </li>
                 ))}
@@ -161,7 +179,7 @@ export function FriendsScreen({ onChanged }: Props) {
                       className="btn-text btn-destructive"
                       onClick={() => {
                         setBlockError(null);
-                        setBlocking(f);
+                        setBlocking({ ...f, request: false });
                       }}
                     >
                       Block
@@ -194,7 +212,11 @@ export function FriendsScreen({ onChanged }: Props) {
       {blocking ? (
         <ConfirmDialog
           title={`Block ${blocking.displayName}?`}
-          body={`While ${blocking.displayName} is blocked, you will not see each other as friends, they cannot send you bottles and you cannot send them any. You can unblock them later from Settings → Blocked users. That makes you friends again, but it does not bring back any letter cancelled or hidden in the meantime.`}
+          body={
+            blocking.request
+              ? `${blocking.displayName} will not be told. Their request disappears, they cannot ask again or send you bottles, and you will not see each other. You can unblock them later from Settings → Blocked users.`
+              : `While ${blocking.displayName} is blocked, you will not see each other as friends, they cannot send you bottles and you cannot send them any. You can unblock them later from Settings → Blocked users. That makes you friends again, but it does not bring back any letter cancelled or hidden in the meantime.`
+          }
           confirmLabel="Block"
           destructive
           busy={blockBusy}

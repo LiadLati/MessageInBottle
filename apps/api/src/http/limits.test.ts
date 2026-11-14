@@ -72,3 +72,47 @@ describe('the risk policy version is validated (ARCH-019)', () => {
     expect(() => loadConfig({ MIB_RISK_POLICY_VERSION: '7' })).toThrow(ConfigError);
   });
 });
+
+// Audit ARCH-R-010: before any device report the harbour sets the map clock, so a harbour change
+// that moves it spends the zone-change budget; one that does not move it is free.
+describe('harbour changes and the map-clock budget', () => {
+  it('charges harbour changes that move the map clock, and not others', async () => {
+    const { createApp } = await import('./app.js');
+    const { createTestWorld, loginAs } = await import('../test/harness.js');
+    const w = createTestWorld();
+    const app = createApp(w.ctx);
+    const { token } = await loginAs(app, 'dee');
+    const put = (shoreId: string) =>
+      app.request('/api/chart/my-shore', {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
+        body: JSON.stringify({ shoreId }),
+      });
+    // Two harbours in different nautical zones, alternately: each move spends the budget.
+    const shores = ['shore_us_new_york', 'shore_jp_yokohama'];
+    const statuses: number[] = [];
+    for (let i = 0; i <= ZONE_CHANGES_PER_ACCOUNT.limit; i++)
+      statuses.push((await put(shores[i % 2]!)).status);
+    expect(statuses.slice(0, ZONE_CHANGES_PER_ACCOUNT.limit).every((s) => s === 204)).toBe(true);
+    expect(statuses[ZONE_CHANGES_PER_ACCOUNT.limit]).toBe(429);
+    // Once a device has reported a zone, the harbour no longer moves the map: not charged.
+    const fresh = createTestWorld();
+    const app2 = createApp(fresh.ctx);
+    const bo = await loginAs(app2, 'bo');
+    await app2.request('/api/auth/time-zone', {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${bo.token}` },
+      body: JSON.stringify({ timeZone: 'Europe/London' }),
+    });
+    for (let i = 0; i < ZONE_CHANGES_PER_ACCOUNT.limit + 2; i++)
+      expect(
+        (
+          await app2.request('/api/chart/my-shore', {
+            method: 'PUT',
+            headers: { 'content-type': 'application/json', authorization: `Bearer ${bo.token}` },
+            body: JSON.stringify({ shoreId: shores[i % 2] }),
+          })
+        ).status,
+      ).toBe(204);
+  });
+});

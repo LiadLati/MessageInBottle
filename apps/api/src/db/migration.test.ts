@@ -11,7 +11,10 @@ import { seedChart, seedUsers } from './seed.js';
 import { createApp } from '../http/app.js';
 import { OutboxMailer } from '../lib/mail.js';
 import { releaseBottle } from '../services/release.js';
-import { runJourneyTick } from '../services/journey.js';
+import { commitArrivalIfDue, runJourneyTick } from '../services/journey.js';
+import { decideCase, getCase, listAppeals } from '../services/admin.js';
+import { deleteAccount } from '../services/deletion.js';
+import { reportLetter, submitAppeal } from '../services/moderation.js';
 import { getMyShore, getSentBottle, openBottle } from '../services/bottles.js';
 import { ManualClock, T0, createTestWorld, releaseInput, testConfig } from '../test/harness.js';
 
@@ -212,4 +215,105 @@ describe('the map-clock history backfill (0017)', () => {
       n: 1,
     });
   });
+});
+
+// Audit QA-R-011: an upgrade from the 0014 era (the shape the owner's development database was
+// last seen at) with moderation, policy and deletion rows in it, not only a journey.
+describe('upgrading a populated 0014-era database', () => {
+  it('keeps every existing row and serves the current API afterwards', () => {
+    // No storm risk: this is about the schema, and a loss decided by a random id would make the
+    // arrival below fail now and then (QA-R-008).
+    const source = createTestWorld({ defaultShoreCapacity: 80, riskPolicyVersion: 0 });
+    const [ada, bo, cy, dee] = ['ada', 'bo', 'cy', 'dee'].map((u) => source.user(u)) as [
+      ReturnType<typeof source.user>,
+      ReturnType<typeof source.user>,
+      ReturnType<typeof source.user>,
+      ReturnType<typeof source.user>,
+    ];
+    source.db.update(t.users).set({ role: 'admin' }).where(eq(t.users.id, dee.id)).run();
+    // A delivered, opened and reported letter with an upheld violation and a pending appeal …
+    const reported = releaseBottle(
+      source.ctx,
+      ada,
+      releaseInput(bo.id, 'upgrade-key-0001'),
+    ).bottleId;
+    // … and a journey still at sea.
+    const atSea = releaseBottle(source.ctx, ada, releaseInput(bo.id, 'upgrade-key-0002')).bottleId;
+    const plan = source.db
+      .select()
+      .from(t.routePlans)
+      .where(eq(t.routePlans.bottleId, atSea))
+      .get()!;
+    const reportedPlan = source.db
+      .select()
+      .from(t.routePlans)
+      .where(eq(t.routePlans.bottleId, reported))
+      .get()!;
+    source.clock.set(reportedPlan.startsAt + reportedPlan.plannedDurationMs);
+    commitArrivalIfDue(source.ctx, reported, source.clock.now());
+    openBottle(source.ctx, bo, reported);
+    const { caseId } = reportLetter(source.ctx, bo, {
+      bottleId: reported,
+      reason: 'harassment',
+      hide: false,
+    });
+    decideCase(source.ctx, dee, caseId, 'accepted', 'Upheld.');
+    const violationId = source.db
+      .select()
+      .from(t.violations)
+      .where(eq(t.violations.caseId, caseId))
+      .get()!.id;
+    submitAppeal(source.ctx, ada, { violationId, text: 'Please look again.' });
+    // A deleted account.
+    deleteAccount(source.ctx, cy.id);
+    const sourceSqlite = (source.db as unknown as { $client: Database.Database }).$client;
+
+    // The 0014-era schema, populated with the same rows (columns it does not have are dropped).
+    const legacyDir = legacyMigrationsFolder(
+      new Set(['0015_product_decisions', '0016_account_storms', '0017_account_zone_backfill']),
+    );
+    const { db, sqlite } = createDb(':memory:');
+    runMigrations(db, legacyDir);
+    expect(tableNames(sqlite)).toContain('moderation_audit');
+    expect(tableNames(sqlite)).not.toContain('account_zone_changes');
+    sqlite.pragma('foreign_keys = OFF');
+    for (const [table, rows] of Object.entries(dump(sourceSqlite))) {
+      if (!tableNames(sqlite).includes(table)) continue;
+      const cols = columnsOf(sqlite, table);
+      const insert = sqlite.prepare(
+        `INSERT INTO ${table} (${cols.join(', ')}) VALUES (${cols.map(() => '?').join(', ')})`,
+      );
+      for (const row of rows) insert.run(cols.map((c) => row[c] ?? null));
+    }
+    sqlite.pragma('foreign_keys = ON');
+    const before = dump(sqlite);
+    for (const table of ['moderation_cases', 'violations', 'appeals', 'policy_acceptances'])
+      expect(before[table]!.length, table).toBeGreaterThan(0);
+
+    // Upgrade in place: every row that existed is still there, unchanged in every column it had.
+    runMigrations(db);
+    expect(sqlite.prepare('PRAGMA foreign_key_check').all()).toEqual([]);
+    expect(sqlite.prepare('PRAGMA integrity_check').get()).toEqual({ integrity_check: 'ok' });
+    const after = dump(sqlite);
+    for (const [table, rows] of Object.entries(before)) {
+      const kept = after[table]!.map((r) =>
+        Object.fromEntries(Object.entries(r).filter(([k]) => k in (rows[0] ?? r))),
+      );
+      expect(kept, table).toEqual(rows);
+    }
+
+    // The current API works on it: the admin reads the case and its appeal, and the journey
+    // still at sea arrives on schedule.
+    const clock = new ManualClock(source.clock.now());
+    const config = testConfig();
+    const ctx = { db, clock, realClock: clock, config, mailer: new OutboxMailer() };
+    expect(getCase(ctx, caseId).violation?.id).toBe(violationId);
+    expect(listAppeals(ctx, 'pending').appeals.map((a) => a.case.id)).toEqual([caseId]);
+    clock.set(plan.startsAt + plan.plannedDurationMs);
+    const tick = runJourneyTick(ctx);
+    expect(tick.failures).toBe(0);
+    expect(db.select().from(t.bottles).where(eq(t.bottles.id, atSea)).get()!.state).toBe(
+      'delivered',
+    );
+  }, 60_000);
 });

@@ -3,10 +3,10 @@ import { createPortal } from 'react-dom';
 import type { BlockedUsersResponse } from '@mib/shared';
 import { api } from '../api/client.js';
 import { focusableIn } from '../lib/focusTrap.js';
-import { restoreFocus, useModalKeys } from '../lib/modal.js';
+import { inertAll, restoreFocus, useModalKeys } from '../lib/modal.js';
 import { formatDate } from '../lib/format.js';
 import { useAsync } from '../lib/useAsync.js';
-import { Avatar, ErrorNote, Skeleton } from './ui.js';
+import { Avatar, ErrorNote, LoadFailed, Skeleton } from './ui.js';
 
 type Blocked = BlockedUsersResponse['blocked'][number];
 
@@ -27,9 +27,9 @@ export function BlockedUsersDialog({ onClose }: { onClose: () => void }) {
     const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     const layer = dialogRef.current?.parentElement;
     const siblings = [...document.body.children].filter((el) => el !== layer);
-    for (const el of siblings) el.setAttribute('inert', '');
+    const releaseInert = inertAll(siblings);
     return () => {
-      for (const el of siblings) el.removeAttribute('inert');
+      releaseInert();
       restoreFocus(previous);
     };
   }, []);
@@ -123,6 +123,9 @@ export function BlockedUsersDialog({ onClose }: { onClose: () => void }) {
             ) : null}
             {list.loading && !list.data ? (
               <Skeleton />
+            ) : list.error && !list.data ? (
+              // A list that failed to load is not an empty one (audit FE-R-007).
+              <LoadFailed error={list.error} onRetry={() => void list.reload()} />
             ) : blocked.length === 0 ? (
               <p className="secondary">You have not blocked anyone.</p>
             ) : (
@@ -154,7 +157,7 @@ export function BlockedUsersDialog({ onClose }: { onClose: () => void }) {
                 ))}
               </ul>
             )}
-            <ErrorNote error={list.error} />
+            {list.data ? <ErrorNote error={list.error} /> : null}
           </>
         )}
       </div>

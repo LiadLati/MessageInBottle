@@ -14,12 +14,17 @@ import { SupportLink } from './SupportLink.js';
 import { ErrorNote } from './ui.js';
 import { formatDate } from '../lib/format.js';
 import { focusableIn } from '../lib/focusTrap.js';
-import { useModalKeys } from '../lib/modal.js';
+import { inertAll, useModalKeys } from '../lib/modal.js';
 
 interface Props {
   notice: ViolationNoticeDto;
   // The notice was resolved (appealed or waived); reload standing.
   onResolved: () => Promise<void> | void;
+  // Leaving without answering (audit FE-R-011): the Terms promise that a restricted account can
+  // always sign out and delete itself, and the notice covers the screen that offers both. Doing
+  // either decides nothing; the notice comes back on the next sign-in.
+  onSignOut?: () => void;
+  onDeleteAccount?: () => void;
 }
 
 // The decision notice, and the single appeal opportunity it carries.
@@ -33,7 +38,7 @@ interface Props {
 // offer is never counted as declined by someone who was never shown it.
 type Stage = 'notice' | 'confirm-waiver' | 'appeal';
 
-export function DecisionNotice({ notice, onResolved }: Props) {
+export function DecisionNotice({ notice, onResolved, onSignOut, onDeleteAccount }: Props) {
   const [stage, setStage] = useState<Stage>('notice');
   const [text, setText] = useState('');
   const [busy, setBusy] = useState(false);
@@ -46,9 +51,9 @@ export function DecisionNotice({ notice, onResolved }: Props) {
 
   useEffect(() => {
     const siblings = [...document.body.children].filter((el) => el !== ref.current?.parentElement);
-    for (const el of siblings) el.setAttribute('inert', '');
+    const releaseInert = inertAll(siblings);
     return () => {
-      for (const el of siblings) el.removeAttribute('inert');
+      releaseInert();
     };
   }, []);
   // Focus moves to the dialog on each stage, so the confirmation is announced rather than
@@ -110,9 +115,10 @@ export function DecisionNotice({ notice, onResolved }: Props) {
             <div id={bodyId} className="stack">
               <p className="secondary">
                 Your letter to {notice.bottle.recipientDisplayName}, released{' '}
-                {formatDate(notice.bottle.releasedAt)}, was reported for{' '}
-                <strong>{REPORT_REASON_LABELS[notice.category].toLowerCase()}</strong> and, after
-                review by a person, removed for breaking the Community Rules.
+                {formatDate(notice.bottle.releasedAt)}
+                {notice.bottle.readByFinder ? ', lost at sea and read by a finder,' : ','} was
+                reported for <strong>{REPORT_REASON_LABELS[notice.category].toLowerCase()}</strong>{' '}
+                and, after review by a person, removed for breaking the Community Rules.
               </p>
               <p className="secondary">{ladder}</p>
               <p className="note amber">
@@ -140,9 +146,10 @@ export function DecisionNotice({ notice, onResolved }: Props) {
             <div id={bodyId} className="stack">
               <p className="secondary">
                 Your letter to {notice.bottle.recipientDisplayName}, released{' '}
-                {formatDate(notice.bottle.releasedAt)}, was reported for{' '}
-                <strong>{REPORT_REASON_LABELS[notice.category].toLowerCase()}</strong> and, after
-                review by a person, removed for breaking the Community Rules.
+                {formatDate(notice.bottle.releasedAt)}
+                {notice.bottle.readByFinder ? ', lost at sea and read by a finder,' : ','} was
+                reported for <strong>{REPORT_REASON_LABELS[notice.category].toLowerCase()}</strong>{' '}
+                and, after review by a person, removed for breaking the Community Rules.
               </p>
               <p className="secondary">{ladder}</p>
               {notice.appealReopenedAt ? (
@@ -255,6 +262,25 @@ export function DecisionNotice({ notice, onResolved }: Props) {
             </div>
           </form>
         )}
+        {onSignOut || onDeleteAccount ? (
+          <div className="row" style={{ gap: 8, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+            {onSignOut ? (
+              <button type="button" className="btn-text" onClick={onSignOut} disabled={busy}>
+                Sign out
+              </button>
+            ) : null}
+            {onDeleteAccount ? (
+              <button
+                type="button"
+                className="btn-text btn-destructive"
+                onClick={onDeleteAccount}
+                disabled={busy}
+              >
+                Delete account
+              </button>
+            ) : null}
+          </div>
+        ) : null}
       </div>
     </div>,
     document.body,

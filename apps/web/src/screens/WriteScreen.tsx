@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   FONT_DEFINITIONS,
   LETTER_FONTS,
@@ -43,6 +43,12 @@ export function WriteScreen({ onReleased, onChooseShore, onImmersive }: Props) {
   const [acknowledged, setAcknowledged] = useState(false);
   const friends = useAsync(() => api.friends(), []);
   const chart = useAsync(() => api.chart(), []);
+  // The preview is its own full-screen view, outside DeckScreen: its heading takes focus when
+  // it opens, like every other in-place view change (FE-R-006).
+  const previewHeading = useRef<HTMLHeadingElement>(null);
+  useEffect(() => {
+    if (step === 'preview') previewHeading.current?.focus();
+  }, [step]);
 
   useEffect(() => saveDraft(draft), [draft]);
   useEffect(ensureLetterFaces, []);
@@ -128,6 +134,7 @@ export function WriteScreen({ onReleased, onChooseShore, onImmersive }: Props) {
     const d = friends.data;
     return (
       <DeckScreen
+        view={step}
         title="Who is this for?"
         subtitle="They will not know a bottle is coming until it lands."
       >
@@ -156,7 +163,7 @@ export function WriteScreen({ onReleased, onChooseShore, onImmersive }: Props) {
                         {f.displayName}
                       </span>
                       <span className="t-meta">
-                        @{f.username} · {eligible ? 'Room on their shore' : 'No shore chosen yet'}
+                        @{f.username} · {eligible ? 'Has a shore' : 'No shore chosen yet'}
                       </span>
                     </span>
                     {eligible ? <Icon name="back" size={16} className="flip" /> : null}
@@ -174,6 +181,7 @@ export function WriteScreen({ onReleased, onChooseShore, onImmersive }: Props) {
   if (step === 'compose') {
     return (
       <DeckScreen
+        view={step}
         // The recipient is named in the heading itself (manual review round 2); that they will
         // not know a bottle is coming is said where they are chosen.
         title={
@@ -294,7 +302,9 @@ export function WriteScreen({ onReleased, onChooseShore, onImmersive }: Props) {
       <div className="scrim-map-header" />
       <header className="world-header">
         <div>
-          <h1 className="t-title">Preview &amp; release</h1>
+          <h1 className="t-title" ref={previewHeading} tabIndex={-1}>
+            Preview &amp; release
+          </h1>
           <p className="t-meta">
             {p?.route
               ? `A journey of about ${formatDuration(p.route.plannedDurationMs)}`
@@ -324,8 +334,9 @@ export function WriteScreen({ onReleased, onChooseShore, onImmersive }: Props) {
               </dd>
             </dl>
           ) : null}
+          {/* A refusal is announced politely where it appears (FE-R-008). */}
           {p && !p.eligible ? (
-            <p className="note error" style={{ marginTop: 12 }}>
+            <p className="note error" role="status" style={{ marginTop: 12 }}>
               {rejectionCopy(p.rejection)}
             </p>
           ) : null}

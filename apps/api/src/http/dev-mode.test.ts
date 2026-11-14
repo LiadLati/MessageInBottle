@@ -5,7 +5,8 @@ import { loadConfig } from '../config.js';
 import { createDb } from '../db/client.js';
 import * as t from '../db/schema.js';
 import { DEV_SEED_PASSWORD, SEED_USERS } from '../db/seed-data.js';
-import { prepareDatabase } from '../db/seed.js';
+import { SeededDatabaseError, assertNoOpenSeedAccounts, prepareDatabase } from '../db/seed.js';
+import { hashPassword } from '../lib/password.js';
 import { OutboxMailer } from '../lib/mail.js';
 import { SystemClock } from '../lib/clock.js';
 import { createApp } from './app.js';
@@ -299,6 +300,24 @@ describe('a clean production database has no development accounts', () => {
       });
       expect(res.status, username).toBe(401);
     }
+  });
+
+  // Audit ARCH-R-001: a development database promoted to production is refused at start.
+  it('refuses a database whose development accounts still open with the published password', () => {
+    const { db } = createDb(':memory:');
+    prepareDatabase(db, loadConfig({ MIB_DEV_MODE: 'true' }), Date.now());
+    expect(() => assertNoOpenSeedAccounts(db)).toThrow(SeededDatabaseError);
+    expect(() => assertNoOpenSeedAccounts(db)).toThrow(/ada, bo, cy, dee/);
+    // Once their passwords are changed (or they are deleted), the database is acceptable.
+    for (const { username } of SEED_USERS)
+      db.update(t.users)
+        .set({ passwordHash: hashPassword(`changed-${username}-password`) })
+        .where(eq(t.users.username, username))
+        .run();
+    expect(() => assertNoOpenSeedAccounts(db)).not.toThrow();
+    const fresh = createDb(':memory:').db;
+    prepareDatabase(fresh, loadConfig({}), Date.now());
+    expect(() => assertNoOpenSeedAccounts(fresh)).not.toThrow();
   });
 
   it('creates them only in explicit development mode', () => {

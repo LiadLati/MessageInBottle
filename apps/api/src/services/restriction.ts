@@ -75,6 +75,66 @@ export function endInboundJourneys(tx: DbOrTx, recipientId: string, now: number)
 // Idempotent and transactional: runs inside the caller's transaction, and every write is guarded
 // on the state it changes, so a retried decision, a repeated standing calculation or a restart
 // changes nothing twice and writes no second notification.
+// Storm midpoints that have already passed for these senders are decided now, exactly as an
+// on-time worker would have decided them, before anything ends their journeys (audit
+// ARCH-R-005). Without it the outcome of a deletion, a restriction or a harbour change depended
+// on how far behind the worker happened to be: a storm that had already struck was cancelled
+// instead. Runs on the journey clock; a no-op for a sender with nothing at risk.
+export function settleDueStorms(ctx: AppContext, tx: DbOrTx, senderIds: Iterable<string>): void {
+  const journeyNow = ctx.clock.now();
+  for (const senderId of new Set(senderIds)) {
+    const atRisk = tx
+      .select({ id: t.bottles.id })
+      .from(t.bottles)
+      .where(
+        and(
+          eq(t.bottles.senderId, senderId),
+          eq(t.bottles.state, 'at_sea'),
+          isNotNull(t.bottles.riskPolicyVersion),
+        ),
+      )
+      .get();
+    if (!atRisk) continue;
+    ensureRollsIn(ctx, tx, senderId, journeyNow);
+    decideDueStorms(ctx, tx, senderId, journeyNow);
+  }
+}
+
+// The same for the senders of every journey still travelling to this account, before those
+// journeys end because the account was deleted or restricted.
+export function settleDueStormsInbound(ctx: AppContext, tx: DbOrTx, recipientId: string): void {
+  const senders = tx
+    .selectDistinct({ senderId: t.bottles.senderId })
+    .from(t.bottles)
+    .where(and(eq(t.bottles.recipientId, recipientId), eq(t.bottles.state, 'at_sea')))
+    .all()
+    .map((r) => r.senderId);
+  settleDueStorms(ctx, tx, senders);
+}
+
+// Everything a sender's journeys had already done by now: storm midpoints, then arrivals —
+// the worker's own order. Returns the arrivals committed.
+export function settleDueForSender(ctx: AppContext, tx: DbOrTx, senderId: string): number {
+  const journeyNow = ctx.clock.now();
+  const realNow = ctx.realClock.now();
+  settleDueStorms(ctx, tx, [senderId]);
+  let settledArrivals = 0;
+  const travelling = tx
+    .select()
+    .from(t.bottles)
+    .where(and(eq(t.bottles.senderId, senderId), eq(t.bottles.state, 'at_sea')))
+    .orderBy(t.bottles.releasedAt, t.bottles.id)
+    .all();
+  for (const bottle of travelling) {
+    const plan = activePlan(tx, bottle.id);
+    if (!plan || plan.startsAt > journeyNow) continue;
+    const arrivalAt = plannedArrivalAt(plan);
+    if (arrivalAt > journeyNow) continue;
+    if (commitArrival(tx, bottle, plan, arrivalAt, journeyNow, realNow)) settledArrivals++;
+  }
+  return settledArrivals;
+}
+
 export function endOutboundJourneys(
   ctx: AppContext,
   tx: DbOrTx,
@@ -82,25 +142,9 @@ export function endOutboundJourneys(
 ): { settledArrivals: number; cancelled: number; listingsWithdrawn: number } {
   // Journeys, storms and listings run on the journey clock; standing on server time.
   const journeyNow = ctx.clock.now();
-  const realNow = ctx.realClock.now();
 
   // 1. What already happened. Storms first, then arrivals — the worker's own order.
-  const atRisk = tx
-    .select({ id: t.bottles.id })
-    .from(t.bottles)
-    .where(
-      and(
-        eq(t.bottles.senderId, senderId),
-        eq(t.bottles.state, 'at_sea'),
-        isNotNull(t.bottles.riskPolicyVersion),
-      ),
-    )
-    .get();
-  if (atRisk) {
-    ensureRollsIn(ctx, tx, senderId, journeyNow);
-    decideDueStorms(ctx, tx, senderId, journeyNow);
-  }
-  let settledArrivals = 0;
+  const settledArrivals = settleDueForSender(ctx, tx, senderId);
   const travelling = () =>
     tx
       .select()
@@ -108,13 +152,6 @@ export function endOutboundJourneys(
       .where(and(eq(t.bottles.senderId, senderId), eq(t.bottles.state, 'at_sea')))
       .orderBy(t.bottles.releasedAt, t.bottles.id)
       .all();
-  for (const bottle of travelling()) {
-    const plan = activePlan(tx, bottle.id);
-    if (!plan || plan.startsAt > journeyNow) continue;
-    const arrivalAt = plannedArrivalAt(plan);
-    if (arrivalAt > journeyNow) continue;
-    if (commitArrival(tx, bottle, plan, arrivalAt, journeyNow, realNow)) settledArrivals++;
-  }
 
   // 2. What is still on its way ends here.
   let cancelled = 0;
@@ -185,6 +222,9 @@ export function applyStandingEffects(
   now: number,
 ): number {
   if (!isRestricted(tx, userId, now)) return 0;
+  // Storms that already struck the journeys travelling to this account are decided before
+  // those journeys end (ARCH-R-005).
+  settleDueStormsInbound(ctx, tx, userId);
   const outbound = endOutboundJourneys(ctx, tx, userId);
   return endInboundJourneys(tx, userId, now) + outbound.cancelled + outbound.listingsWithdrawn;
 }

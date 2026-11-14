@@ -2,7 +2,7 @@ import { useEffect, useId, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import type { SentBottleSummaryDto } from '@mib/shared';
 import { Icon } from '../design/Icon.js';
-import { restoreFocus, useModalKeys } from '../lib/modal.js';
+import { inertAll, restoreFocus, useModalKeys } from '../lib/modal.js';
 import { formatDuration, prefersReducedMotion } from '../lib/format.js';
 import type { BottleWeather } from '../lib/oceanWeather.js';
 import { ShoreScene } from './ShoreScene.js';
@@ -41,13 +41,13 @@ export function SeaViewer({ bottle, weather, phase, onBack }: Props) {
     const siblings = [...document.body.children].filter(
       (el) => el !== dialogRef.current?.parentElement,
     );
-    for (const el of siblings) el.setAttribute('inert', '');
+    const releaseInert = inertAll(siblings);
     const bodyOverflow = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
     // Back to map is the first focus target on the sea screen.
     dialogRef.current?.querySelector<HTMLElement>('.sea-back')?.focus();
     return () => {
-      for (const el of siblings) el.removeAttribute('inert');
+      releaseInert();
       document.body.style.overflow = bodyOverflow;
       restoreFocus(previous);
     };

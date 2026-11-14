@@ -1,15 +1,21 @@
 # Remediation status
 
-Tracks fixes for findings from the pre-deployment readiness audit (branch
-`audit/pre-deployment-readiness`, audited commit `5ba32c2`; reports `00`–`05` in
-`docs/audits/pre-deployment-readiness/` on that branch). The audit's verdict was **NO-GO**.
+Tracks fixes for findings from two audits, both kept in `docs/audits/` (see its README for
+provenance):
 
-Two branches carry the work:
+- the pre-deployment readiness audit (audited commit `5ba32c2`; reports `00`–`05` in
+  `docs/audits/pre-deployment-readiness/`), verdict **NO-GO**, 100 findings;
+- the pre-production re-audit (audited commit `a04526f`; reports `00`–`06` in
+  `docs/audits/pre-production-rerun/`), 55 findings. Every one is accounted for in
+  "Re-audit closure" at the end of this file.
 
-- `fix/production-runtime` (Stage 1, merged to `main` as `f89e35c`) — recorded below under
-  "Stage 1".
-- `fix/audit-remediation` (from `f89e35c`, not merged, not deployed) — Batches 1–4 of
-  `05-remediation-plan.md`, in dependency order, one commit group per batch.
+The work, all merged to `main` unless said otherwise:
+
+- `fix/production-runtime` (Stage 1, merged as `f89e35c`) — recorded below under "Stage 1".
+- `fix/audit-remediation` — Batches 1–4 of `05-remediation-plan.md`.
+- `fix/product-decisions` — the owner's decisions D1–D17.
+- `fix/final-release-blockers` — the re-audit's P1s and the first P2s.
+- `fix/backlog-remediation` (not merged) — the remaining re-audit findings.
 
 **Status words.** *Fixed* — changed and verified by the named test or check. *Fixed by f89e35c*
 — closed by Stage 1; re-checked against current code, not reimplemented. *Partly fixed* — the
@@ -43,7 +49,7 @@ Test paths are relative to `apps/api/src` (API), `apps/web/src` (web) or `packag
 | --- | --- | --- | --- | --- |
 | ARCH-002 = SEC-002 | P1 | Fixed | `services/deletion.ts` `sweepDeletedAccount()`: withdraws the deleted sender's adrift listings (closing readings), clears every lost letter's text | `services/deletion-sweep.test.ts` |
 | ARCH-014 = QA-005 | P1 | Fixed | Inbound journeys to a deleted account end as cancelled ("Delivery unavailable"), capacity released; delivered-unopened slots released; `commitArrival` refuses inactive recipients and blocks in either direction | `services/deletion-sweep.test.ts`; arrival refusals in `services/recovery-paths.test.ts` |
-| SEC-012 | P2 | Partly fixed | Deleting an account closes its unused appeal (system audit row `appeal_waived`), so the case becomes final and is redacted after seven days | `services/deletion-sweep.test.ts`. Absent-but-living senders: Decision D5 |
+| SEC-012 | P2 | Partly fixed | Deleting an account closes its unused appeal (system audit row `appeal_waived`), so the case becomes final and is redacted at the end of the retention window (seven days at the time; 30 days since decision D5) | `services/deletion-sweep.test.ts`. Absent-but-living senders: Decision D5 |
 | ARCH-003 | P2 | Fixed | `releaseStaleAiClaims()` at startup and on every tick | `services/deletion-sweep.test.ts` (ARCH-003 describe) |
 | ARCH-025 | P3 | Fixed | Dead states, loss reason and event types removed from shared model and web | `letter.test.ts` (transitions), typecheck |
 | FE-010 = SEC-015 | P2 | Fixed | Sign-out clears `mib.accountTimeZone` and per-user session keys | `state/session.test.tsx` (behavioural; emptying the key list fails it) |
@@ -169,7 +175,7 @@ the tests that pin it. Paths are relative to `apps/api/src` unless they start wi
 | D7 | One authoritative map clock per account (final): the latest valid device IANA zone the server accepted, else the harbour's zone, else UTC, used for both the map's day/night and storm eligibility on every device. Daytime maps have no storm; each night entered rolls a deterministic 25% storm, persisted, at most one roll per rolling 24 hours; the storm lies wholly inside the night and its midpoint takes one independent decision per eligible bottle. A zone change moves only future state, never rerolls inside 24 hours, never changes release, route, duration, arrival, past decisions, notifications, deadlines or rate limits; a pre-midpoint storm turned to day is cancelled and stays consumed. | **Resolved (risk policy v4)** — the earlier conflict with policy v3 is gone: v3's per-bottle storms are replaced, not patched | `packages/shared/src/weather.ts` (v4 section), `services/weather.ts`, `services/risk.ts`, `GET /api/ocean/weather`, `apps/web/src/state/weather.tsx`; migrations `0016_account_storms`, `0017_account_zone_backfill` | `services/account-storms.test.ts` (19), `services/risk.test.ts`, `packages/shared/src/risk.test.ts`, `services/recovery-paths.test.ts` (date line), `db/migration.test.ts` (backfill), `apps/web/src/state/weather.test.tsx`, `apps/web/src/lib/oceanWeather.test.ts` |
 | D8 | Settings → Blocked users → Unblock, behind a confirmation. Allows future contact and public-ocean encounters; restores no letter and no friendship; reveals nothing. A finder can block the anonymous writer during the reading; that entry is named and undone by the bottle, never by the writer's name. | **Resolved** | `services/friends.ts` `listBlocked`, `unblockUser`, `blockFoundWriter`, `unblockFoundWriter`; `blocks.found_bottle_id` (migration 0015); `apps/web/src/components/BlockedUsersDialog.tsx`, `LetterModal.tsx` | `http/unblock.test.ts` (both directions, finder block), `apps/web/src/screens/screens.test.tsx` |
 | D9 | Reject — not strip — the direction controls U+202A–U+202E and U+2066–U+2069, with a clear message. Zero-width joiners, LRM/RLM/ALM and ZWNJ stay allowed, so Hebrew, Arabic, Persian, emoji and punctuation are unaffected. Client and server both check; the server decides. Moderation still reveals controls in stored letters. | **Resolved** | `packages/shared/src/letter.ts` `DIRECTION_CONTROLS`, `validateLetterText`; `services/release.ts` `letter_direction_controls` | `packages/shared/src/letter.test.ts` (mixed scripts, spoofing samples), `http/letter-controls.test.ts`, `apps/web/src/screens/WriteScreen.test.tsx` |
-| D10 | Historical deletion backfill on the real database | **Open (owner-operated)** | Tool ready, dry run by default; not run by this work | — |
+| D10 | Historical deletion backfill on the real database | **Open (owner-operated)** | Tool ready, dry run by default; since `fix/backlog-remediation` it applies every current deletion rule (ARCH-R-006). Not run by development work. Not needed if production starts from a fresh database | `services/deletion-sweep.test.ts` |
 | D11 | User-visible notifications are never deleted automatically (type, entity, time, read state are kept; marking read clears only the badge); history is paginated. Operational data (delivery attempts, retries, worker state, provider errors) may be pruned after 90 days. Cleanup never deletes letters or journeys. | **Resolved** | `services/notifications.ts` `notificationPage`; `http/routes/notifications.ts` (`?before=&limit=`); `services/housekeeping.ts` `OPERATIONAL_LOG_KEEP_MS`; `apps/web/src/screens/NotificationsScreen.tsx` "Load older" | `http/notification-history.test.ts`, `services/housekeeping.test.ts` |
 | D12 | Finder: one reading, once (amended 2026-09-26: the 15-minute resume was removed); never in Received, archive or history; no friendship or access; report and block available while the reading is open; finishing is explicit and confirmed. | **Resolved** | `services/outcomes.ts` `openPublicBottle` (serves once; a second open is `409 reading_closed`); finder block above; `apps/web/src/components/LetterModal.tsx`, `apps/web/src/state/letterReader.ts` | `services/finder.test.ts`, `services/risk.test.ts`, `http/routes-coverage.test.ts`, `apps/web/src/components/LetterModal.test.tsx` |
 | D13 | Keep the multi-reporter merge as deliberate, forward-compatible behaviour: several reports make one case and at most one violation. | **Resolved** | `services/moderation.ts` (one open case per bottle) | `http/moderation-decisions.test.ts` (merge) |
@@ -192,9 +198,8 @@ asked again). See `docs/LEGAL_DOCUMENTS.md`.
 
 ## Final release blockers (`fix/final-release-blockers`)
 
-From the pre-production re-audit (`audit/pre-production-rerun`, `docs/audits/pre-production-rerun/`
-on that branch). Only these five were in scope; the audit's other P2/P3 findings are scheduled
-separately.
+From the pre-production re-audit (`docs/audits/pre-production-rerun/`). Only these five were in
+scope; the audit's other findings are in "Re-audit closure" below.
 
 | ID | Sev | Status | Fix | Regression tests |
 | --- | --- | --- | --- | --- |
@@ -235,7 +240,7 @@ Branch `fix/production-runtime`.
 | **SEC-003** — outbox registered before authentication | P2 | **Fixed** as part of DEPLOY-001. |
 | **ARCH-006** — no deployable artefact, no host, no backup, no persistent-storage contract | P0 | **Partly fixed.** The API now builds to runnable JavaScript (`apps/api/dist`, `node dist/server.js`), `pnpm --filter @mib/api deploy --prod --legacy <dir>` produces a production-only artefact with no TypeScript runtime, production requires an absolute `MIB_DATABASE_PATH`, and the server stops cleanly on `SIGTERM`. **Still open (Stage 2):** hosting, reverse proxy and TLS, serving the web bundle, persistent volume, backup and restore drill, SMTP. |
 | **ARCH-016** — no graceful shutdown | P2 | **Fixed** (needed for the artefact's clean-stop proof). |
-| **QA-001** — no CI | P1 | **Partly fixed.** `.github/workflows/ci.yml` runs format, lint, typecheck, the test suite, both production builds, a fresh migration with the compiled migrator, and the production-artefact smoke on every pull request and push to `main`. **Still open:** `apps/web` still runs `vitest --passWithNoTests`; branch protection must be enabled in GitHub for CI to block merges. |
+| **QA-001** — no CI | P1 | **Partly fixed.** `.github/workflows/ci.yml` runs format, lint, typecheck, the test suite, both production builds, a fresh migration with the compiled migrator, and the production-artefact smoke on every pull request and push to `main`. **Still open:** branch protection must be enabled in GitHub for CI to block merges (owner). *(Since then `apps/web` runs its own suite without `--passWithNoTests`, and CI also runs a browser and accessibility smoke.)* |
 
 Supporting changes in this stage:
 
@@ -250,3 +255,84 @@ Supporting changes in this stage:
   fixed each test takes about a second.)*
 
 Everything else in the audit is unchanged by this stage.
+
+## Re-audit closure (`fix/backlog-remediation`)
+
+Every finding of the pre-production re-audit (`docs/audits/pre-production-rerun/05-findings-matrix.md`,
+55 after merging duplicates), with its state on `fix/backlog-remediation`. Each finding was
+re-checked against the current code before it was changed. Commits are on that branch unless a
+branch is named. **Fixed** means the code change and a test that fails without it are in place;
+**Fixed (code)** means the code is done and an operator step named in the row is still required
+in production; **Partly fixed** means part of the finding needs an owner decision, named in the
+row; nothing is marked closed on documentation alone.
+
+Commits: `0b61805` process lock · `c05f4e7` moderation · `b4da47e` configuration, sign-in, SMTP
+· `a38854e` journeys and worker · `631f846` frontend · `ab0325a` browser smoke · `65d34f3` test
+determinism · documentation in the commit that adds this section.
+
+| ID | Sev | State | What changed | Test | Commit |
+| --- | --- | --- | --- | --- | --- |
+| SEC-R-001 | P1 | Fixed | Deletion budgets per account and address | `http/account-delete-limit.test.ts` | `fix/final-release-blockers` |
+| SEC-R-002 | P1 | Accepted risk | Not implemented, by owner decision (above) | — | — |
+| ARCH-R-002 | P1 | Fixed | Restricted senders' journeys end | `services/restricted-sender.test.ts` | `fix/final-release-blockers` |
+| FE-R-001 | P2 | Fixed | Report panel scrolls in landscape | `apps/web/src/components/LetterModal.test.tsx` | `fix/final-release-blockers` |
+| FE-R-002 | P2 | Fixed, superseded | Explicit finish; resume removed (D12 amended) | `LetterModal.test.tsx` | `fix/final-release-blockers` |
+| FE-R-003 | P2 | Fixed | Map phase on server time | `apps/web/src/state/weather-clock.test.tsx` | `fix/final-release-blockers` |
+| FE-R-004 | P2 | Fixed (block); cool-down not built | Block from an incoming request; the requester cannot ask again. A cool-down after Deny is a policy choice for the owner | `apps/web/src/screens/screens.test.tsx` | `631f846` |
+| FE-R-005 | P2 | Partly fixed | The console says when automated review is off instead of "waiting for model". **Owner decision:** a reporter-chosen child-safety reason that marks a case urgent changes the urgency policy (D2) and was not added | `http/moderation-hardening.test.ts` | `c05f4e7` |
+| FE-R-006 | P2 | Fixed | Heading focus on in-place view changes (write steps, preview, case and appeal views) | `apps/web/src/components/hardening.test.tsx` | `631f846` |
+| FE-R-007 | P2 | Fixed | Load failure shows the error and Try again (Blocked users, Friends, admin queues) | `apps/web/src/components/hardening.test.tsx` | `c05f4e7`, `631f846` |
+| FE-R-008 | P2 | Fixed | "Has a shore"; preview refusal is a status | — (wording) | `631f846` |
+| FE-R-009 | P2 | Fixed | Slid-off entries kept between pages; "Unread" announced | `hardening.test.tsx` | `631f846` |
+| ARCH-R-001 | P2 | Fixed (code) | Production refuses a database whose development accounts open with the published password. **Operator:** start from a fresh database (`docs/DEPLOYMENT.md` §1a) | `http/dev-mode.test.ts` | `b4da47e` |
+| ARCH-R-003 | P2 | Fixed (code) | OS-held lock on `<db>.process-lock`, released on death, honoured across containers. **Operator:** one replica, local volume | `lib/process-lock.test.ts` (real second process, SIGKILL) | `0b61805` |
+| ARCH-R-004 | P2 | Fixed (code) | `MIB_HOST`, loopback by default in production. **Operator:** do not publish the port when using `0.0.0.0` in a container | `config.test.ts`; artefact smoke | `b4da47e` |
+| ARCH-R-005 | P2 | Fixed | Deletion, recipient restriction and harbour change settle due storms first; cancellation only before the midpoint | `services/settle-before-ending.test.ts` (fails on the old code) | `a38854e` |
+| ARCH-R-006 | P2 | Fixed (tool) | Backfill runs the full, idempotent deletion pass. **Owner:** whether to run it (D10) | `services/deletion-sweep.test.ts` | `a38854e` |
+| ARCH-R-008 | P2 | Fixed | Worker reads only due arrivals (≤ 1000 per tick) and accounts whose roll can be due | `services/journey-worker.test.ts` | `a38854e` |
+| SEC-R-003 | P2 | Fixed | Party administrators: reporters, explanations and appeal text hidden; holds refused; evidence reads audited | `http/moderation-hardening.test.ts` | `c05f4e7` |
+| SEC-R-004 | P2 | Partly fixed | Grant tool and start-up log report the administrator count and warn below two. **Owner decision:** two administrators, or an escalation path | `tools/grant-role.test.ts` | `c05f4e7`, `b4da47e` |
+| SEC-R-005 | P2 | Fixed | A repeated critical confirmation changes nothing | `http/moderation-hardening.test.ts` | `c05f4e7` |
+| SEC-R-007 | P2 | Partly fixed | Rate limits key IPv6 clients by /64. **Owner decision:** the sign-in lockout policy (account ceiling, progressive delay or other) | `http/client-address.test.ts` | `b4da47e` |
+| QA-R-001 | P2 | Partly fixed | CI runs on pull requests and pushes. **Owner:** branch protection; no pull request has run it yet | — | — |
+| QA-R-002 | P2 | Fixed | Playwright + axe smoke of the built app under the production CSP, in CI | `apps/e2e/tests/` | `ab0325a` |
+| QA-R-003 | P2 | Fixed | Error boundary unit test and a contained chunk failure in the browser | `hardening.test.tsx`, `apps/e2e/tests/smoke.spec.ts` | `631f846`, `ab0325a` |
+| FE-R-010 | P3 | Fixed | Blocked users closes on account change | — (one-line reset) | `631f846` |
+| FE-R-011 | P3 | Fixed | Sign out and Delete account on the decision notice | `hardening.test.tsx` | `631f846` |
+| FE-R-012 | P3 | Fixed | Radios directly in the radiogroup; focus to Anchor after a phone pick | browser smoke (axe `listitem` would fail) | `631f846` |
+| FE-R-013 | P3 | Fixed | Empty side pane collapses (measured: map 295 → 595 px at 667×375) | `apps/e2e/tests/layout.spec.ts` | `ab0325a` |
+| FE-R-014 | P3 | Fixed | No pointer copy without WebGL; sunk list entries count as seen; no WebGL attempt | — (WebGL-less browser not automated) | `631f846` |
+| FE-R-015 | P3 | Fixed | Day or night instead of "dusk"; empty-state text in the secondary colour (contrast not re-measured over the 3D scene) | — | `631f846` |
+| FE-R-016 | P3 | Fixed | Weather poll paused while hidden | — (same pattern as `useAsync`) | `631f846` |
+| FE-R-017 | P3 | Fixed | `aria-describedby`; reference-counted inert | `hardening.test.tsx` | `631f846` |
+| FE-R-018 | P3 | Fixed | Invalid token reads as an invalid link | `hardening.test.tsx` | `631f846` |
+| FE-R-019 | P3 | Fixed | Storm label removed | — | `fix/manual-review-round-2` |
+| ARCH-R-007 | P3 | Fixed | CI pins every released migration's content and order. The owner's database was found at 15 applied migrations by the re-audit, so it never ran the edited 0015 | `db/migration-immutability.test.ts` | `a38854e` |
+| ARCH-R-009 | P3 | Fixed | Per-item fault isolation; health reports degraded or failing worker | `services/journey-worker.test.ts` | `a38854e` |
+| ARCH-R-010 | P3 | Partly fixed | Harbour changes that move the map clock spend the zone budget. The budget is still in memory (resets on restart), as all rate limits are | `http/limits.test.ts` | `a38854e` |
+| ARCH-R-011 | P3 | Fixed | Every numeric setting range-checked | `config.test.ts` | `b4da47e` |
+| ARCH-R-012 | P3 | Fixed | Tools no longer need `MIB_APP_URL`; CI runs the migrator without it | `config.test.ts`; CI | `b4da47e` |
+| ARCH-R-013 | P3 | Fixed | No notification for a deleted account | `services/notifications.test.ts` | `a38854e` |
+| SEC-R-010 | P3 | Fixed | Malformed JSON → 400, nothing logged | `http/hardening.test.ts` | `b4da47e` |
+| SEC-R-011 | P3 | Fixed (code) | STARTTLS required without implicit TLS; port/TLS mismatch refused. **Operator:** Gmail on 465 and one real reset e-mail | `http/smtp-reset.test.ts`, `config.test.ts` | `b4da47e` |
+| SEC-R-012 | P3 | Fixed | A finder who reported can still block the writer; offered in the report sheet | `http/moderation-hardening.test.ts` | `c05f4e7` |
+| SEC-R-013 | P3 | Fixed | Finder-reported notices say a finder read it | `http/moderation-hardening.test.ts` | `c05f4e7` |
+| SEC-R-014 | P3 | Fixed | Reset e-mails budgeted per (address, requester) and per address overall | `http/recovery.test.ts` | `b4da47e` |
+| SEC-R-015 | P3 | Fixed (code) | `MIB_AI_ENABLED` must be set in production; plain-http endpoint only on this machine. **Owner decision:** review on or off | `config.test.ts`; artefact smoke | `b4da47e` |
+| SEC-R-016 | P3 | Fixed | Role changes in the audit trail | `tools/grant-role.test.ts` | `c05f4e7` |
+| SEC-R-018 | P3 | Fixed | Cursor paging for cases and appeals | `http/moderation-hardening.test.ts` | `c05f4e7` |
+| QA-R-005 | P3 | Fixed | Stale-claim release tested through the review tick | `services/deletion-sweep.test.ts` | `65d34f3` |
+| QA-R-006 | P3 | Fixed | Same-millisecond paging, startup 401, suspension −1 ms, backfill counters | several | `65d34f3`, `a38854e` |
+| QA-R-007 | P3 | Fixed | Structural instead of timed assertions; checked-in vitest config | `lib/password.test.ts`, `http/recovery-delivery.test.ts`, `services/recovery-paths.test.ts` | `65d34f3` |
+| QA-R-008 | P3 | Fixed | Ids derived from the test name | `test/deterministic-ids.test.ts` | `65d34f3` |
+| QA-R-009 | P3 | Fixed | This file, `ARCHITECTURE.md`, `DEPLOYMENT.md`, the spec's §22 note, the audit reports on the branch | — | documentation commit |
+| QA-R-011 | P3 | Fixed | Populated upgrade from the 0014 era | `db/migration.test.ts` | `a38854e` |
+
+Found while doing this work, outside the matrix:
+
+- The production CSP reported zod 4's eval probe as a violation on every page load; the web app
+  now sets zod's jitless mode (`ab0325a`).
+- Hold audit rows and comments still described a seven-day evidence window; they now say the
+  ordinary retention window (30 days, D5).
+- The deletion counters for an old-style deletion now count real changes, so a second backfill
+  reports zero.

@@ -1,7 +1,7 @@
 import { useEffect, useId, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { focusableIn } from '../lib/focusTrap.js';
-import { restoreFocus, useModalKeys } from '../lib/modal.js';
+import { inertAll, restoreFocus, useModalKeys } from '../lib/modal.js';
 
 interface Props {
   title: string;
@@ -49,11 +49,11 @@ export function ConfirmDialog({
     const siblings = [...document.body.children].filter(
       (el) => el !== dialogRef.current?.parentElement,
     );
-    for (const el of siblings) el.setAttribute('inert', '');
+    const releaseInert = inertAll(siblings);
     const focusables = focusableIn(dialogRef.current!);
     (focusables[0] ?? dialogRef.current)?.focus();
     return () => {
-      for (const el of siblings) el.removeAttribute('inert');
+      releaseInert();
       restoreFocus(previous);
     };
   }, []);

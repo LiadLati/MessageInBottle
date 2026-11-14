@@ -583,6 +583,9 @@ export const AiReviewOutputSchema = z.object({
 export type AiReviewOutput = z.infer<typeof AiReviewOutputSchema>;
 
 export const AiReviewSchema = z.object({
+  // Whether automated review runs on this server at all. When it does not, a queued case is
+  // decided by a person only and never "waits for the model" (audit FE-R-005).
+  enabled: z.boolean(),
   status: z.enum(['queued', 'running', 'done', 'failed']),
   verdict: AiVerdictSchema.nullable(),
   reason: z.string().nullable(),
@@ -624,7 +627,9 @@ export const LetterReportSchema = z.object({
   context: z.enum(['shore', 'public']),
   hidden: z.boolean(),
   createdAt: z.string(),
-  reporter: PersonSchema,
+  // Null when the viewing administrator is a party to the case: a party is not shown who else
+  // reported it or what they wrote (audit SEC-R-003).
+  reporter: PersonSchema.nullable(),
 });
 export type LetterReportDto = z.infer<typeof LetterReportSchema>;
 
@@ -788,7 +793,14 @@ export const ViolationNoticeSchema = z.object({
   // `critical` is a confirmed child-safety violation, which bans immediately rather than
   // walking the warning ladder. It carries the same single appeal as any other decision.
   severity: z.enum(['standard', 'critical']),
-  bottle: z.object({ id: IdSchema, recipientDisplayName: z.string(), releasedAt: z.string() }),
+  bottle: z.object({
+    id: IdSchema,
+    recipientDisplayName: z.string(),
+    releasedAt: z.string(),
+    // Reported by a finder in the public ocean: the intended recipient never read it, so the
+    // notice must not suggest they reported it (audit SEC-R-013).
+    readByFinder: z.boolean(),
+  }),
   appeal: z
     .object({
       id: IdSchema,

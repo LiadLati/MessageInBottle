@@ -199,8 +199,9 @@ function ViolationRow({ violation: v }: { violation: ViolationNoticeDto }) {
             {v.severity === 'critical' ? ' · critical child safety' : ''}
           </span>
           <span className="t-meta">
-            Released {formatDate(v.bottle.releasedAt)} · decided {formatDate(v.decidedAt)} ·{' '}
-            {status}
+            Released {formatDate(v.bottle.releasedAt)}
+            {v.bottle.readByFinder ? ' · lost at sea, read by a finder' : ''} · decided{' '}
+            {formatDate(v.decidedAt)} · {status}
           </span>
         </span>
       </div>

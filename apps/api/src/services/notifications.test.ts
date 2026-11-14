@@ -2,8 +2,14 @@ import { eq } from 'drizzle-orm';
 import { beforeEach, describe, expect, it } from 'vitest';
 import * as t from '../db/schema.js';
 import { getSentBottle } from './bottles.js';
+import { deleteAccount } from './deletion.js';
 import { commitArrivalIfDue } from './journey.js';
-import { enqueueNotification, listNotifications, markAllRead } from './notifications.js';
+import {
+  enqueueNotification,
+  listNotifications,
+  markAllRead,
+  notificationPage,
+} from './notifications.js';
 import { commitLoss, markOutcomeSeen } from './outcomes.js';
 import { releaseBottle } from './release.js';
 import { createTestWorld, releaseInput, type TestWorld } from '../test/harness.js';
@@ -79,5 +85,64 @@ describe('notifications inbox', () => {
     w.db.update(t.notifications).set({ kind: null }).run();
     const kinds = listNotifications(w.ctx, ada().id).map((n) => [n.kind]);
     expect(kinds).toEqual([['received_arrived'], ['sent_sunk']]);
+  });
+});
+
+// Audit ARCH-R-013: nothing is written for an account that no longer exists.
+describe('notifications for a deleted account', () => {
+  it('are not written', () => {
+    const w = createTestWorld();
+    const ada = w.user('ada');
+    deleteAccount(w.ctx, ada.id);
+    enqueueNotification(w.db, {
+      userId: ada.id,
+      type: 'journey_event',
+      kind: 'sent_cancelled',
+      bottleId: null,
+      dedupeKey: 'late:event',
+      message: 'late',
+      now: w.clock.now(),
+    });
+    expect(
+      w.db.select().from(t.notifications).where(eq(t.notifications.userId, ada.id)).all(),
+    ).toEqual([]);
+  });
+});
+
+// Audit QA-R-006: notices written in the same millisecond (a suspension and the appeal result
+// that lifts it can be) page in write order, each exactly once, across a page boundary.
+describe('paging notices written in the same millisecond', () => {
+  it('returns each once, newest written first', () => {
+    const w = createTestWorld();
+    const ada = w.user('ada');
+    const at = w.clock.now();
+    const ids: string[] = [];
+    for (let i = 0; i < 5; i++) {
+      enqueueNotification(w.db, {
+        userId: ada.id,
+        type: 'moderation',
+        kind: 'other',
+        bottleId: null,
+        dedupeKey: `same-ms:${i}`,
+        message: `notice ${i}`,
+        now: at,
+      });
+      ids.push(
+        w.db
+          .select()
+          .from(t.notifications)
+          .where(eq(t.notifications.dedupeKey, `same-ms:${i}`))
+          .get()!.id,
+      );
+    }
+    const seen: string[] = [];
+    let before: string | undefined;
+    do {
+      const page = notificationPage(w.ctx, ada.id, { before: before ?? null, limit: 2 });
+      seen.push(...page.notifications.map((n) => n.id));
+      before = page.nextCursor ?? undefined;
+    } while (before);
+    const mine = seen.filter((id) => ids.includes(id));
+    expect(mine).toEqual([...ids].reverse());
   });
 });

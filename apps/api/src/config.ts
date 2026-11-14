@@ -82,6 +82,55 @@ function envPositiveInt(env: Env, name: string, fallback: number): number {
   return n;
 }
 
+// A whole number within a sensible range (audit ARCH-R-011). Every numeric setting goes through
+// this: a negative tick, a zero session lifetime or a port of 70000 is a refused start, not a
+// server that misbehaves later. The message names the range, never the value.
+function envIntIn(env: Env, name: string, fallback: number, min: number, max: number): number {
+  const n = envInt(env, name, fallback);
+  if (!Number.isInteger(n) || n < min || n > max)
+    throw new ConfigError(`${name} must be a whole number from ${min} to ${max}`);
+  return n;
+}
+
+const SECOND = 1000;
+const MINUTE = 60 * SECOND;
+const HOUR = 60 * MINUTE;
+const DAY = 24 * HOUR;
+
+// Where the API listens (audit ARCH-R-004). The deployment contract puts it behind a reverse
+// proxy on the same host with MIB_TRUST_PROXY=true, so in production it listens on the loopback
+// interface unless told otherwise: a directly reachable API would let any client choose its
+// rate-limit address through X-Forwarded-For. A container deployment, where the proxy reaches
+// the API over a container network, sets MIB_HOST=0.0.0.0 and must keep the port unpublished.
+// Development keeps listening on every interface, so a phone or emulator on the LAN can reach it.
+function hostOf(env: Env, production: boolean): string | undefined {
+  const raw = env.MIB_HOST;
+  if (raw === undefined || raw === '') return production ? '127.0.0.1' : undefined;
+  if (!/^[A-Za-z0-9.:-]+$/.test(raw))
+    throw new ConfigError('MIB_HOST must be a host name or an IP address such as 127.0.0.1');
+  return raw;
+}
+
+const LOOPBACK_HOSTS = new Set(['localhost', '127.0.0.1', '::1', '[::1]']);
+
+// The review model receives the full text of reported letters. Over plain http it may only be
+// reached on this machine; anything else must be https (audit SEC-R-015).
+function aiEndpointOf(env: Env): string {
+  const raw = (env.MIB_AI_ENDPOINT ?? 'http://127.0.0.1:11434').replace(/\/+$/, '');
+  let url: URL;
+  try {
+    url = new URL(raw);
+  } catch {
+    throw new ConfigError('MIB_AI_ENDPOINT must be an http(s) URL');
+  }
+  if (url.protocol === 'https:') return raw;
+  if (url.protocol === 'http:' && LOOPBACK_HOSTS.has(url.hostname)) return raw;
+  throw new ConfigError(
+    'MIB_AI_ENDPOINT must use https://, or http:// only on this machine (localhost, 127.0.0.1 ' +
+      'or ::1): reported letters are sent to it.',
+  );
+}
+
 // 0 (no automatic outcomes for new journeys) or the one policy the worker implements. Any other
 // number was silently stamped on bottles and never applied (audit ARCH-019).
 function riskPolicyVersionOf(env: Env): number {
@@ -93,6 +142,8 @@ function riskPolicyVersionOf(env: Env): number {
 
 export interface AppConfig {
   port: number;
+  // The interface the API listens on. Undefined: every interface (development only).
+  host: string | undefined;
   databasePath: string;
   devMode: boolean;
   logRequests: boolean;
@@ -136,6 +187,8 @@ export interface AppConfig {
 export interface AiConfig {
   // false: reported cases are queued but never sent to a model; admins decide everything.
   enabled: boolean;
+  // Whether MIB_AI_ENABLED was set at all (production requires it; see requireAiDecision).
+  explicit: boolean;
   // Ollama-compatible base URL (POST {endpoint}/api/chat). Local by default; a cloud host later
   // is a URL change, nothing else.
   endpoint: string;
@@ -153,15 +206,29 @@ export interface MailConfig {
   // smtp: any SMTP provider. disabled: nothing is sent (request-reset still answers normally).
   provider: MailProvider;
   from: string;
-  smtp: { host: string; port: number; secure: boolean; user: string; pass: string };
+  smtp: {
+    host: string;
+    port: number;
+    // Implicit TLS from the first byte (port 465).
+    secure: boolean;
+    // Without implicit TLS, refuse to send unless the server upgrades with STARTTLS, so the
+    // password and the reset links never cross the network in clear (audit SEC-R-011).
+    requireTls: boolean;
+    user: string;
+    pass: string;
+  };
 }
 
 // Reads and validates the whole configuration before anything listens. Development mode is off
 // unless MIB_DEV_MODE is exactly `true`, and it is refused outright in production: a forgotten
 // variable must never be what turns on seeded accounts, the dev clock or /api/dev.
+//
+// `forTool` is for the operator command-line tools (migrate, backup, grant, retention, audit
+// export, deletion backfill). They build no links and send no mail, so they do not require the
+// public MIB_APP_URL that only the server needs (audit ARCH-R-012); every other check applies.
 export function loadConfig(
   env: Env = process.env,
-  options: { productionBuild?: boolean } = {},
+  options: { productionBuild?: boolean; forTool?: boolean } = {},
 ): AppConfig {
   const production = isProductionRuntime(env, options.productionBuild ?? PRODUCTION_BUILD);
   const devMode = envBool(env, 'MIB_DEV_MODE', false);
@@ -183,7 +250,7 @@ export function loadConfig(
   // Password-reset links are built from this URL, and the Privacy Policy says a production
   // deployment requires HTTPS; a production server with an http:// public URL would mail
   // plain-text links to its users (SEC-014).
-  if (production && !/^https:\/\//.test(appUrl))
+  if (production && !options.forTool && !/^https:\/\//.test(appUrl))
     throw new ConfigError(
       'MIB_APP_URL must be the public https:// address of the web app in production.',
     );
@@ -196,16 +263,17 @@ export function loadConfig(
         'case is decided by a person. Remove the setting.',
     );
   return {
-    port: envInt(env, 'MIB_PORT', 3001),
+    port: envIntIn(env, 'MIB_PORT', 3001, 1, 65_535),
+    host: hostOf(env, production),
     databasePath: databasePath || path.join(API_ROOT, 'data', 'mib.sqlite'),
     devMode,
     logRequests: envBool(env, 'MIB_LOG_REQUESTS', true),
-    msPerChartUnit: envInt(env, 'MIB_MS_PER_CHART_UNIT', 60 * 60 * 1000),
-    minJourneyMs: envInt(env, 'MIB_MIN_JOURNEY_MS', 6 * 60 * 60 * 1000),
-    defaultShoreCapacity: envInt(env, 'MIB_DEFAULT_SHORE_CAPACITY', 5),
-    shoreCapacity: envInt(env, 'MIB_SHORE_CAPACITY', SHORE_CAPACITY),
-    journeyTickMs: envInt(env, 'MIB_JOURNEY_TICK_MS', 15_000),
-    sessionTtlMs: envInt(env, 'MIB_SESSION_TTL_MS', 30 * 24 * 60 * 60 * 1000),
+    msPerChartUnit: envIntIn(env, 'MIB_MS_PER_CHART_UNIT', HOUR, 1, 7 * DAY),
+    minJourneyMs: envIntIn(env, 'MIB_MIN_JOURNEY_MS', 6 * HOUR, 0, 365 * DAY),
+    defaultShoreCapacity: envIntIn(env, 'MIB_DEFAULT_SHORE_CAPACITY', 5, 1, 10_000),
+    shoreCapacity: envIntIn(env, 'MIB_SHORE_CAPACITY', SHORE_CAPACITY, 1, 10_000),
+    journeyTickMs: envIntIn(env, 'MIB_JOURNEY_TICK_MS', 15 * SECOND, 100, HOUR),
+    sessionTtlMs: envIntIn(env, 'MIB_SESSION_TTL_MS', 30 * DAY, MINUTE, 365 * DAY),
     corsOrigin: env.MIB_CORS_ORIGIN ?? 'http://localhost:5173',
     trustProxy: envBool(env, 'MIB_TRUST_PROXY', false),
     trustedProxyHops: envPositiveInt(env, 'MIB_TRUSTED_PROXY_HOPS', 1),
@@ -217,17 +285,38 @@ export function loadConfig(
     policies: { status: policySetStatus(POLICY_DOCUMENTS) },
     riskPolicyVersion: riskPolicyVersionOf(env),
     retention: loadRetentionPolicy(env),
-    // Hourly. The pass is idempotent and the window is seven days, so the exact cadence only
+    // Hourly. The pass is idempotent and the window is 30 days, so the exact cadence only
     // decides how soon after the boundary the evidence actually goes.
-    retentionTickMs: envInt(env, 'MIB_RETENTION_TICK_MS', 60 * 60 * 1000),
-    ai: {
-      enabled: envBool(env, 'MIB_AI_ENABLED', true),
-      endpoint: (env.MIB_AI_ENDPOINT ?? 'http://127.0.0.1:11434').replace(/\/+$/, ''),
-      model: env.MIB_AI_MODEL ?? 'qwen2.5:7b',
-      timeoutMs: envInt(env, 'MIB_AI_TIMEOUT_MS', 60_000),
-      tickMs: envInt(env, 'MIB_AI_TICK_MS', 10_000),
-    },
+    retentionTickMs: envIntIn(env, 'MIB_RETENTION_TICK_MS', HOUR, SECOND, DAY),
+    ai: loadAiConfig(env, production),
   };
+}
+
+// Automated review stays on by default in development. In production the setting must be
+// written down (audit SEC-R-015): whether a model reads reported letters is an operator's
+// decision, so an unset MIB_AI_ENABLED stops the server rather than being guessed either way.
+// Command-line tools never review anything, so they accept it unset (`requireAiDecision`).
+function loadAiConfig(env: Env, production: boolean): AiConfig {
+  const explicit = env.MIB_AI_ENABLED !== undefined && env.MIB_AI_ENABLED !== '';
+  const enabled = envBool(env, 'MIB_AI_ENABLED', !production);
+  return {
+    enabled,
+    explicit,
+    endpoint: enabled ? aiEndpointOf(env) : (env.MIB_AI_ENDPOINT ?? '').replace(/\/+$/, ''),
+    model: env.MIB_AI_MODEL ?? 'qwen2.5:7b',
+    timeoutMs: envIntIn(env, 'MIB_AI_TIMEOUT_MS', MINUTE, SECOND, 10 * MINUTE),
+    tickMs: envIntIn(env, 'MIB_AI_TICK_MS', 10 * SECOND, 100, HOUR),
+  };
+}
+
+// The server's own start check. See loadAiConfig.
+export function requireAiDecision(config: AppConfig, production: boolean): void {
+  if (production && !config.ai.explicit)
+    throw new ConfigError(
+      'MIB_AI_ENABLED must be set to true or false in production. true sends reported letters ' +
+        'to the review model at MIB_AI_ENDPOINT for a recommendation; false leaves every report ' +
+        'to an administrator alone. See docs/DEPLOYMENT.md.',
+    );
 }
 
 function loadMailConfig(env: Env, devMode: boolean): MailConfig {
@@ -236,13 +325,27 @@ function loadMailConfig(env: Env, devMode: boolean): MailConfig {
     throw new ConfigError('MIB_MAIL_PROVIDER must be outbox, smtp or disabled');
   if (raw === 'outbox' && !devMode)
     throw new ConfigError('MIB_MAIL_PROVIDER=outbox is development-only; use smtp or disabled');
+  const port = envIntIn(env, 'MIB_SMTP_PORT', 587, 1, 65_535);
+  const secure = envBool(env, 'MIB_SMTP_SECURE', false);
+  // The two standard submission ports each have one TLS mode; the other one hangs or fails
+  // with an unhelpful error on the first reset e-mail, long after startup.
+  if (port === 465 && !secure)
+    throw new ConfigError('MIB_SMTP_PORT=465 uses implicit TLS: set MIB_SMTP_SECURE=true');
+  if (port === 587 && secure)
+    throw new ConfigError('MIB_SMTP_PORT=587 upgrades with STARTTLS: set MIB_SMTP_SECURE=false');
+  const requireTls = envBool(env, 'MIB_SMTP_REQUIRE_TLS', true);
+  if (!requireTls && !devMode)
+    throw new ConfigError(
+      'MIB_SMTP_REQUIRE_TLS=false is development-only: outside it, mail is sent over TLS or not at all',
+    );
   return {
     provider: raw,
     from: env.MIB_MAIL_FROM ?? 'SeaYou <no-reply@localhost>',
     smtp: {
       host: env.MIB_SMTP_HOST ?? '',
-      port: envInt(env, 'MIB_SMTP_PORT', 587),
-      secure: envBool(env, 'MIB_SMTP_SECURE', false),
+      port,
+      secure,
+      requireTls,
       user: env.MIB_SMTP_USER ?? '',
       pass: env.MIB_SMTP_PASS ?? '',
     },

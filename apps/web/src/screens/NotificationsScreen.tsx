@@ -47,11 +47,24 @@ export function NotificationsScreen({ notifications, nextCursor, loading, error,
   const [olderCursor, setOlderCursor] = useState<string | null>(null);
   const [loadingOlder, setLoadingOlder] = useState(false);
   const [olderError, setOlderError] = useState<Error | null>(null);
+  // Entries that slid off the polled first page after an older page was loaded (audit
+  // FE-R-009). New notices push the oldest entries of the first page out of it, and they sit
+  // between the new first page and the older pages already loaded, so without this they would
+  // vanish from the list until it was reopened.
+  const [kept, setKept] = useState<NotificationDto[]>([]);
+  const [shownFirst, setShownFirst] = useState<NotificationDto[] | null>(notifications);
+  // Adjusted while rendering, React's pattern for state derived from a changing prop.
+  if (notifications !== shownFirst) {
+    if (older.length > 0 && shownFirst) {
+      const now = new Set((notifications ?? []).map((n) => n.id));
+      const slid = shownFirst.filter((n) => !now.has(n.id));
+      if (slid.length) setKept((prev) => mergeById(slid, prev));
+    }
+    setShownFirst(notifications);
+  }
   // Until an older page is loaded, paging continues from the polled first page.
   const cursor = older.length === 0 ? nextCursor : olderCursor;
-  const first = notifications ?? [];
-  const seen = new Set(first.map((n) => n.id));
-  const list = [...first, ...older.filter((n) => !seen.has(n.id))];
+  const list = mergeById(notifications ?? [], mergeById(kept, older));
   const loadOlder = () => {
     if (!cursor || loadingOlder) return;
     setLoadingOlder(true);
@@ -97,6 +110,8 @@ export function NotificationsScreen({ notifications, nextCursor, loading, error,
                     <Icon name={k.icon} size={18} />
                   </span>
                   <span className="grow" style={{ minWidth: 0 }}>
+                    {/* The unread dot is visual only; say it too (FE-R-009). */}
+                    {n.readAt === null ? <span className="sr-only">Unread. </span> : null}
                     <span className="inbox-text">{n.message}</span>
                     <time className="t-meta" dateTime={n.createdAt} style={{ display: 'block' }}>
                       {formatDate(n.createdAt)}
@@ -123,4 +138,10 @@ export function NotificationsScreen({ notifications, nextCursor, loading, error,
       </div>
     </DeckScreen>
   );
+}
+
+// The first list's entries in its order, then the second's that are not already shown.
+function mergeById(first: NotificationDto[], rest: NotificationDto[]): NotificationDto[] {
+  const seen = new Set(first.map((n) => n.id));
+  return [...first, ...rest.filter((n) => !seen.has(n.id))];
 }

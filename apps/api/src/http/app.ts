@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import { bodyLimit } from 'hono/body-limit';
+import { HTTPException } from 'hono/http-exception';
 import { logger } from 'hono/logger';
 import type { ZodError } from 'zod';
 import { AppError } from '../lib/errors.js';
@@ -61,8 +62,15 @@ export function createApp(ctx: AppContext) {
     } catch {
       return c.json({ ok: false, error: { code: 'database_unavailable' } }, 503);
     }
+    // The journey worker (audit ARCH-R-009): failing as a whole for three ticks in a row means
+    // arrivals and storms have stopped, which a process manager should hear about. Individual
+    // bottles it had to skip are reported as degraded, without detail; the log has the ids.
+    const journey = ctx.workers?.journey;
+    if (journey && journey.failedTicks >= 3)
+      return c.json({ ok: false, error: { code: 'journey_worker_failing' } }, 503);
     return c.json({
       ok: true,
+      ...(journey ? { worker: journey.lastTickFailures > 0 ? 'degraded' : 'ok' } : {}),
       serverTime: new Date(ctx.clock.now()).toISOString(),
       // Development builds say how mail is handled, so the password-recovery screen can state
       // plainly that nothing will be delivered. Omitted entirely outside development.
@@ -89,7 +97,7 @@ export function createApp(ctx: AppContext) {
       'cache-control': 'public, max-age=300',
     }),
   );
-  app.route('/api/chart', chartRoutes());
+  app.route('/api/chart', chartRoutes(limiter));
   app.route('/api/friends', friendRoutes());
   app.route('/api/bottles', bottleRoutes(limiter));
   app.route('/api/shore', shoreRoutes());
@@ -112,6 +120,21 @@ export function createApp(ctx: AppContext) {
       return c.json(
         { error: { code: 'busy', message: 'The server is busy. Try again in a moment.' } },
         503,
+      );
+    }
+    // Hono's own client errors, chiefly a body that is not valid JSON: the client's mistake, so
+    // a 400 with no stack trace logged (audit SEC-R-010). Never the raw message, which can quote
+    // the request.
+    if (err instanceof HTTPException && err.status < 500) {
+      return c.json(
+        {
+          error: {
+            code: err.status === 400 ? 'malformed_request' : 'bad_request',
+            message:
+              err.status === 400 ? 'the request body could not be read as JSON' : 'bad request',
+          },
+        },
+        err.status,
       );
     }
     if (isZodError(err)) {
